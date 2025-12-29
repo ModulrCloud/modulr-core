@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -29,6 +31,8 @@ func RunBlockchain() {
 		return
 
 	}
+
+	waitUntilFirstEpochStart()
 
 	//_________________________ RUN SEVERAL LOGICAL THREADS _________________________
 
@@ -69,6 +73,51 @@ func RunBlockchain() {
 
 	http_pack.CreateHTTPServer()
 
+}
+
+func waitUntilFirstEpochStart() {
+	startMs := globals.GENESIS.FirstEpochStartTimestamp
+	nowMs := uint64(utils.GetUTCTimestampInMilliSeconds())
+
+	// If genesis start is in the future, sleep until that time so multiple nodes can start simultaneously.
+	if startMs <= nowMs {
+		return
+	}
+
+	diffMs := startMs - nowMs
+
+	// Avoid overflow when converting to time.Duration (nanoseconds, int64).
+	maxMs := uint64(math.MaxInt64) / uint64(time.Millisecond)
+	if diffMs > maxMs {
+		diffMs = maxMs
+	}
+
+	until := time.Duration(diffMs) * time.Millisecond
+
+	utils.LogWithTime(
+		fmt.Sprintf(
+			"Genesis start is in the future. Sleeping for %s until FIRST_EPOCH_START_TIMESTAMP=%d ...",
+			until.String(),
+			startMs,
+		),
+		utils.YELLOW_COLOR,
+	)
+
+	// Sleep in chunks so we can be interrupted by SIGINT (and to keep logs reasonable for long delays).
+	deadline := time.Now().Add(until)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		step := remaining
+		if step > 5*time.Second {
+			step = 5 * time.Second
+		}
+		time.Sleep(step)
+	}
+
+	utils.LogWithTime("Genesis start reached. Starting node threads...", utils.GREEN_COLOR)
 }
 
 func prepareBlockchain() error {
