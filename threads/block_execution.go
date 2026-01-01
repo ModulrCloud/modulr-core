@@ -107,7 +107,8 @@ func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpRespons
 
 	if reqBytes, err := json.Marshal(req); err == nil {
 
-		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+		// Use dedicated PoD websocket connection to avoid blocking other PoD traffic.
+		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
 
 			var resp websocket_pack.WsBlockWithAfpResponse
 

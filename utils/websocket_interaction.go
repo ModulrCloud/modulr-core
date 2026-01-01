@@ -44,6 +44,14 @@ var (
 	WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION *websocket.Conn // Connection with PoD itself
 )
 
+// Dedicated "bulk" PoD connection used for high-frequency requests (e.g. block execution fetching blocks).
+// This avoids head-of-line blocking with other PoD requests that share the default connection.
+var (
+	POD_BULK_MUTEX                                       sync.Mutex
+	POD_BULK_REQUEST_MUTEX                               sync.Mutex
+	WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK *websocket.Conn
+)
+
 var (
 	ANCHORS_POD_MUTEX                                       sync.Mutex      // Guards open/close & replace of Anchors PoD conn
 	ANCHORS_POD_REQUEST_MUTEX                               sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
@@ -133,6 +141,77 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION = nil
 			}
 			POD_MUTEX.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
+
+}
+
+// SendWebsocketMessageToPoDForBlocks is the same as SendWebsocketMessageToPoD but uses a dedicated PoD connection.
+// Use it for high-frequency block fetching so it doesn't block other PoD calls (proofs, stores, etc).
+func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
+
+	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
+
+		POD_BULK_MUTEX.Lock()
+
+		if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == nil {
+
+			conn, err := openWebsocketConnectionWithPoD()
+
+			if err != nil {
+
+				POD_BULK_MUTEX.Unlock()
+
+				time.Sleep(RETRY_INTERVAL)
+
+				continue
+			}
+
+			WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = conn
+
+		}
+
+		c := WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK
+
+		POD_BULK_MUTEX.Unlock()
+
+		// single request (write+read) for this connection
+		POD_BULK_REQUEST_MUTEX.Lock()
+
+		_ = c.SetWriteDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+
+		err := c.WriteMessage(websocket.TextMessage, msg)
+
+		if err != nil {
+			POD_BULK_REQUEST_MUTEX.Unlock()
+			POD_BULK_MUTEX.Lock()
+			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == c {
+				_ = c.Close()
+				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = nil
+			}
+			POD_BULK_MUTEX.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		_ = c.SetReadDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_, resp, err := c.ReadMessage()
+
+		POD_BULK_REQUEST_MUTEX.Unlock()
+
+		if err != nil {
+			POD_BULK_MUTEX.Lock()
+			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == c {
+				_ = c.Close()
+				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = nil
+			}
+			POD_BULK_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
