@@ -51,25 +51,22 @@ func BlocksSharingAndProofsGrabingThread() {
 
 	for {
 
+		// Take a snapshot of AT state quickly, then do any heavy work without holding AT lock.
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+		atSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler
+		epochSnapshot := atSnapshot.EpochDataHandler
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
-		epochHandlerRef := &handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
+		currentLeaderPubKey := epochSnapshot.LeadersSequence[epochSnapshot.CurrentLeaderIndex]
 
-		currentLeaderPubKey := epochHandlerRef.LeadersSequence[epochHandlerRef.CurrentLeaderIndex]
-
-		if currentLeaderPubKey != globals.CONFIGURATION.PublicKey || !utils.EpochStillFresh(&handlers.APPROVEMENT_THREAD_METADATA.Handler) {
-
-			handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
+		if currentLeaderPubKey != globals.CONFIGURATION.PublicKey || !utils.EpochStillFresh(&atSnapshot) {
 			time.Sleep(200 * time.Millisecond)
-
 			continue
-
 		}
 
 		PROOFS_GRABBER_MUTEX.RLock()
 
-		if PROOFS_GRABBER.EpochId != epochHandlerRef.Id {
+		if PROOFS_GRABBER.EpochId != epochSnapshot.Id {
 
 			PROOFS_GRABBER_MUTEX.RUnlock()
 
@@ -77,7 +74,7 @@ func BlocksSharingAndProofsGrabingThread() {
 
 			// Try to get stored proofs grabber from db
 
-			dbKey := []byte(strconv.Itoa(epochHandlerRef.Id) + ":PROOFS_GRABBER")
+			dbKey := []byte(strconv.Itoa(epochSnapshot.Id) + ":PROOFS_GRABBER")
 
 			if rawGrabber, err := databases.FINALIZATION_VOTING_STATS.Get(dbKey, nil); err == nil {
 
@@ -89,7 +86,7 @@ func BlocksSharingAndProofsGrabingThread() {
 
 				PROOFS_GRABBER = ProofsGrabber{
 
-					EpochId: epochHandlerRef.Id,
+					EpochId: epochSnapshot.Id,
 
 					AcceptedIndex: -1,
 
@@ -113,12 +110,9 @@ func BlocksSharingAndProofsGrabingThread() {
 			PROOFS_GRABBER_MUTEX.Unlock()
 
 			// Also, open connections with quorum here. Create QuorumWaiter etc.
-
-			utils.OpenWebsocketConnectionsWithQuorum(epochHandlerRef.Quorum, WEBSOCKET_CONNECTIONS, WEBSOCKET_GUARDS_FOR_PROOFS)
-
-			// Create new QuorumWaiter
-
-			QUORUM_WAITER_FOR_FINALIZATION_PROOFS = utils.NewQuorumWaiter(len(epochHandlerRef.Quorum), WEBSOCKET_GUARDS_FOR_PROOFS)
+			// This is network I/O, so do it without holding AT lock.
+			utils.OpenWebsocketConnectionsWithQuorum(epochSnapshot.Quorum, WEBSOCKET_CONNECTIONS, WEBSOCKET_GUARDS_FOR_PROOFS)
+			QUORUM_WAITER_FOR_FINALIZATION_PROOFS = utils.NewQuorumWaiter(len(epochSnapshot.Quorum), WEBSOCKET_GUARDS_FOR_PROOFS)
 
 		} else {
 
@@ -126,9 +120,7 @@ func BlocksSharingAndProofsGrabingThread() {
 
 		}
 
-		runFinalizationProofsGrabbing(epochHandlerRef)
-
-		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+		runFinalizationProofsGrabbing(&epochSnapshot)
 
 	}
 
@@ -139,50 +131,55 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 	// Call SendAndWait here
 	// Once received 2/3 votes for block - continue
 
+	// Snapshot what we need under lock, then do network work without holding PROOFS_GRABBER_MUTEX.
 	PROOFS_GRABBER_MUTEX.Lock()
 
-	defer PROOFS_GRABBER_MUTEX.Unlock()
-
 	epochFullId := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
-
-	blockIndexToHunt := strconv.Itoa(PROOFS_GRABBER.AcceptedIndex + 1)
-
-	blockIdForHunting := strconv.Itoa(epochHandler.Id) + ":" + globals.CONFIGURATION.PublicKey + ":" + blockIndexToHunt
-
-	blockIdThatInPointer := strconv.Itoa(epochHandler.Id) + ":" + globals.CONFIGURATION.PublicKey + ":" + strconv.Itoa(BLOCK_TO_SHARE.Index)
-
 	majority := utils.GetQuorumMajority(epochHandler)
 
-	if blockIdForHunting != blockIdThatInPointer {
+	blockIndexToHunt := PROOFS_GRABBER.AcceptedIndex + 1
+	blockIdForHunting := strconv.Itoa(epochHandler.Id) + ":" + globals.CONFIGURATION.PublicKey + ":" + strconv.Itoa(blockIndexToHunt)
 
-		blockDataRaw, errDB := databases.BLOCKS.Get([]byte(blockIdForHunting), nil)
+	// Copy current cache and previous proof snapshot
+	proofsCopy := make(map[string]string, len(FINALIZATION_PROOFS_CACHE))
+	for k, v := range FINALIZATION_PROOFS_CACHE {
+		proofsCopy[k] = v
+	}
+	acceptedHash := PROOFS_GRABBER.AcceptedHash
+	afpPrev := PROOFS_GRABBER.AfpForPrevious
 
-		if errDB == nil {
-
-			if parseErr := json.Unmarshal(blockDataRaw, BLOCK_TO_SHARE); parseErr != nil {
-				return
-			}
-
-		} else {
-			return
-		}
-
+	// Try to reuse in-memory block if it matches; otherwise we'll load it outside lock.
+	reuseBlock := BLOCK_TO_SHARE != nil && strconv.Itoa(epochHandler.Id)+":"+globals.CONFIGURATION.PublicKey+":"+strconv.Itoa(BLOCK_TO_SHARE.Index) == blockIdForHunting
+	var blockToShare block_pack.Block
+	if reuseBlock {
+		blockToShare = *BLOCK_TO_SHARE
 	}
 
-	blockHash := BLOCK_TO_SHARE.GetHash()
-
 	PROOFS_GRABBER.HuntingForBlockId = blockIdForHunting
+	PROOFS_GRABBER_MUTEX.Unlock()
 
-	PROOFS_GRABBER.HuntingForBlockHash = blockHash
+	// Load block from DB if not in memory (DB I/O outside lock).
+	if !reuseBlock {
+		blockDataRaw, errDB := databases.BLOCKS.Get([]byte(blockIdForHunting), nil)
+		if errDB != nil {
+			return
+		}
+		if err := json.Unmarshal(blockDataRaw, &blockToShare); err != nil {
+			return
+		}
+	}
 
-	if len(FINALIZATION_PROOFS_CACHE) < majority {
+	blockHash := blockToShare.GetHash()
+
+	// If we already have enough proofs, we can skip network step.
+	if len(proofsCopy) < majority {
 
 		// Build message - then parse to JSON
 
 		message := websocket_pack.WsFinalizationProofRequest{
 			Route:            "get_finalization_proof",
-			Block:            *BLOCK_TO_SHARE,
-			PreviousBlockAfp: PROOFS_GRABBER.AfpForPrevious,
+			Block:            blockToShare,
+			PreviousBlockAfp: afpPrev,
 		}
 
 		if messageJsoned, err := json.Marshal(message); err == nil {
@@ -206,13 +203,13 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 
 					// Now verify proof and parse requests
 
-					if parsedFinalizationProof.VotedForHash == PROOFS_GRABBER.HuntingForBlockHash {
+					if parsedFinalizationProof.VotedForHash == blockHash {
 
 						// Verify the finalization proof
 
 						dataThatShouldBeSigned := strings.Join(
 
-							[]string{PROOFS_GRABBER.AcceptedHash, PROOFS_GRABBER.HuntingForBlockId, PROOFS_GRABBER.HuntingForBlockHash, epochFullId}, ":",
+							[]string{acceptedHash, blockIdForHunting, blockHash, epochFullId}, ":",
 						)
 
 						finalizationProofIsOk := slices.Contains(epochHandler.Quorum, parsedFinalizationProof.Voter) && cryptography.VerifySignature(
@@ -222,7 +219,7 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 
 						if finalizationProofIsOk {
 
-							FINALIZATION_PROOFS_CACHE[parsedFinalizationProof.Voter] = parsedFinalizationProof.FinalizationProof
+							proofsCopy[parsedFinalizationProof.Voter] = parsedFinalizationProof.FinalizationProof
 
 						}
 
@@ -235,6 +232,28 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 		}
 
 	}
+
+	// Apply results under lock and, if reached majority, persist AFP/progress.
+	PROOFS_GRABBER_MUTEX.Lock()
+	defer PROOFS_GRABBER_MUTEX.Unlock()
+
+	// Ensure we are still hunting the same block for the same epoch.
+	if PROOFS_GRABBER.EpochId != epochHandler.Id || PROOFS_GRABBER.HuntingForBlockId != blockIdForHunting {
+		return
+	}
+
+	// Merge proofs (in case some were added while we were unlocked).
+	for k, v := range proofsCopy {
+		FINALIZATION_PROOFS_CACHE[k] = v
+	}
+
+	PROOFS_GRABBER.HuntingForBlockHash = blockHash
+
+	// Keep BLOCK_TO_SHARE up to date for compatibility with existing logic/debugging.
+	if BLOCK_TO_SHARE == nil {
+		BLOCK_TO_SHARE = &block_pack.Block{}
+	}
+	*BLOCK_TO_SHARE = blockToShare
 
 	if len(FINALIZATION_PROOFS_CACHE) >= majority {
 

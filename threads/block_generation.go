@@ -25,13 +25,12 @@ func BlockGenerationThread() {
 
 	for {
 
+		// Don't hold AT lock while generating blocks (generation may include network I/O for delayed tx quorum signatures).
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
-
 		blockTime := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.BlockTime
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 		generateBlock()
-
-		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 		time.Sleep(time.Duration(blockTime) * time.Millisecond)
 
@@ -39,13 +38,11 @@ func BlockGenerationThread() {
 
 }
 
-func getTransactionsFromMempool() []structures.Transaction {
+func getTransactionsFromMempool(limit int) []structures.Transaction {
 
 	globals.MEMPOOL.Mutex.Lock()
 
 	defer globals.MEMPOOL.Mutex.Unlock()
-
-	limit := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.TxLimitPerBlock
 
 	mempoolSize := len(globals.MEMPOOL.Slice)
 
@@ -64,12 +61,10 @@ func getTransactionsFromMempool() []structures.Transaction {
 	return transactions
 }
 
-func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedTransactionsBatch {
+func getBatchOfApprovedDelayedTxsByQuorum(epochHandler structures.EpochDataHandler, indexOfLeader int) structures.DelayedTransactionsBatch {
 
-	epochHandlerRef := &handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
-
-	prevEpochIndex := epochHandlerRef.Id - 2
-	majority := utils.GetQuorumMajority(epochHandlerRef)
+	prevEpochIndex := epochHandler.Id - 2
+	majority := utils.GetQuorumMajority(&epochHandler)
 
 	batch := structures.DelayedTransactionsBatch{
 		EpochIndex:          prevEpochIndex,
@@ -102,7 +97,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedT
 		globals.CONFIGURATION.PublicKey: cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, delayedTxHash),
 	}
 
-	quorumMembers := utils.GetQuorumUrlsAndPubkeys(epochHandlerRef)
+	quorumMembers := utils.GetQuorumUrlsAndPubkeys(&epochHandler)
 	reqBody, err := json.Marshal(map[string]int{"epochIndex": prevEpochIndex})
 	if err != nil {
 		return batch
@@ -194,19 +189,24 @@ func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedT
 
 func generateBlock() {
 
-	epochHandlerRef := &handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
+	// Snapshot AT quickly; do heavy work without holding AT lock.
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+	atSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler
+	epochSnapshot := atSnapshot.EpochDataHandler
+	txLimit := atSnapshot.NetworkParameters.TxLimitPerBlock
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
-	if !utils.EpochStillFresh(&handlers.APPROVEMENT_THREAD_METADATA.Handler) {
+	if !utils.EpochStillFresh(&atSnapshot) {
 
 		return
 
 	}
 
-	epochFullID := epochHandlerRef.Hash + "#" + strconv.Itoa(epochHandlerRef.Id)
+	epochFullID := epochSnapshot.Hash + "#" + strconv.Itoa(epochSnapshot.Id)
 
-	epochIndex := epochHandlerRef.Id
+	epochIndex := epochSnapshot.Id
 
-	currentLeaderPubKey := epochHandlerRef.LeadersSequence[epochHandlerRef.CurrentLeaderIndex]
+	currentLeaderPubKey := epochSnapshot.LeadersSequence[epochSnapshot.CurrentLeaderIndex]
 
 	PROOFS_GRABBER_MUTEX.RLock()
 
@@ -243,13 +243,13 @@ func generateBlock() {
 
 		extraData := block_pack.ExtraDataToBlock{}
 
-		extraData.DelayedTransactionsBatch = getBatchOfApprovedDelayedTxsByQuorum(epochHandlerRef.CurrentLeaderIndex)
+		extraData.DelayedTransactionsBatch = getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot, epochSnapshot.CurrentLeaderIndex)
 
 		extraData.Rest = globals.CONFIGURATION.ExtraDataToBlock
 
 		blockDbAtomicBatch := new(leveldb.Batch)
 
-		blockCandidate := block_pack.NewBlock(getTransactionsFromMempool(), extraData, epochFullID)
+		blockCandidate := block_pack.NewBlock(getTransactionsFromMempool(txLimit), extraData, epochFullID)
 
 		blockHash := blockCandidate.GetHash()
 
