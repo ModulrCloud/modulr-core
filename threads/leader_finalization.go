@@ -31,7 +31,7 @@ type LeaderFinalizationCache struct {
 	LastPodFetch time.Time
 }
 
-type EpochRotationState struct {
+type AlfpProcessMetadata struct {
 	EpochId  int
 	Snapshot *structures.EpochDataSnapshot
 	Caches   map[string]*LeaderFinalizationCache
@@ -41,20 +41,17 @@ type EpochRotationState struct {
 }
 
 var (
-	ALFP_GRABBING_MUTEX    = sync.Mutex{}
-	ALFP_PROCESS_METADATA  *EpochRotationState
-	PROCESSING_EPOCH_INDEX = -1
+	ALFP_GRABBING_MUTEX   = sync.Mutex{}
+	ALFP_PROCESS_METADATA *AlfpProcessMetadata
 )
 
 func LeaderFinalizationThread() {
 
+	processingEpochIndex := loadFinalizationProgress()
+
 	for {
 
-		if PROCESSING_EPOCH_INDEX == -1 {
-			PROCESSING_EPOCH_INDEX = loadFinalizationProgress()
-		}
-
-		snapshot := getOrLoadEpochSnapshot(PROCESSING_EPOCH_INDEX)
+		snapshot := getOrLoadEpochSnapshot(processingEpochIndex)
 
 		if snapshot == nil {
 			time.Sleep(200 * time.Millisecond)
@@ -64,15 +61,15 @@ func LeaderFinalizationThread() {
 		processingHandler := &snapshot.EpochDataHandler
 
 		if !weAreInEpochQuorum(processingHandler) {
-			currentEpoch := PROCESSING_EPOCH_INDEX
-			PROCESSING_EPOCH_INDEX++
-			persistFinalizationProgress(PROCESSING_EPOCH_INDEX)
+			currentEpoch := processingEpochIndex
+			processingEpochIndex++
+			persistFinalizationProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		state := ensureLeaderFinalizationState(processingHandler)
+		state := ensureAlfpProcessMetadata(processingHandler)
 		majority := utils.GetQuorumMajority(processingHandler)
 
 		networkParams := snapshot.NetworkParameters
@@ -82,9 +79,9 @@ func LeaderFinalizationThread() {
 		}
 
 		if allLeaderFinalizationProofsCollected(processingHandler) {
-			currentEpoch := PROCESSING_EPOCH_INDEX
-			PROCESSING_EPOCH_INDEX++
-			persistFinalizationProgress(PROCESSING_EPOCH_INDEX)
+			currentEpoch := processingEpochIndex
+			processingEpochIndex++
+			persistFinalizationProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 		}
 
@@ -92,7 +89,7 @@ func LeaderFinalizationThread() {
 	}
 }
 
-func ensureLeaderFinalizationState(epochHandler *structures.EpochDataHandler) *EpochRotationState {
+func ensureAlfpProcessMetadata(epochHandler *structures.EpochDataHandler) *AlfpProcessMetadata {
 
 	ALFP_GRABBING_MUTEX.Lock()
 	defer ALFP_GRABBING_MUTEX.Unlock()
@@ -112,7 +109,7 @@ func ensureLeaderFinalizationState(epochHandler *structures.EpochDataHandler) *E
 	}
 
 	guards := utils.NewWebsocketGuards()
-	state := &EpochRotationState{
+	alfpProcMetadata := &AlfpProcessMetadata{
 		EpochId: epochHandler.Id,
 		Caches:  make(map[string]*LeaderFinalizationCache),
 		WsConns: make(map[string]*websocket.Conn),
@@ -120,10 +117,10 @@ func ensureLeaderFinalizationState(epochHandler *structures.EpochDataHandler) *E
 		Guards:  guards,
 	}
 
-	utils.OpenWebsocketConnectionsWithQuorum(epochHandler.Quorum, state.WsConns, guards)
-	ALFP_PROCESS_METADATA = state
+	utils.OpenWebsocketConnectionsWithQuorum(epochHandler.Quorum, alfpProcMetadata.WsConns, guards)
+	ALFP_PROCESS_METADATA = alfpProcMetadata
 
-	return state
+	return alfpProcMetadata
 }
 
 func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
@@ -295,7 +292,7 @@ func leaderTimeIsOut(epochHandler *structures.EpochDataHandler, networkParams *s
 	return utils.GetUTCTimestampInMilliSeconds() >= int64(epochHandler.StartTimestamp)+(int64(leaderIndex)+1)*leadershipTimeframe
 }
 
-func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandler, leaderIndex, majority int, state *EpochRotationState) {
+func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandler, leaderIndex, majority int, state *AlfpProcessMetadata) {
 
 	leaderPubKey := epochHandler.LeadersSequence[leaderIndex]
 	epochFullID := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
@@ -349,7 +346,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 	}
 }
 
-func ensureLeaderFinalizationCache(state *EpochRotationState, epochId int, leaderPubKey string) *LeaderFinalizationCache {
+func ensureLeaderFinalizationCache(state *AlfpProcessMetadata, epochId int, leaderPubKey string) *LeaderFinalizationCache {
 
 	key := fmt.Sprintf("%d:%s", epochId, leaderPubKey)
 
@@ -382,7 +379,7 @@ func loadLeaderSkipData(epochId int, leaderPubKey string) structures.VotingStat 
 	return skipData
 }
 
-func handleLeaderFinalizationResponse(raw []byte, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *EpochRotationState) {
+func handleLeaderFinalizationResponse(raw []byte, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *AlfpProcessMetadata) {
 
 	var statusHolder map[string]any
 
@@ -409,7 +406,7 @@ func handleLeaderFinalizationResponse(raw []byte, epochHandler *structures.Epoch
 	}
 }
 
-func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProofResponseOk, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *EpochRotationState) {
+func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProofResponseOk, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *AlfpProcessMetadata) {
 
 	if response.ForLeaderPubkey != leaderPubKey {
 		return
@@ -434,7 +431,7 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 	}
 }
 
-func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizationProofResponseUpgrade, epochHandler *structures.EpochDataHandler, leaderPubKey string, state *EpochRotationState) {
+func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizationProofResponseUpgrade, epochHandler *structures.EpochDataHandler, leaderPubKey string, state *AlfpProcessMetadata) {
 
 	if response.ForLeaderPubkey != leaderPubKey {
 		return
