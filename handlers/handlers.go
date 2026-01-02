@@ -37,10 +37,3 @@ var EXECUTION_THREAD_METADATA = struct {
 		Statistics: &structures.Statistics{LastHeight: -1},
 	},
 }
-
-var FINALIZATION_THREAD_METADATA = struct {
-	RWMutex       sync.RWMutex
-	EpochHandlers map[int]structures.EpochDataSnapshot
-}{
-	EpochHandlers: make(map[int]structures.EpochDataSnapshot),
-}
