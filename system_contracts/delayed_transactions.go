@@ -110,7 +110,7 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 		if context == "AT" {
 
-			validatorStorage := utils.GetValidatorFromApprovementThreadState(validatorPubkey)
+			validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 			if validatorStorage != nil {
 
@@ -170,7 +170,7 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 
 	if context == "AT" {
 
-		validatorStorage := utils.GetValidatorFromApprovementThreadState(validatorPubkey)
+		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 		if validatorStorage != nil {
 
@@ -270,7 +270,7 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 
 	if context == "AT" {
 
-		validatorStorage := utils.GetValidatorFromApprovementThreadState(validatorPubkey)
+		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 		if validatorStorage != nil {
 

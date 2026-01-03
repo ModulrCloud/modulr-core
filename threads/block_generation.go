@@ -21,6 +21,13 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+const (
+	// Prevent realloc noise for small mempools; compact only after a noticeable burst.
+	MEMPOOL_MIN_CAP_TO_COMPACT = 4096
+	// Compact when underlying capacity is much larger than the remaining length.
+	MEMPOOL_COMPACT_WHEN_CAP_OVER_LEN_FACTOR = 4
+)
+
 func BlockGenerationThread() {
 
 	for {
@@ -61,7 +68,31 @@ func getTransactionsFromMempool() []structures.Transaction {
 
 	globals.MEMPOOL.Slice = globals.MEMPOOL.Slice[limit:]
 
+	compactMempoolIfNeeded()
+
 	return transactions
+}
+
+func compactMempoolIfNeeded() {
+	// Must be called under globals.MEMPOOL.Mutex.
+	if len(globals.MEMPOOL.Slice) == 0 {
+		// Let GC reclaim backing array after bursts.
+		globals.MEMPOOL.Slice = nil
+		return
+	}
+
+	// Reslicing drops len, but the underlying array can remain huge.
+	// Compact only when it's clearly beneficial.
+	if cap(globals.MEMPOOL.Slice) <= MEMPOOL_MIN_CAP_TO_COMPACT {
+		return
+	}
+	if cap(globals.MEMPOOL.Slice) <= MEMPOOL_COMPACT_WHEN_CAP_OVER_LEN_FACTOR*len(globals.MEMPOOL.Slice) {
+		return
+	}
+
+	compacted := make([]structures.Transaction, len(globals.MEMPOOL.Slice))
+	copy(compacted, globals.MEMPOOL.Slice)
+	globals.MEMPOOL.Slice = compacted
 }
 
 func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedTransactionsBatch {

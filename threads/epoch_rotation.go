@@ -274,7 +274,6 @@ func EpochRotationThread() {
 						atomicBatch.Put([]byte("AT"), jsonedHandler)
 
 						// Clean cache
-
 						clear(handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache)
 
 						// Clean in-memory helpful object
