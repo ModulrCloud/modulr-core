@@ -522,7 +522,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			// We therefore guard the whole request (WriteMessage+ReadMessage), not only the write.
 			wmu := qw.getWriteMu(id)
 			wmu.Lock()
-			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
+			_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 			err := c.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
 				wmu.Unlock()
@@ -540,7 +540,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			}
 
 			// Short read deadline for reply
-			_ = c.SetReadDeadline(time.Now().Add(time.Second))
+			_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 			_, raw, err := c.ReadMessage()
 			wmu.Unlock()
 			if err != nil {
