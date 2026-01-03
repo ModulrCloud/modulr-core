@@ -39,23 +39,23 @@ const (
 )
 
 var (
-	POD_MUTEX                                       sync.Mutex      // Guards open/close & replace of PoD conn
-	POD_REQUEST_MUTEX                               sync.Mutex      // Single request (write+read) guarantee for PoD
-	WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION *websocket.Conn // Connection with PoD itself
+	POD_MUTEX                sync.Mutex      // Guards open/close & replace of PoD conn
+	POD_REQUEST_MUTEX        sync.Mutex      // Single request (write+read) guarantee for PoD
+	POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with PoD itself
 )
 
 // Dedicated "bulk" PoD connection used for high-frequency requests (e.g. block execution fetching blocks).
 // This avoids head-of-line blocking with other PoD requests that share the default connection.
 var (
-	POD_BULK_MUTEX                                       sync.Mutex
-	POD_BULK_REQUEST_MUTEX                               sync.Mutex
-	WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK *websocket.Conn
+	POD_BULK_MUTEX                sync.Mutex
+	POD_BULK_REQUEST_MUTEX        sync.Mutex
+	POD_WEBSOCKET_CONNECTION_BULK *websocket.Conn
 )
 
 var (
-	ANCHORS_POD_MUTEX                                       sync.Mutex      // Guards open/close & replace of Anchors PoD conn
-	ANCHORS_POD_REQUEST_MUTEX                               sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
-	WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION *websocket.Conn // Connection with anchors PoD itself
+	ANCHORS_POD_MUTEX                sync.Mutex      // Guards open/close & replace of Anchors PoD conn
+	ANCHORS_POD_REQUEST_MUTEX        sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
+	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
 )
 
 var (
@@ -89,7 +89,7 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 
 		POD_MUTEX.Lock()
 
-		if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION == nil {
+		if POD_WEBSOCKET_CONNECTION == nil {
 
 			conn, err := openWebsocketConnectionWithPoD()
 
@@ -102,11 +102,11 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 				continue
 			}
 
-			WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION = conn
+			POD_WEBSOCKET_CONNECTION = conn
 
 		}
 
-		c := WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION
+		c := POD_WEBSOCKET_CONNECTION
 
 		POD_MUTEX.Unlock()
 
@@ -120,9 +120,9 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 		if err != nil {
 			POD_REQUEST_MUTEX.Unlock()
 			POD_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION == c {
+			if POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION = nil
+				POD_WEBSOCKET_CONNECTION = nil
 			}
 			POD_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -136,9 +136,9 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 
 		if err != nil {
 			POD_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION == c {
+			if POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION = nil
+				POD_WEBSOCKET_CONNECTION = nil
 			}
 			POD_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -160,7 +160,7 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 
 		POD_BULK_MUTEX.Lock()
 
-		if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == nil {
+		if POD_WEBSOCKET_CONNECTION_BULK == nil {
 
 			conn, err := openWebsocketConnectionWithPoD()
 
@@ -173,11 +173,11 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 				continue
 			}
 
-			WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = conn
+			POD_WEBSOCKET_CONNECTION_BULK = conn
 
 		}
 
-		c := WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK
+		c := POD_WEBSOCKET_CONNECTION_BULK
 
 		POD_BULK_MUTEX.Unlock()
 
@@ -191,9 +191,9 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 		if err != nil {
 			POD_BULK_REQUEST_MUTEX.Unlock()
 			POD_BULK_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == c {
+			if POD_WEBSOCKET_CONNECTION_BULK == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = nil
+				POD_WEBSOCKET_CONNECTION_BULK = nil
 			}
 			POD_BULK_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -207,9 +207,9 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 
 		if err != nil {
 			POD_BULK_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK == c {
+			if POD_WEBSOCKET_CONNECTION_BULK == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_POINT_OF_DISTRIBUTION_BULK = nil
+				POD_WEBSOCKET_CONNECTION_BULK = nil
 			}
 			POD_BULK_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -229,7 +229,7 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 		ANCHORS_POD_MUTEX.Lock()
 
-		if WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION == nil {
+		if ANCHORS_POD_WEBSOCKET_CONNECTION == nil {
 
 			conn, err := openWebsocketConnectionWithAnchorsPoD()
 
@@ -242,11 +242,11 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 				continue
 			}
 
-			WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION = conn
+			ANCHORS_POD_WEBSOCKET_CONNECTION = conn
 
 		}
 
-		c := WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION
+		c := ANCHORS_POD_WEBSOCKET_CONNECTION
 
 		ANCHORS_POD_MUTEX.Unlock()
 
@@ -260,9 +260,9 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 		if err != nil {
 			ANCHORS_POD_REQUEST_MUTEX.Unlock()
 			ANCHORS_POD_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION == c {
+			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION = nil
+				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
 			}
 			ANCHORS_POD_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -276,9 +276,9 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 		if err != nil {
 			ANCHORS_POD_MUTEX.Lock()
-			if WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION == c {
+			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
-				WEBSOCKET_CONNECTION_WITH_ANCHORS_POINT_OF_DISTRIBUTION = nil
+				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
 			}
 			ANCHORS_POD_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
@@ -536,12 +536,15 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 		}
 
 		go func(id string, c *websocket.Conn) {
-			// Single-writer guard for this websocket
+			// Single-request guard for this websocket.
+			// IMPORTANT: gorilla/websocket requires a single reader AND a single writer per connection.
+			// We therefore guard the whole request (WriteMessage+ReadMessage), not only the write.
 			wmu := qw.getWriteMu(id)
 			wmu.Lock()
+			_ = c.SetWriteDeadline(time.Now().Add(time.Second))
 			err := c.WriteMessage(websocket.TextMessage, msg)
-			wmu.Unlock()
 			if err != nil {
+				wmu.Unlock()
 				// Mark as failed and remove the connection safely
 				qw.mu.Lock()
 				qw.failed[id] = struct{}{}
@@ -558,6 +561,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			// Short read deadline for reply
 			_ = c.SetReadDeadline(time.Now().Add(time.Second))
 			_, raw, err := c.ReadMessage()
+			wmu.Unlock()
 			if err != nil {
 				// Mark as failed and remove the connection safely
 				qw.mu.Lock()
