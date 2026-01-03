@@ -33,28 +33,28 @@ type QuorumResponse struct {
 }
 
 const (
-	MAX_RETRIES             = 3
-	RETRY_INTERVAL          = 200 * time.Millisecond
-	POD_READ_WRITE_DEADLINE = 2 * time.Second // timeout for read/write operations for POD (point of distribution)
+	MAX_RETRIES         = 3
+	RETRY_INTERVAL      = 200 * time.Millisecond
+	READ_WRITE_DEADLINE = 2 * time.Second // timeout for read/write operations for POD (point of distribution)
 )
 
 var (
-	POD_MUTEX                sync.Mutex      // Guards open/close & replace of PoD conn
-	POD_REQUEST_MUTEX        sync.Mutex      // Single request (write+read) guarantee for PoD
+	POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of PoD conn
+	POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for PoD
 	POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with PoD itself
 )
 
 // Dedicated "bulk" PoD connection used for high-frequency requests (e.g. block execution fetching blocks).
 // This avoids head-of-line blocking with other PoD requests that share the default connection.
 var (
-	POD_BULK_MUTEX                sync.Mutex
-	POD_BULK_REQUEST_MUTEX        sync.Mutex
+	POD_BULK_ACCESS_MUTEX         sync.Mutex
+	POD_BULK_READ_WRITE_MUTEX     sync.Mutex
 	POD_WEBSOCKET_CONNECTION_BULK *websocket.Conn
 )
 
 var (
-	ANCHORS_POD_MUTEX                sync.Mutex      // Guards open/close & replace of Anchors PoD conn
-	ANCHORS_POD_REQUEST_MUTEX        sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
+	ANCHORS_POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of Anchors PoD conn
+	ANCHORS_POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
 	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
 )
 
@@ -74,7 +74,7 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
 
-		POD_MUTEX.Lock()
+		POD_ACCESS_MUTEX.Lock()
 
 		if POD_WEBSOCKET_CONNECTION == nil {
 
@@ -82,7 +82,7 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 
 			if err != nil {
 
-				POD_MUTEX.Unlock()
+				POD_ACCESS_MUTEX.Unlock()
 
 				time.Sleep(RETRY_INTERVAL)
 
@@ -95,39 +95,39 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 
 		c := POD_WEBSOCKET_CONNECTION
 
-		POD_MUTEX.Unlock()
+		POD_ACCESS_MUTEX.Unlock()
 
 		// single request (write+read) for this connection
-		POD_REQUEST_MUTEX.Lock()
+		POD_READ_WRITE_MUTEX.Lock()
 
-		_ = c.SetWriteDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
-			POD_REQUEST_MUTEX.Unlock()
-			POD_MUTEX.Lock()
+			POD_READ_WRITE_MUTEX.Unlock()
+			POD_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
 				POD_WEBSOCKET_CONNECTION = nil
 			}
-			POD_MUTEX.Unlock()
+			POD_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
 
-		_ = c.SetReadDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 		_, resp, err := c.ReadMessage()
 
-		POD_REQUEST_MUTEX.Unlock()
+		POD_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
-			POD_MUTEX.Lock()
+			POD_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
 				POD_WEBSOCKET_CONNECTION = nil
 			}
-			POD_MUTEX.Unlock()
+			POD_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
@@ -145,7 +145,7 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
 
-		POD_BULK_MUTEX.Lock()
+		POD_BULK_ACCESS_MUTEX.Lock()
 
 		if POD_WEBSOCKET_CONNECTION_BULK == nil {
 
@@ -153,7 +153,7 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 
 			if err != nil {
 
-				POD_BULK_MUTEX.Unlock()
+				POD_BULK_ACCESS_MUTEX.Unlock()
 
 				time.Sleep(RETRY_INTERVAL)
 
@@ -166,39 +166,39 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 
 		c := POD_WEBSOCKET_CONNECTION_BULK
 
-		POD_BULK_MUTEX.Unlock()
+		POD_BULK_ACCESS_MUTEX.Unlock()
 
 		// single request (write+read) for this connection
-		POD_BULK_REQUEST_MUTEX.Lock()
+		POD_BULK_READ_WRITE_MUTEX.Lock()
 
-		_ = c.SetWriteDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
-			POD_BULK_REQUEST_MUTEX.Unlock()
-			POD_BULK_MUTEX.Lock()
+			POD_BULK_READ_WRITE_MUTEX.Unlock()
+			POD_BULK_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION_BULK == c {
 				_ = c.Close()
 				POD_WEBSOCKET_CONNECTION_BULK = nil
 			}
-			POD_BULK_MUTEX.Unlock()
+			POD_BULK_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
 
-		_ = c.SetReadDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 		_, resp, err := c.ReadMessage()
 
-		POD_BULK_REQUEST_MUTEX.Unlock()
+		POD_BULK_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
-			POD_BULK_MUTEX.Lock()
+			POD_BULK_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION_BULK == c {
 				_ = c.Close()
 				POD_WEBSOCKET_CONNECTION_BULK = nil
 			}
-			POD_BULK_MUTEX.Unlock()
+			POD_BULK_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
@@ -214,7 +214,7 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
 
-		ANCHORS_POD_MUTEX.Lock()
+		ANCHORS_POD_ACCESS_MUTEX.Lock()
 
 		if ANCHORS_POD_WEBSOCKET_CONNECTION == nil {
 
@@ -222,7 +222,7 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 			if err != nil {
 
-				ANCHORS_POD_MUTEX.Unlock()
+				ANCHORS_POD_ACCESS_MUTEX.Unlock()
 
 				time.Sleep(RETRY_INTERVAL)
 
@@ -235,39 +235,39 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 		c := ANCHORS_POD_WEBSOCKET_CONNECTION
 
-		ANCHORS_POD_MUTEX.Unlock()
+		ANCHORS_POD_ACCESS_MUTEX.Unlock()
 
 		// single request (write+read) for this connection
-		ANCHORS_POD_REQUEST_MUTEX.Lock()
+		ANCHORS_POD_READ_WRITE_MUTEX.Lock()
 
-		_ = c.SetWriteDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
-			ANCHORS_POD_REQUEST_MUTEX.Unlock()
-			ANCHORS_POD_MUTEX.Lock()
+			ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
+			ANCHORS_POD_ACCESS_MUTEX.Lock()
 			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
 				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
 			}
-			ANCHORS_POD_MUTEX.Unlock()
+			ANCHORS_POD_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
 
-		_ = c.SetReadDeadline(time.Now().Add(POD_READ_WRITE_DEADLINE))
+		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 		_, resp, err := c.ReadMessage()
 
-		ANCHORS_POD_REQUEST_MUTEX.Unlock()
+		ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
-			ANCHORS_POD_MUTEX.Lock()
+			ANCHORS_POD_ACCESS_MUTEX.Lock()
 			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
 				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
 			}
-			ANCHORS_POD_MUTEX.Unlock()
+			ANCHORS_POD_ACCESS_MUTEX.Unlock()
 			time.Sleep(RETRY_INTERVAL)
 			continue
 		}
