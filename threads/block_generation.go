@@ -92,12 +92,10 @@ func compactMempoolIfNeeded() {
 	globals.MEMPOOL.Slice = compacted
 }
 
-func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedTransactionsBatch {
+func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHandler, indexOfLeader int) structures.DelayedTransactionsBatch {
 
-	epochHandlerRef := &handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
-
-	prevEpochIndex := epochHandler.Id - 2
-	majority := utils.GetQuorumMajority(&epochHandler)
+	prevEpochIndex := epochSnapshot.Id - 2
+	majority := utils.GetQuorumMajority(&epochSnapshot)
 
 	batch := structures.DelayedTransactionsBatch{
 		EpochIndex:          prevEpochIndex,
@@ -130,7 +128,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(indexOfLeader int) structures.DelayedT
 		globals.CONFIGURATION.PublicKey: cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, delayedTxHash),
 	}
 
-	quorumMembers := utils.GetQuorumUrlsAndPubkeys(&epochHandler)
+	quorumMembers := utils.GetQuorumUrlsAndPubkeys(&epochSnapshot)
 	reqBody, err := json.Marshal(map[string]int{"epochIndex": prevEpochIndex})
 	if err != nil {
 		return batch
