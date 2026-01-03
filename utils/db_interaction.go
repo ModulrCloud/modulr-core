@@ -57,6 +57,14 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 }
 
 func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.ValidatorStorage {
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+	return GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
+}
+
+// GetValidatorFromApprovementThreadStateUnderLock reads/writes the AT validators cache.
+// Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex (RLock or Lock).
+func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *structures.ValidatorStorage {
 
 	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
 
