@@ -58,12 +58,6 @@ var (
 	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
 )
 
-var (
-	WEBSOCKET_CONNECTION_MUTEX sync.RWMutex // Protects concurrent access to wsConnMap (map[string]*websocket.Conn)
-	// key: pubkey -> *sync.Mutex
-	WEBSOCKET_WRITE_MUTEX sync.Map // Ensures single writer per websocket connection (gorilla/websocket requirement)
-)
-
 type WebsocketGuards struct {
 	ConnMu  *sync.RWMutex
 	WriteMu *sync.Map
@@ -73,13 +67,6 @@ func NewWebsocketGuards() *WebsocketGuards {
 	return &WebsocketGuards{
 		ConnMu:  &sync.RWMutex{},
 		WriteMu: &sync.Map{},
-	}
-}
-
-func defaultWebsocketGuards() *WebsocketGuards {
-	return &WebsocketGuards{
-		ConnMu:  &WEBSOCKET_CONNECTION_MUTEX,
-		WriteMu: &WEBSOCKET_WRITE_MUTEX,
 	}
 }
 
@@ -294,9 +281,6 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	if guards == nil {
-		guards = defaultWebsocketGuards()
-	}
 	// Close and remove any existing connections (called once per your note)
 	guards.ConnMu.Lock()
 	for id, conn := range wsConnMap {
@@ -342,9 +326,6 @@ func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*w
 }
 
 func NewQuorumWaiter(maxQuorumSize int, guards *WebsocketGuards) *QuorumWaiter {
-	if guards == nil {
-		guards = defaultWebsocketGuards()
-	}
 	return &QuorumWaiter{
 		responseCh: make(chan QuorumResponse, maxQuorumSize),
 		done:       make(chan struct{}),
