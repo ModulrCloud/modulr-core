@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/cryptography"
@@ -21,86 +22,77 @@ func BlockExecutionThread() {
 
 	for {
 
+		// NOTE: Don't hold EXECUTION_THREAD_METADATA lock during network I/O to PoD.
+		// On high-latency links this blocks alignment/monitor threads and can cause huge execution lag.
+
+		progressed := false
+
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
 
 		epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
-
-		// Take the leader by it's position
-
 		currentEpochAlignmentData := &epochHandlerRef.SequenceAlignmentData
 
-		leaderPubkeyToExecBlocks := epochHandlerRef.EpochDataHandler.LeadersSequence[currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom]
+		epochSnapshot := epochHandlerRef.EpochDataHandler
 
-		execStatsOfLeader := epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks] // {index,hash}
-
-		infoAboutLastBlockByThisLeader, infoAboutLastBlockExists := currentEpochAlignmentData.LastBlocksByLeaders[leaderPubkeyToExecBlocks] // {index,hash}
-
-		if infoAboutLastBlockExists && execStatsOfLeader.Index == infoAboutLastBlockByThisLeader.Index {
-
-			allBlocksInEpochWereExecuted := len(epochHandlerRef.EpochDataHandler.LeadersSequence) == epochHandlerRef.SequenceAlignmentData.CurrentLeaderToExecBlocksFrom+1
-
-			if allBlocksInEpochWereExecuted {
-
-				// Move to the next epoch
-
-				setupNextEpoch(&epochHandlerRef.EpochDataHandler)
-
-			} else {
-
-				// Move to the next leader
-
-				epochHandlerRef.SequenceAlignmentData.CurrentLeaderToExecBlocksFrom++
-
-			}
-
-			// Here we need to skip the following logic and start next iteration
-
+		leaderIndexToExec := currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom
+		if leaderIndexToExec < 0 || leaderIndexToExec >= len(epochSnapshot.LeadersSequence) {
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
-
+			time.Sleep(200 * time.Millisecond)
 			continue
-
 		}
 
-		// Now, when we have connection with some entity which has an ability to give us blocks via WS(s) tunnel
+		leaderPubkeyToExecBlocks := epochSnapshot.LeadersSequence[leaderIndexToExec]
+		execStatsOfLeader := epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks] // {index,hash}
+		infoAboutLastBlockByThisLeader, infoAboutLastBlockExists := currentEpochAlignmentData.LastBlocksByLeaders[leaderPubkeyToExecBlocks]
+
+		// If we already executed everything we know for this leader, advance leader/epoch.
+		if infoAboutLastBlockExists && execStatsOfLeader.Index == infoAboutLastBlockByThisLeader.Index {
+			allBlocksInEpochWereExecuted := len(epochSnapshot.LeadersSequence) == currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom+1
+			if allBlocksInEpochWereExecuted {
+				setupNextEpoch(&epochHandlerRef.EpochDataHandler)
+			} else {
+				epochHandlerRef.SequenceAlignmentData.CurrentLeaderToExecBlocksFrom++
+			}
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			continue
+		}
+
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
 		// ___________ Now start a cycle to fetch blocks and exec ___________
-
 		for {
+			blockId := strconv.Itoa(epochSnapshot.Id) + ":" + leaderPubkeyToExecBlocks + ":" + strconv.Itoa(execStatsOfLeader.Index+1)
 
-			// Try to get the next block + proof and do it until block will be unavailable or we finished with current block creator
-
-			blockId := strconv.Itoa(epochHandlerRef.EpochDataHandler.Id) + ":" + leaderPubkeyToExecBlocks + ":" + strconv.Itoa(execStatsOfLeader.Index+1)
-
+			// Network I/O (PoD) - no locks held.
 			response := getBlockAndAfpFromPoD(blockId)
-
-			// If no data - break
 			if response == nil || response.Block == nil {
 				break
 			}
 
-			if infoAboutLastBlockExists && execStatsOfLeader.Index+1 == infoAboutLastBlockByThisLeader.Index && response.Block.GetHash() == infoAboutLastBlockByThisLeader.Hash {
+			// Decide whether we can execute this block.
+			shouldExecWithoutAfp := infoAboutLastBlockExists &&
+				execStatsOfLeader.Index+1 == infoAboutLastBlockByThisLeader.Index &&
+				response.Block.GetHash() == infoAboutLastBlockByThisLeader.Hash
 
-				// Let is exec without AFP
-				executeBlock(response.Block)
+			shouldExecWithAfp := response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
 
-				execStatsOfLeader = epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks]
-
-			} else if response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochHandlerRef.EpochDataHandler) {
-
-				// Exec only if AFP is valid
-				executeBlock(response.Block)
-
-				execStatsOfLeader = epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks]
-
-			} else {
-
+			if !shouldExecWithoutAfp && !shouldExecWithAfp {
 				break
-
 			}
 
+			// Apply block under lock (mutates handler caches/state and writes to DB).
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			executeBlock(response.Block)
+			execStatsOfLeader = handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[leaderPubkeyToExecBlocks]
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+
+			progressed = true
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		// Avoid tight loop when PoD doesn't have the next block yet (especially on high RTT links).
+		if !progressed {
+			time.Sleep(100 * time.Millisecond)
+		}
 
 	}
 
@@ -115,7 +107,8 @@ func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpRespons
 
 	if reqBytes, err := json.Marshal(req); err == nil {
 
-		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+		// Use dedicated PoD websocket connection to avoid blocking other PoD traffic.
+		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
 
 			var resp websocket_pack.WsBlockWithAfpResponse
 
