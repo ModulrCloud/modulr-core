@@ -225,6 +225,8 @@ func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*w
 			_ = conn.Close()
 		}
 		delete(wsConnMap, id)
+		// Also drop per-connection write mutex to prevent unbounded growth when pubkeys change.
+		guards.WriteMu.Delete(id)
 	}
 	guards.ConnMu.Unlock()
 
@@ -470,6 +472,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				qw.guards.WriteMu.Delete(id)
 				return
 			}
 
@@ -486,6 +489,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				qw.guards.WriteMu.Delete(id)
 				return
 			}
 
