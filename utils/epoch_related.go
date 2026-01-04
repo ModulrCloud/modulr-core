@@ -21,13 +21,13 @@ type ValidatorData struct {
 
 func GetCurrentLeader() CurrentLeaderData {
 
+	// Snapshot leader data under RLock, then release lock before calling validator getter.
+	// This avoids a potential lock-upgrade deadlock, because GetValidatorFromApprovementThreadState
+	// may need a write lock to populate the cache on a miss.
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
-
-	defer handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
 	currentLeaderIndex := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.CurrentLeaderIndex
-
 	currentLeaderPubKey := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.LeadersSequence[currentLeaderIndex]
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 	if currentLeaderPubKey != globals.CONFIGURATION.PublicKey {
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/utils"
 
@@ -42,7 +43,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 	switch incoming.Route {
 
-	case "get_finalization_proof":
+	case constants.WsRouteGetFinalizationProof:
 
 		var req WsFinalizationProofRequest
 
@@ -53,7 +54,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		GetFinalizationProof(req, connection)
 
-	case "get_leader_finalization_proof":
+	case constants.WsRouteGetLeaderFinalizationProof:
 
 		var req WsLeaderFinalizationProofRequest
 
@@ -64,7 +65,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		GetLeaderFinalizationProof(req, connection)
 
-	case "get_block_with_afp":
+	case constants.WsRouteGetBlockWithAfp:
 
 		var req WsBlockWithAfpRequest
 

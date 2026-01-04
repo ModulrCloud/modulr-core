@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -43,7 +44,7 @@ func EpochRotationThread() {
 			if !utils.SignalAboutEpochRotationExists(epochHandlerRef.Id) {
 
 				// If epoch is not fresh - send the signal to persistent db that we finish it - not to create AFPs, ALFPs anymore
-				keyValue := []byte("EPOCH_FINISH:" + strconv.Itoa(epochHandlerRef.Id))
+				keyValue := []byte(constants.DBKeyPrefixEpochFinish + strconv.Itoa(epochHandlerRef.Id))
 
 				databases.EPOCH_DATA.Put(keyValue, []byte("TRUE"), nil)
 
@@ -203,7 +204,7 @@ func EpochRotationThread() {
 
 						for _, delayedTransaction := range delayedTransactionsOrderByPriority {
 
-							executeDelayedTransaction(delayedTransaction, "APPROVEMENT_THREAD")
+							executeDelayedTransaction(delayedTransaction, constants.ContextApprovementThread)
 
 						}
 

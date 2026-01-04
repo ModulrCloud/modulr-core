@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
@@ -28,9 +29,9 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 	if validatorURL != "" && wssValidatorURL != "" && percentage <= 100 {
 
-		validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+		validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
-		if context == "AT" {
+		if context == constants.ContextApprovementThread {
 
 			if _, existsInCache := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; existsInCache {
 
@@ -61,7 +62,9 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 			return false
 
-		} else {
+		}
+
+		if context == constants.ContextExecutionThread {
 
 			if _, existsInCache := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; existsInCache {
 
@@ -92,6 +95,9 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 		}
 
+		// Unknown context tag -> don't touch state.
+		return false
+
 	}
 
 	return false
@@ -106,9 +112,9 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 	if validatorURL != "" && wssValidatorURL != "" && percentage <= 100 {
 
-		validatorStorageId := validatorPubkey + "_VALIDATOR_STORAGE"
+		validatorStorageId := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
-		if context == "AT" {
+		if context == constants.ContextApprovementThread {
 
 			validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
@@ -128,7 +134,9 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 			return false
 
-		} else {
+		}
+
+		if context == constants.ContextExecutionThread {
 
 			validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
@@ -150,6 +158,9 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 		}
 
+		// Unknown context tag -> don't touch state.
+		return false
+
 	}
 
 	return false
@@ -168,7 +179,7 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 
 	}
 
-	if context == "AT" {
+	if context == constants.ContextApprovementThread {
 
 		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
@@ -210,7 +221,9 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 
 		return false
 
-	} else {
+	}
+
+	if context == constants.ContextExecutionThread {
 
 		validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
@@ -254,6 +267,9 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 
 	}
 
+	// Unknown context tag -> don't touch state.
+	return false
+
 }
 
 func Unstake(delayedTransaction map[string]string, context string) bool {
@@ -268,7 +284,7 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 
 	}
 
-	if context == "AT" {
+	if context == constants.ContextApprovementThread {
 
 		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
@@ -318,7 +334,9 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 
 		return false
 
-	} else {
+	}
+
+	if context == constants.ContextExecutionThread {
 
 		validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
@@ -369,6 +387,9 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 		return false
 
 	}
+
+	// Unknown context tag -> don't touch state.
+	return false
 
 }
 

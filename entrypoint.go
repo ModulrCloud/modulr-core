@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -297,13 +298,13 @@ func setGenesisToState() error {
 			return err
 		}
 
-		approvementThreadBatch.Put([]byte(validatorPubkey+"_VALIDATOR_STORAGE"), serializedStorage)
+		approvementThreadBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), serializedStorage)
 
-		execThreadBatch.Put([]byte(validatorPubkey+"_VALIDATOR_STORAGE"), serializedStorage)
+		execThreadBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), serializedStorage)
 
 		// Populate in-memory caches so helper functions (quorum/leader selection) can read validator stake/urls
 		// before the DB batch is committed.
-		key := validatorPubkey + "_VALIDATOR_STORAGE"
+		key := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 		vsCopy := validatorStorage
 		handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = &vsCopy
 		handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = &vsCopy

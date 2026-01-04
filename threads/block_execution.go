@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -101,7 +102,7 @@ func BlockExecutionThread() {
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {
 
 	req := websocket_pack.WsBlockWithAfpRequest{
-		Route:   "get_block_with_afp",
+		Route:   constants.WsRouteGetBlockWithAfp,
 		BlockId: blockID,
 	}
 
@@ -134,7 +135,7 @@ func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpRespons
 func getAnchorBlockAndAfpFromAnchorsPoD(blockID string) *websocket_pack.WsAnchorBlockWithAfpResponse {
 
 	req := websocket_pack.WsAnchorBlockWithAfpRequest{
-		Route:   "get_anchor_block_with_afp",
+		Route:   constants.WsRouteGetAnchorBlockWithAfp,
 		BlockId: blockID,
 	}
 
@@ -207,7 +208,7 @@ func executeBlock(block *block_pack.Block) {
 
 			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success}); err == nil {
 
-				stateBatch.Put([]byte("TX:"+transaction.Hash()), locationBytes)
+				stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 
 			} else {
 
@@ -248,7 +249,7 @@ func executeBlock(block *block_pack.Block) {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				stateBatch.Put([]byte(validatorPubkey), dataBytes)
+				stateBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
 
 			} else {
 
@@ -315,6 +316,12 @@ func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) 
 }
 
 func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]string, bool) {
+
+	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
+	// Account IDs must be canonical pubkeys.
+	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
+		return false, 0, nil, false
+	}
 
 	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
 
@@ -517,7 +524,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		for _, delayedTx := range nextEpochData.DelayedTransactions {
 
-			executeDelayedTransaction(delayedTx, "EXECUTION_THREAD")
+			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
 
 		}
 
@@ -576,7 +583,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				dbBatch.Put([]byte(validatorPubkey), dataBytes)
+				dbBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
 
 			} else {
 

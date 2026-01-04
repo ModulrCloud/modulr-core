@@ -69,18 +69,41 @@ func GenerateSignature(base64PrivateKey, msg string) string {
 }
 
 func VerifySignature(message, base58PubKey, base64Signature string) bool {
-	// Decode everything
 	msgAsBytes := []byte(message)
+
+	// Pubkey must be base58-decoded to raw 32 bytes (ed25519).
 	publicKeyAsBytesWithNoAsnPrefix := base58.Decode(base58PubKey)
+	if len(publicKeyAsBytesWithNoAsnPrefix) != ed25519.PublicKeySize {
+		return false
+	}
 
-	// Add ASN.1 prefix
-	pubKeyAsBytesWithAsnPrefix := append([]byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00}, publicKeyAsBytesWithNoAsnPrefix...)
-	pubKeyInterface, _ := x509.ParsePKIXPublicKey(pubKeyAsBytesWithAsnPrefix)
-	finalPubKey := pubKeyInterface.(ed25519.PublicKey)
+	// Add ASN.1 prefix for x509.ParsePKIXPublicKey.
+	pubKeyAsBytesWithAsnPrefix := append(
+		[]byte{0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00},
+		publicKeyAsBytesWithNoAsnPrefix...,
+	)
 
-	signature, _ := base64.StdEncoding.DecodeString(base64Signature)
+	pubKeyInterface, err := x509.ParsePKIXPublicKey(pubKeyAsBytesWithAsnPrefix)
+	if err != nil {
+		return false
+	}
+	finalPubKey, ok := pubKeyInterface.(ed25519.PublicKey)
+	if !ok {
+		return false
+	}
+
+	signature, err := base64.StdEncoding.DecodeString(base64Signature)
+	if err != nil {
+		return false
+	}
 
 	return ed25519.Verify(finalPubKey, msgAsBytes, signature)
+}
+
+// IsValidPubKey validates that a string is a canonical Modulr public key:
+// base58-encoded raw ed25519 public key bytes (32 bytes).
+func IsValidPubKey(base58PubKey string) bool {
+	return len(base58.Decode(base58PubKey)) == ed25519.PublicKeySize
 }
 
 // Private inner function

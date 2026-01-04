@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -57,16 +58,45 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 }
 
 func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.ValidatorStorage {
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
+
+	// Fast path: cache hit under RLock (read-only).
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-	return GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+		return val
+	}
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+
+	// Cache miss: fetch from DB without holding RWMutex to avoid lock-upgrade deadlocks
+	// when callers already hold RLock elsewhere.
+	data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorStorageKey), nil)
+	if err != nil {
+		return nil
+	}
+
+	var validatorStorage structures.ValidatorStorage
+	if err := json.Unmarshal(data, &validatorStorage); err != nil {
+		return nil
+	}
+
+	// Store in cache under write lock (double-check to avoid overwriting on races).
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Lock()
+	defer handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Unlock()
+
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+		return val
+	}
+
+	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &validatorStorage
+	return &validatorStorage
 }
 
 // GetValidatorFromApprovementThreadStateUnderLock reads/writes the AT validators cache.
-// Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex (RLock or Lock).
+// Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex in write mode (Lock).
 func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *structures.ValidatorStorage {
 
-	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
@@ -94,7 +124,7 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 
 func GetValidatorFromExecThreadState(validatorPubkey string) *structures.ValidatorStorage {
 
-	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
