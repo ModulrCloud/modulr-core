@@ -175,6 +175,10 @@ func executeBlock(block *block_pack.Block) {
 
 	if epochHandlerRef.ExecutionData[block.Creator].Hash == block.PrevHash {
 
+		// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
+		// while keeping the read caches bounded via LRU.
+		utils.ResetExecTouchedSets()
+
 		currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
 
 		currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
@@ -231,7 +235,7 @@ func executeBlock(block *block_pack.Block) {
 		// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
 		sendFeesToValidatorAccount(block.Creator, blockFees)
 
-		for accountID, accountData := range epochHandlerRef.AccountsCache {
+		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
 
 			if accountDataBytes, err := json.Marshal(accountData); err == nil {
 
@@ -245,11 +249,12 @@ func executeBlock(block *block_pack.Block) {
 
 		}
 
-		for validatorPubkey, validatorStorage := range epochHandlerRef.ValidatorsStoragesCache {
+		for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				stateBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
+				// storageKey already includes DBKeyPrefixValidatorStorage.
+				stateBatch.Put([]byte(storageKey), dataBytes)
 
 			} else {
 
@@ -518,6 +523,9 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 	if nextEpochData != nil {
 
+		// Reset touched sets before executing delayed txs for next epoch so we only persist what they touch.
+		utils.ResetExecTouchedSets()
+
 		dbBatch := new(leveldb.Batch)
 
 		// Exec delayed txs here
@@ -565,7 +573,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		// Commit the changes of state using atomic batch. Because we modified state via delayed transactions when epoch finished
 
-		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache {
+		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
 
 			if accountDataBytes, err := json.Marshal(accountData); err == nil {
 
@@ -579,11 +587,12 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		}
 
-		for validatorPubkey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache {
+		for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				dbBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
+				// storageKey already includes DBKeyPrefixValidatorStorage.
+				dbBatch.Put([]byte(storageKey), dataBytes)
 
 			} else {
 

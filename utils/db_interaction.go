@@ -23,7 +23,15 @@ func OpenDb(dbName string) *leveldb.DB {
 
 func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]; ok {
+	// If account was already touched/modified in this block, return the in-memory object.
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.AccountsTouched[accountId]; ok && val != nil {
+		TouchExecAccountCache(accountId)
+		return val
+	}
+
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]; ok && val != nil {
+		TouchExecAccountCache(accountId)
+		MarkExecAccountTouched(accountId, val)
 		return val
 	}
 
@@ -31,9 +39,10 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
 	if err == leveldb.ErrNotFound {
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId] = &structures.Account{}
-
-		return handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]
+		acc := &structures.Account{}
+		PutExecAccountCache(accountId, acc)
+		MarkExecAccountTouched(accountId, acc)
+		return acc
 
 	}
 
@@ -45,9 +54,10 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
 		if parseErr == nil {
 
-			handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId] = &account
-
-			return handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]
+			acc := &account
+			PutExecAccountCache(accountId, acc)
+			MarkExecAccountTouched(accountId, acc)
+			return acc
 
 		}
 
@@ -62,6 +72,10 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 
 	// Fast path: cache hit under RLock (read-only).
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+		return val
+	}
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 		return val
@@ -84,12 +98,16 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Lock()
 	defer handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Unlock()
 
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
+		return val
+	}
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
 	}
 
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &validatorStorage
-	return &validatorStorage
+	vs := &validatorStorage
+	PutApprovementValidatorCache(validatorStorageKey, vs)
+	return vs
 }
 
 // GetValidatorFromApprovementThreadStateUnderLock reads/writes the AT validators cache.
@@ -98,7 +116,15 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	// Prefer touched value if already accessed/modified in the current AT batch.
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
+		TouchApprovementValidatorCache(validatorStorageKey)
+		return val
+	}
+
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+		TouchApprovementValidatorCache(validatorStorageKey)
+		MarkApprovementValidatorTouched(validatorStorageKey, val)
 		return val
 	}
 
@@ -116,9 +142,10 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 		return nil
 	}
 
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &validatorStorage
-
-	return &validatorStorage
+	vs := &validatorStorage
+	PutApprovementValidatorCache(validatorStorageKey, vs)
+	MarkApprovementValidatorTouched(validatorStorageKey, vs)
+	return vs
 
 }
 
@@ -126,7 +153,15 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	// Prefer touched value if already accessed/modified in the current block/batch.
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
+		TouchExecValidatorCache(validatorStorageKey)
+		return val
+	}
+
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+		TouchExecValidatorCache(validatorStorageKey)
+		MarkExecValidatorTouched(validatorStorageKey, val)
 		return val
 	}
 
@@ -144,8 +179,9 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 		return nil
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &validatorStorage
-
-	return &validatorStorage
+	vs := &validatorStorage
+	PutExecValidatorCache(validatorStorageKey, vs)
+	MarkExecValidatorTouched(validatorStorageKey, vs)
+	return vs
 
 }
