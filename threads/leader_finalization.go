@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -314,7 +315,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 	requestLeaderFinalizationFromPoD(epochHandler, leaderPubKey, cache)
 
 	request := websocket_pack.WsLeaderFinalizationProofRequest{
-		Route:                   "get_leader_finalization_proof",
+		Route:                   constants.WsRouteGetLeaderFinalizationProof,
 		EpochIndex:              epochHandler.Id,
 		IndexOfLeaderToFinalize: leaderIndex,
 		SkipData:                cache.SkipData,

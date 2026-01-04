@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
@@ -47,11 +48,11 @@ func TestCreateValidatorAddsNewValidatorToApprovementCache(t *testing.T) {
 		"wssValidatorURL": "ws://validator",
 	}
 
-	if !system_contracts.CreateValidator(delayedTx, "AT") {
+	if !system_contracts.CreateValidator(delayedTx, constants.ContextApprovementThread) {
 		t.Fatalf("expected CreateValidator to succeed")
 	}
 
-	key := "validator1_VALIDATOR_STORAGE"
+	key := constants.DBKeyPrefixValidatorStorage + "validator1"
 	stored := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key]
 	if stored == nil {
 		t.Fatalf("expected validator to be stored in cache")
@@ -71,7 +72,7 @@ func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T)
 		ValidatorUrl:    "old",
 		WssValidatorUrl: "old-wss",
 	}
-	key := "validator1_VALIDATOR_STORAGE"
+	key := constants.DBKeyPrefixValidatorStorage + "validator1"
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = existing
 
 	delayedTx := map[string]string{
@@ -81,7 +82,7 @@ func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T)
 		"wssValidatorURL": "ws://new",
 	}
 
-	if !system_contracts.UpdateValidator(delayedTx, "AT") {
+	if !system_contracts.UpdateValidator(delayedTx, constants.ContextApprovementThread) {
 		t.Fatalf("expected UpdateValidator to succeed")
 	}
 
@@ -105,7 +106,7 @@ func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
 		ValidatorUrl:    "http://validator",
 		WssValidatorUrl: "ws://validator",
 	}
-	key := "validator1_VALIDATOR_STORAGE"
+	key := constants.DBKeyPrefixValidatorStorage + "validator1"
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = validator
 
 	delayedTx := map[string]string{
@@ -114,7 +115,7 @@ func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
 		"amount":          "20",
 	}
 
-	if !system_contracts.Stake(delayedTx, "AT") {
+	if !system_contracts.Stake(delayedTx, constants.ContextApprovementThread) {
 		t.Fatalf("expected Stake to succeed")
 	}
 
@@ -144,7 +145,7 @@ func TestUnstakeRemovesValidatorFromRegistryWhenBelowRequiredStake(t *testing.T)
 		ValidatorUrl:    "http://validator",
 		WssValidatorUrl: "ws://validator",
 	}
-	key := "validator1_VALIDATOR_STORAGE"
+	key := constants.DBKeyPrefixValidatorStorage + "validator1"
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = validator
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = []string{"validator1"}
 
@@ -154,7 +155,7 @@ func TestUnstakeRemovesValidatorFromRegistryWhenBelowRequiredStake(t *testing.T)
 		"amount":          "30",
 	}
 
-	if !system_contracts.Unstake(delayedTx, "AT") {
+	if !system_contracts.Unstake(delayedTx, constants.ContextApprovementThread) {
 		t.Fatalf("expected Unstake to succeed")
 	}
 

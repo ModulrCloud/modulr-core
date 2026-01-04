@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/structures"
@@ -296,7 +297,7 @@ func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*w
 	// Establish new connections for each validator in the quorum
 	for _, validatorPubkey := range quorum {
 		// Fetch validator metadata
-		raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorPubkey+"_VALIDATOR_STORAGE"), nil)
+		raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), nil)
 		if err != nil {
 			continue
 		}
@@ -433,7 +434,7 @@ func (qw *QuorumWaiter) getWriteMu(id string) *sync.Mutex {
 func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
 
 	// Get validator metadata
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(pubkey+"_VALIDATOR_STORAGE"), nil)
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixValidatorStorage+pubkey), nil)
 	if err != nil {
 		return
 	}

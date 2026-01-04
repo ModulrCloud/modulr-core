@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -227,7 +228,7 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	txReceiptRawBytes, err := databases.STATE.Get([]byte("TX:"+hash), nil)
+	txReceiptRawBytes, err := databases.STATE.Get([]byte(constants.DBKeyPrefixTxReceipt+hash), nil)
 
 	if err != nil {
 		if err == leveldb.ErrNotFound {

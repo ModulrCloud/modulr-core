@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -57,7 +58,7 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 }
 
 func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.ValidatorStorage {
-	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	// Fast path: cache hit under RLock (read-only).
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
@@ -95,7 +96,7 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 // Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex in write mode (Lock).
 func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *structures.ValidatorStorage {
 
-	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
@@ -123,7 +124,7 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 
 func GetValidatorFromExecThreadState(validatorPubkey string) *structures.ValidatorStorage {
 
-	validatorStorageKey := validatorPubkey + "_VALIDATOR_STORAGE"
+	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val

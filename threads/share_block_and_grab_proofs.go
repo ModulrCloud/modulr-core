@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -177,7 +178,7 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 		// Build message - then parse to JSON
 
 		message := websocket_pack.WsFinalizationProofRequest{
-			Route:            "get_finalization_proof",
+			Route:            constants.WsRouteGetFinalizationProof,
 			Block:            blockToShare,
 			PreviousBlockAfp: afpPrev,
 		}

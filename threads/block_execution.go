@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -101,7 +102,7 @@ func BlockExecutionThread() {
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {
 
 	req := websocket_pack.WsBlockWithAfpRequest{
-		Route:   "get_block_with_afp",
+		Route:   constants.WsRouteGetBlockWithAfp,
 		BlockId: blockID,
 	}
 
@@ -134,7 +135,7 @@ func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpRespons
 func getAnchorBlockAndAfpFromAnchorsPoD(blockID string) *websocket_pack.WsAnchorBlockWithAfpResponse {
 
 	req := websocket_pack.WsAnchorBlockWithAfpRequest{
-		Route:   "get_anchor_block_with_afp",
+		Route:   constants.WsRouteGetAnchorBlockWithAfp,
 		BlockId: blockID,
 	}
 
@@ -207,7 +208,7 @@ func executeBlock(block *block_pack.Block) {
 
 			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success}); err == nil {
 
-				stateBatch.Put([]byte("TX:"+transaction.Hash()), locationBytes)
+				stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 
 			} else {
 
@@ -517,7 +518,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		for _, delayedTx := range nextEpochData.DelayedTransactions {
 
-			executeDelayedTransaction(delayedTx, "EXECUTION_THREAD")
+			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
 
 		}
 
