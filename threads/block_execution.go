@@ -249,7 +249,7 @@ func executeBlock(block *block_pack.Block) {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				stateBatch.Put([]byte(validatorPubkey), dataBytes)
+				stateBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
 
 			} else {
 
@@ -577,7 +577,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
 
-				dbBatch.Put([]byte(validatorPubkey), dataBytes)
+				dbBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), dataBytes)
 
 			} else {
 
