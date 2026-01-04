@@ -202,13 +202,17 @@ func EpochRotationThread() {
 
 						// Execute delayed transactions (in context of approvement thread)
 
+						// Reset write-back set for this epoch rotation. We will persist only validators touched
+						// by delayed tx execution, while keeping the read cache bounded via LRU.
+						utils.ResetApprovementTouchedSets()
+
 						for _, delayedTransaction := range delayedTransactionsOrderByPriority {
 
 							executeDelayedTransaction(delayedTransaction, constants.ContextApprovementThread)
 
 						}
 
-						for key, value := range handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache {
+						for key, value := range handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched {
 
 							valBytes, _ := json.Marshal(value)
 
@@ -274,8 +278,8 @@ func EpochRotationThread() {
 
 						atomicBatch.Put([]byte("AT"), jsonedHandler)
 
-						// Clean cache
-						clear(handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache)
+						// Clear write-back set (cache itself stays bounded via LRU).
+						utils.ResetApprovementTouchedSets()
 
 						// Clean in-memory helpful object
 

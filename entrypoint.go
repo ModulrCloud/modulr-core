@@ -306,8 +306,8 @@ func setGenesisToState() error {
 		// before the DB batch is committed.
 		key := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 		vsCopy := validatorStorage
-		handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = &vsCopy
-		handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = &vsCopy
+		utils.PutApprovementValidatorCache(key, &vsCopy)
+		utils.PutExecValidatorCache(key, &vsCopy)
 
 		validatorsRegistryForEpochHandler = append(validatorsRegistryForEpochHandler, validatorPubkey)
 

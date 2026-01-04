@@ -45,7 +45,7 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 			if existErr != nil {
 
-				handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &structures.ValidatorStorage{
+				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,
 					Percentage:  percentage,
 					TotalStaked: 0,
@@ -55,6 +55,9 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 					ValidatorUrl:    validatorURL,
 					WssValidatorUrl: wssValidatorURL,
 				}
+
+				utils.PutApprovementValidatorCache(validatorStorageKey, vs)
+				utils.MarkApprovementValidatorTouched(validatorStorageKey, vs)
 
 				return true
 
@@ -76,7 +79,7 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 			if existErr != nil {
 
-				handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey] = &structures.ValidatorStorage{
+				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,
 					Percentage:  percentage,
 					TotalStaked: 0,
@@ -86,6 +89,9 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 					ValidatorUrl:    validatorURL,
 					WssValidatorUrl: wssValidatorURL,
 				}
+
+				utils.PutExecValidatorCache(validatorStorageKey, vs)
+				utils.MarkExecValidatorTouched(validatorStorageKey, vs)
 
 				return true
 
@@ -126,7 +132,8 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 				validatorStorage.WssValidatorUrl = wssValidatorURL
 
-				handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageId] = validatorStorage
+				utils.MarkApprovementValidatorTouched(validatorStorageId, validatorStorage)
+				utils.TouchApprovementValidatorCache(validatorStorageId)
 
 				return true
 
@@ -148,7 +155,8 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 
 				validatorStorage.WssValidatorUrl = wssValidatorURL
 
-				handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageId] = validatorStorage
+				utils.MarkExecValidatorTouched(validatorStorageId, validatorStorage)
+				utils.TouchExecValidatorCache(validatorStorageId)
 
 				return true
 
