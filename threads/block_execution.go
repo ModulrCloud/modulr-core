@@ -317,6 +317,12 @@ func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) 
 
 func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]string, bool) {
 
+	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
+	// Account IDs must be canonical pubkeys.
+	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
+		return false, 0, nil, false
+	}
+
 	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
 
 		accountFrom := utils.GetAccountFromExecThreadState(tx.From)
