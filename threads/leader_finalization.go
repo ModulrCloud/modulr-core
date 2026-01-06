@@ -52,6 +52,21 @@ func LeaderFinalizationThread() {
 
 	for {
 
+		// If execution already advanced beyond our current ALFP progress,
+		// there is no point processing older epochs here. Fast-forward.
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+		if execEpochId > processingEpochIndex {
+			currentEpoch := processingEpochIndex
+			processingEpochIndex = execEpochId
+			persistFinalizationProgress(processingEpochIndex)
+			cleanupLeaderFinalizationState(currentEpoch)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		snapshot := getOrLoadEpochSnapshot(processingEpochIndex)
 
 		if snapshot == nil {
@@ -265,6 +280,16 @@ func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
 }
 
 func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHandler) bool {
+
+	// If execution already advanced beyond this epoch, it means ET has all the data it needs for it.
+	// No point to keep ALFP thread blocked on older epoch.
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	if execEpochId > epochHandler.Id {
+		return true
+	}
 
 	for _, leader := range epochHandler.LeadersSequence {
 		if !leaderHasAlfp(epochHandler.Id, leader) {
