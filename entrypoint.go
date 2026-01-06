@@ -64,6 +64,9 @@ func RunBlockchain() {
 	//✅ 9.Thread to asynchronously find and store first block data in each epoch
 	go threads.FirstBlockMonitorThread()
 
+	//✅ 10. Thread to independently scan anchor blocks and persist ALFP inclusion markers (delivery confirmation)
+	go threads.AlfpInclusionWatcherThread()
+
 	//___________________ RUN SERVERS - WEBSOCKET AND HTTP __________________
 
 	// Set the atomic flag to true

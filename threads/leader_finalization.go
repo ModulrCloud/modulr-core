@@ -227,7 +227,11 @@ func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParam
 
 	for idx := range epochHandler.LeadersSequence {
 
-		if leaderFinalizationConfirmedByAlignment(epochHandler.Id, epochHandler.LeadersSequence[idx]) {
+		leader := epochHandler.LeadersSequence[idx]
+		if utils.HasAnyAlfpIncluded(epochHandler.Id, leader) {
+			continue
+		}
+		if leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
 			continue
 		}
 
@@ -292,13 +296,18 @@ func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHand
 	}
 
 	for _, leader := range epochHandler.LeadersSequence {
-		if !leaderHasAlfp(epochHandler.Id, leader) {
-			return false
+		// Prefer durable inclusion markers from ALFP watcher (independent from execution epoch).
+		if utils.HasAnyAlfpIncluded(epochHandler.Id, leader) {
+			continue
 		}
 
-		if executionMetadataMatches(epochHandler.Id) && !leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
-			return false
+		// Fallback: if execution is on this epoch and alignment already confirmed, allow progress.
+		if executionMetadataMatches(epochHandler.Id) && leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
+			continue
 		}
+
+		// Otherwise, we still need to collect and/or deliver this leader's ALFP.
+		return false
 	}
 
 	return true
@@ -323,6 +332,9 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 	leaderPubKey := epochHandler.LeadersSequence[leaderIndex]
 	epochFullID := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
 
+	if utils.HasAnyAlfpIncluded(epochHandler.Id, leaderPubKey) {
+		return
+	}
 	if leaderFinalizationConfirmedByAlignment(epochHandler.Id, leaderPubKey) {
 		return
 	}
@@ -330,7 +342,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 	cache := ensureLeaderFinalizationCache(state, epochHandler.Id, leaderPubKey)
 
 	if leaderHasAlfp(epochHandler.Id, leaderPubKey) || state.Waiter == nil {
-		if aggregated := loadAggregatedLeaderFinalizationProof(epochHandler.Id, leaderPubKey); aggregated != nil && shouldBroadcastLeaderFinalization(cache) {
+		if aggregated := loadAggregatedLeaderFinalizationProof(epochHandler.Id, leaderPubKey); aggregated != nil && !utils.HasAnyAlfpIncluded(epochHandler.Id, leaderPubKey) && shouldBroadcastLeaderFinalization(cache) {
 			markLeaderFinalizationBroadcast(cache)
 			sendAggregatedLeaderFinalizationProofToAnchors(aggregated)
 		}
