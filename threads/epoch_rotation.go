@@ -236,13 +236,13 @@ func EpochRotationThread() {
 							Id:                 nextEpochId,
 							Hash:               nextEpochHash,
 							ValidatorsRegistry: epochHandlerRef.ValidatorsRegistry,
-							Quorum:             utils.GetCurrentEpochQuorum(epochHandlerRef, nextEpochQuorumSize, nextEpochHash),
+							Quorum:             utils.GetCurrentEpochQuorumUnderLock(epochHandlerRef, nextEpochQuorumSize, nextEpochHash),
 							LeadersSequence:    []string{},
 							StartTimestamp:     epochHandlerRef.StartTimestamp + uint64(handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.EpochDuration),
 							CurrentLeaderIndex: 0,
 						}
 
-						utils.SetLeadersSequence(&nextEpochHandler, nextEpochHash)
+						utils.SetLeadersSequenceUnderLock(&nextEpochHandler, nextEpochHash)
 
 						nextEpochDataHandler := structures.NextEpochDataHandler{
 							NextEpochHash:               nextEpochHash,
