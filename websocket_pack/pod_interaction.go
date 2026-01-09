@@ -2,9 +2,12 @@ package websocket_pack
 
 import (
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
+	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/utils"
 )
@@ -12,14 +15,30 @@ import (
 func SendBlockAndAfpToPoD(block block_pack.Block, afp structures.AggregatedFinalizationProof) {
 	req := WsBlockWithAfpStoreRequest{Route: constants.WsRouteAcceptBlockWithAfp, Block: block, Afp: afp}
 	if reqBytes, err := json.Marshal(req); err == nil {
-		_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		epochIndex := -1
+		parts := strings.Split(block.Epoch, "#")
+		if len(parts) > 0 {
+			last := parts[len(parts)-1]
+			if v, convErr := strconv.Atoi(last); convErr == nil {
+				epochIndex = v
+			}
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForCoreBlock(epochIndex, block.Creator, block.Index), reqBytes)
 	}
 }
 
 func SendAggregatedLeaderFinalizationProofToPoD(proof structures.AggregatedLeaderFinalizationProof) {
 	req := WsAggregatedLeaderFinalizationProofStoreRequest{Route: constants.WsRouteAcceptAggregatedLeaderFinalization, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
-		_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForALFP(proof.EpochIndex, proof.Leader), reqBytes)
 	}
 }
 

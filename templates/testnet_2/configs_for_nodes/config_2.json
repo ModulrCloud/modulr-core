@@ -9,7 +9,10 @@
     "hello": "world"
   },
 
+  "DISABLE_POD_OUTBOX": false,
+
   "TXS_MEMPOOL_SIZE": 300000,
+  "BLOCK_TO_BLOCK_CACHE_SIZE": 100000,
 
   "BOOTSTRAP_NODES": [
     "http://localhost:7332",
