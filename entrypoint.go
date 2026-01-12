@@ -61,11 +61,16 @@ func RunBlockchain() {
 	//✅ 8.Thread to get consensus about the last block by each leader, grab proofs and send to anchors
 	go threads.LeaderFinalizationThread()
 
-	//✅ 9.Thread to asynchronously find and store first block data in each epoch
+	//✅ 9.Thread to independently scan anchor blocks and persist ALFP inclusion markers (delivery confirmation)
+	go threads.AlfpInclusionWatcherThread()
+
+	//✅ 10.Thread to asynchronously find and store first block data in each epoch
 	go threads.FirstBlockMonitorThread()
 
-	//✅ 10. Thread to independently scan anchor blocks and persist ALFP inclusion markers (delivery confirmation)
-	go threads.AlfpInclusionWatcherThread()
+	//✅ 11.PoD outbox: retry store messages to PoD until acknowledged (optional)
+	if !globals.CONFIGURATION.DisablePoDOutbox {
+		go threads.PoDOutboxThread()
+	}
 
 	//___________________ RUN SERVERS - WEBSOCKET AND HTTP __________________
 
