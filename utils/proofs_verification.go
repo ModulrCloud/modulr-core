@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
@@ -201,6 +202,70 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 	}()
 
 	// Return first valid AFP
+	for res := range resultChan {
+		if res != nil {
+			return res
+		}
+	}
+
+	return nil
+}
+
+// GetVerifiedAnchorsAggregatedFinalizationProofByBlockId fetches an aggregated finalization proof for an anchor block
+// from anchors (HTTP) and returns the first proof that verifies against the anchors quorum.
+//
+// This is intended as a fallback when Anchors-PoD hasn't received/stored AFP yet.
+func GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
+	if blockID == "" || epochHandler == nil {
+		return nil
+	}
+
+	// Use a short timeout to avoid stalling threads when some anchors are down.
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	resultChan := make(chan *structures.AggregatedFinalizationProof, len(globals.ANCHORS))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, anchor := range globals.ANCHORS {
+		if anchor.AnchorUrl == "" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(endpoint string) {
+			defer wg.Done()
+
+			endpoint = strings.TrimRight(endpoint, "/")
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/aggregated_finalization_proof/"+blockID, nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			var afp structures.AggregatedFinalizationProof
+			if json.NewDecoder(resp.Body).Decode(&afp) == nil && VerifyAggregatedFinalizationProofForAnchorBlock(&afp, epochHandler) {
+				select {
+				case resultChan <- &afp:
+					cancel()
+				default:
+				}
+			}
+		}(anchor.AnchorUrl)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
 	for res := range resultChan {
 		if res != nil {
 			return res

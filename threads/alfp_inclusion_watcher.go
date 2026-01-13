@@ -189,7 +189,7 @@ func AlfpInclusionWatcherThread() {
 		anchor := globals.ANCHORS[anchorIndex]
 		blockID := fmt.Sprintf("%d:%s:%d", epochId, anchor.Pubkey, currentExec)
 
-		response := getAnchorBlockAndAfpFromAnchorsPoD(blockID)
+		response := getAnchorBlockAndAfpFromAnchorsPoD(blockID, epochHandler)
 		if response == nil || response.Block == nil {
 			time.Sleep(200 * time.Millisecond)
 			continue

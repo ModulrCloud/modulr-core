@@ -212,7 +212,7 @@ func findEarliestAnchorRotationProof(currentAnchor, foundInAnchorIndex, blockLim
 
 		for blockIndex := 0; blockIndex < searchLimit; blockIndex++ {
 			blockID := fmt.Sprintf("%d:%s:%d", epochHandler.Id, anchor.Pubkey, blockIndex)
-			response := getAnchorBlockAndAfpFromAnchorsPoD(blockID)
+			response := getAnchorBlockAndAfpFromAnchorsPoD(blockID, epochHandler)
 
 			if response == nil || response.Block == nil {
 				return structures.ExecutionStats{}, false

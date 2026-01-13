@@ -52,7 +52,7 @@ func SequenceAlignmentThread() {
 		anchorData := globals.ANCHORS[currentAnchorIndex]
 		blockId := strconv.Itoa(epochSnapshot.Id) + ":" + anchorData.Pubkey + ":" + strconv.Itoa(currentAnchorBlockPointerObserved+1)
 
-		response := getAnchorBlockAndAfpFromAnchorsPoD(blockId)
+		response := getAnchorBlockAndAfpFromAnchorsPoD(blockId, &epochSnapshot)
 		if response == nil || response.Block == nil {
 			utils.LogWithTime(
 				fmt.Sprintf("Sequence alignment: no anchor block available for %s", blockId),

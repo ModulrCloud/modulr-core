@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
@@ -71,13 +72,26 @@ func BlockExecutionThread() {
 			}
 
 			// Decide whether we can execute this block.
-			shouldExecWithoutAfp := infoAboutLastBlockExists &&
+			canExecWithoutAfp := infoAboutLastBlockExists &&
 				execStatsOfLeader.Index+1 == infoAboutLastBlockByThisLeader.Index &&
 				response.Block.GetHash() == infoAboutLastBlockByThisLeader.Hash
 
-			shouldExecWithAfp := response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
+			// Only fetch/verify AFP if we can't safely execute without it.
+			if !canExecWithoutAfp && response.Afp == nil {
+				if nextID := nextBlockId(blockId); nextID != "" {
+					if afp := utils.GetVerifiedAggregatedFinalizationProofByBlockId(nextID, &epochSnapshot); afp != nil {
+						response.Afp = afp
+					}
+				}
+			}
 
-			if !shouldExecWithoutAfp && !shouldExecWithAfp {
+			// Verify AFP only if we can't safely execute without it (AFP verification is relatively expensive).
+			mustExecWithAfp := false
+			if !canExecWithoutAfp {
+				mustExecWithAfp = response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
+			}
+
+			if !canExecWithoutAfp && !mustExecWithAfp {
 				break
 			}
 
@@ -132,7 +146,7 @@ func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpRespons
 
 }
 
-func getAnchorBlockAndAfpFromAnchorsPoD(blockID string) *websocket_pack.WsAnchorBlockWithAfpResponse {
+func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures.EpochDataHandler) *websocket_pack.WsAnchorBlockWithAfpResponse {
 
 	req := websocket_pack.WsAnchorBlockWithAfpRequest{
 		Route:   constants.WsRouteGetAnchorBlockWithAfp,
@@ -153,6 +167,16 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string) *websocket_pack.WsAnchor
 
 				}
 
+				// Fallback: if anchors PoD hasn't received/stored AFP yet, fetch a verified AFP for (blockID+1)
+				// directly from anchors via HTTP.
+				if resp.Afp == nil && epochHandler != nil {
+					if nextID := nextBlockId(blockID); nextID != "" {
+						if afp := utils.GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(nextID, epochHandler); afp != nil {
+							resp.Afp = afp
+						}
+					}
+				}
+
 				return &resp
 
 			}
@@ -161,6 +185,19 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string) *websocket_pack.WsAnchor
 
 	return nil
 
+}
+
+func nextBlockId(blockId string) string {
+	parts := strings.Split(blockId, ":")
+	if len(parts) != 3 {
+		return ""
+	}
+	idx, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return ""
+	}
+	parts[2] = strconv.Itoa(idx + 1)
+	return strings.Join(parts, ":")
 }
 
 func executeBlock(block *block_pack.Block) {
