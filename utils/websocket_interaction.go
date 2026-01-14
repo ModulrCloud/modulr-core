@@ -60,7 +60,9 @@ var (
 )
 
 type WebsocketGuards struct {
-	ConnMu  *sync.RWMutex
+	ConnMu *sync.RWMutex
+	// WriteMu keys are *websocket.Conn and values are *sync.Mutex.
+	// This guarantees a single writer per actual websocket connection, regardless of id/pubkey mapping.
 	WriteMu *sync.Map
 }
 
@@ -287,10 +289,10 @@ func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*w
 	for id, conn := range wsConnMap {
 		if conn != nil {
 			_ = conn.Close()
+			// Drop per-connection write mutex to prevent unbounded growth.
+			guards.WriteMu.Delete(conn)
 		}
 		delete(wsConnMap, id)
-		// Also drop per-connection write mutex to prevent unbounded growth when pubkeys change.
-		guards.WriteMu.Delete(id)
 	}
 	guards.ConnMu.Unlock()
 
@@ -422,12 +424,15 @@ func (qw *QuorumWaiter) SendAndWait(
 	}
 }
 
-func (qw *QuorumWaiter) getWriteMu(id string) *sync.Mutex {
-	if m, ok := qw.guards.WriteMu.Load(id); ok {
+func (qw *QuorumWaiter) getWriteMuConn(c *websocket.Conn) *sync.Mutex {
+	if c == nil {
+		return &sync.Mutex{}
+	}
+	if m, ok := qw.guards.WriteMu.Load(c); ok {
 		return m.(*sync.Mutex)
 	}
 	m := &sync.Mutex{}
-	actual, _ := qw.guards.WriteMu.LoadOrStore(id, m)
+	actual, _ := qw.guards.WriteMu.LoadOrStore(c, m)
 	return actual.(*sync.Mutex)
 }
 
@@ -451,9 +456,11 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 
 	// Store back into the shared map under lock
 	guards.ConnMu.Lock()
-
+	if old := wsConnMap[pubkey]; old != nil {
+		_ = old.Close()
+		guards.WriteMu.Delete(old)
+	}
 	wsConnMap[pubkey] = conn
-
 	guards.ConnMu.Unlock()
 
 }
@@ -521,7 +528,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			// Single-request guard for this websocket.
 			// IMPORTANT: gorilla/websocket requires a single reader AND a single writer per connection.
 			// We therefore guard the whole request (WriteMessage+ReadMessage), not only the write.
-			wmu := qw.getWriteMu(id)
+			wmu := qw.getWriteMuConn(c)
 			wmu.Lock()
 			_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 			err := c.WriteMessage(websocket.TextMessage, msg)
@@ -536,7 +543,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
-				qw.guards.WriteMu.Delete(id)
+				qw.guards.WriteMu.Delete(c)
 				return
 			}
 
@@ -554,7 +561,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
-				qw.guards.WriteMu.Delete(id)
+				qw.guards.WriteMu.Delete(c)
 				return
 			}
 
