@@ -191,6 +191,12 @@ func AlfpInclusionWatcherThread() {
 
 		response := getAnchorBlockAndAfpFromAnchorsPoD(blockID, epochHandler)
 		if response == nil || response.Block == nil {
+			utils.LogWithTimeThrottled(
+				"alfp_inclusion_watcher:no_anchor_block:"+blockID,
+				2*time.Second,
+				fmt.Sprintf("ALFP inclusion watcher: can't fetch anchor block %s (Anchors-PoD/HTTP)", blockID),
+				utils.YELLOW_COLOR,
+			)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

@@ -215,6 +215,12 @@ func findEarliestAnchorRotationProof(currentAnchor, foundInAnchorIndex, blockLim
 			response := getAnchorBlockAndAfpFromAnchorsPoD(blockID, epochHandler)
 
 			if response == nil || response.Block == nil {
+				utils.LogWithTimeThrottled(
+					"anchor_rotation_monitor:no_anchor_block:"+blockID,
+					2*time.Second,
+					fmt.Sprintf("Anchor rotation monitor: can't fetch anchor block %s (Anchors-PoD/HTTP)", blockID),
+					utils.YELLOW_COLOR,
+				)
 				return structures.ExecutionStats{}, false
 			}
 

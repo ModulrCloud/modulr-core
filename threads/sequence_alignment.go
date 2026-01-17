@@ -3,6 +3,7 @@ package threads
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/anchors_pack"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -54,8 +55,10 @@ func SequenceAlignmentThread() {
 
 		response := getAnchorBlockAndAfpFromAnchorsPoD(blockId, &epochSnapshot)
 		if response == nil || response.Block == nil {
-			utils.LogWithTime(
-				fmt.Sprintf("Sequence alignment: no anchor block available for %s", blockId),
+			utils.LogWithTimeThrottled(
+				"sequence_alignment:no_anchor_block:"+blockId,
+				2*time.Second,
+				fmt.Sprintf("Sequence alignment: can't fetch anchor block %s (Anchors-PoD/HTTP)", blockId),
 				utils.YELLOW_COLOR,
 			)
 			continue

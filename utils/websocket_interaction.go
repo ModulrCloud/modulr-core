@@ -84,6 +84,12 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 			conn, err := openWebsocketConnectionWithPoD()
 
 			if err != nil {
+				LogWithTimeThrottled(
+					"POD:WS:DIAL",
+					2*time.Second,
+					fmt.Sprintf("PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+					YELLOW_COLOR,
+				)
 
 				POD_ACCESS_MUTEX.Unlock()
 
@@ -108,6 +114,12 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"POD:WS:WRITE",
+				2*time.Second,
+				fmt.Sprintf("PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			POD_READ_WRITE_MUTEX.Unlock()
 			POD_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION == c {
@@ -125,6 +137,12 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 		POD_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"POD:WS:READ",
+				2*time.Second,
+				fmt.Sprintf("PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			POD_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
@@ -155,6 +173,12 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 			conn, err := openWebsocketConnectionWithPoD()
 
 			if err != nil {
+				LogWithTimeThrottled(
+					"POD:BULK:WS:DIAL",
+					2*time.Second,
+					fmt.Sprintf("PoD bulk websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+					YELLOW_COLOR,
+				)
 
 				POD_BULK_ACCESS_MUTEX.Unlock()
 
@@ -179,6 +203,12 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"POD:BULK:WS:WRITE",
+				2*time.Second,
+				fmt.Sprintf("PoD bulk websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			POD_BULK_READ_WRITE_MUTEX.Unlock()
 			POD_BULK_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION_BULK == c {
@@ -196,6 +226,12 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 		POD_BULK_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"POD:BULK:WS:READ",
+				2*time.Second,
+				fmt.Sprintf("PoD bulk websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			POD_BULK_ACCESS_MUTEX.Lock()
 			if POD_WEBSOCKET_CONNECTION_BULK == c {
 				_ = c.Close()
@@ -209,6 +245,12 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 		return resp, nil
 	}
 
+	LogWithTimeThrottled(
+		"POD:BULK:WS:FAILED",
+		2*time.Second,
+		fmt.Sprintf("PoD bulk websocket request failed after %d attempts", MAX_RETRIES),
+		RED_COLOR,
+	)
 	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
 
 }
@@ -224,6 +266,12 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 			conn, err := openWebsocketConnectionWithAnchorsPoD()
 
 			if err != nil {
+				LogWithTimeThrottled(
+					"ANCHORS_POD:WS:DIAL",
+					2*time.Second,
+					fmt.Sprintf("Anchors-PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+					YELLOW_COLOR,
+				)
 
 				ANCHORS_POD_ACCESS_MUTEX.Unlock()
 
@@ -248,6 +296,12 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 		err := c.WriteMessage(websocket.TextMessage, msg)
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"ANCHORS_POD:WS:WRITE",
+				2*time.Second,
+				fmt.Sprintf("Anchors-PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
 			ANCHORS_POD_ACCESS_MUTEX.Lock()
 			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
@@ -265,6 +319,12 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 		ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
 
 		if err != nil {
+			LogWithTimeThrottled(
+				"ANCHORS_POD:WS:READ",
+				2*time.Second,
+				fmt.Sprintf("Anchors-PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
 			ANCHORS_POD_ACCESS_MUTEX.Lock()
 			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
 				_ = c.Close()
@@ -279,6 +339,12 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 
 	}
 
+	LogWithTimeThrottled(
+		"ANCHORS_POD:WS:FAILED",
+		2*time.Second,
+		fmt.Sprintf("Anchors-PoD websocket request failed after %d attempts", MAX_RETRIES),
+		RED_COLOR,
+	)
 	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
 
 }
