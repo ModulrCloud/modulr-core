@@ -203,6 +203,12 @@ func AlfpInclusionWatcherThread() {
 		block := response.Block
 
 		if block.Creator != anchor.Pubkey || block.Index != currentExec || !block.VerifySignature() {
+			utils.LogWithTimeThrottled(
+				fmt.Sprintf("alfp_inclusion_watcher:invalid_anchor_block:%s", blockID),
+				2*time.Second,
+				fmt.Sprintf("ALFP inclusion watcher: invalid anchor block %s (creator/index/sig mismatch)", blockID),
+				utils.YELLOW_COLOR,
+			)
 			// Don't advance on invalid data; wait and retry.
 			time.Sleep(200 * time.Millisecond)
 			continue

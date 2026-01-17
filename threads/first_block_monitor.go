@@ -45,6 +45,13 @@ func FirstBlockMonitorThread() {
 			if err := storeFirstBlockData(epochUnderObservation, firstBlockData); err != nil {
 				utils.LogWithTime(fmt.Sprintf("failed to store first block data for epoch %d: %v", epochUnderObservation, err), utils.RED_COLOR)
 			}
+		} else {
+			utils.LogWithTimeThrottled(
+				fmt.Sprintf("first_block_monitor:missing:%d", epochUnderObservation),
+				5*time.Second,
+				fmt.Sprintf("FirstBlockMonitor: can't determine first block for epoch %d yet (alignment/DB/network)", epochUnderObservation),
+				utils.YELLOW_COLOR,
+			)
 		}
 
 		time.Sleep(200 * time.Millisecond)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,8 +40,11 @@ type AnchorsPodMissState struct {
 	LastSeen     time.Time
 }
 
-var ANCHORS_POD_MISSES_MUTEX sync.Mutex
-var ANCHORS_POD_MISSES = make(map[string]*AnchorsPodMissState)
+var (
+	ANCHORS_POD_MISSES_MUTEX  sync.Mutex
+	ANCHORS_POD_MISSES        = make(map[string]*AnchorsPodMissState)
+	ANCHORS_HTTP_FALLBACK_RNG = rand.New(rand.NewSource(time.Now().UnixNano()))
+)
 
 func BlockExecutionThread() {
 
@@ -402,17 +406,28 @@ func getAnchorBlockFromAnchorsNetworkById(blockID string) *anchors_pack.AnchorBl
 
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	resultChan := make(chan *anchors_pack.AnchorBlock, len(globals.ANCHORS))
+	// Query a randomized list of anchors. The block may be replicated on peers even if its creator is down.
+	anchors := make([]structures.Anchor, 0, len(globals.ANCHORS))
+	for _, a := range globals.ANCHORS {
+		if a.AnchorUrl == "" {
+			continue
+		}
+		anchors = append(anchors, a)
+	}
+	if len(anchors) == 0 {
+		return nil
+	}
+	ANCHORS_POD_MISSES_MUTEX.Lock()
+	ANCHORS_HTTP_FALLBACK_RNG.Shuffle(len(anchors), func(i, j int) { anchors[i], anchors[j] = anchors[j], anchors[i] })
+	ANCHORS_POD_MISSES_MUTEX.Unlock()
+
+	resultChan := make(chan *anchors_pack.AnchorBlock, len(anchors))
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	for _, anchor := range globals.ANCHORS {
-		if anchor.AnchorUrl == "" {
-			continue
-		}
-
+	for _, anchor := range anchors {
 		wg.Add(1)
 		go func(endpoint string) {
 			defer wg.Done()
@@ -957,5 +972,13 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		}
 
 	}
+	// If we can't start the next epoch, execution can look "stuck" even if other threads progress.
+	// Log it (throttled) to surface missing/late epoch data.
+	utils.LogWithTimeThrottled(
+		fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
+		5*time.Second,
+		fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
+		utils.YELLOW_COLOR,
+	)
 
 }

@@ -227,6 +227,12 @@ func findEarliestAnchorRotationProof(currentAnchor, foundInAnchorIndex, blockLim
 			block := response.Block
 
 			if block.Creator != anchor.Pubkey || block.Index != blockIndex || !block.VerifySignature() {
+				utils.LogWithTimeThrottled(
+					fmt.Sprintf("anchor_rotation_monitor:invalid_anchor_block:%s", blockID),
+					2*time.Second,
+					fmt.Sprintf("Anchor rotation monitor: invalid anchor block %s (creator/index/sig mismatch)", blockID),
+					utils.YELLOW_COLOR,
+				)
 				return structures.ExecutionStats{}, false
 			}
 

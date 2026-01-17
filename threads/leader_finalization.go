@@ -368,6 +368,12 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 
 	responses, ok := state.Waiter.SendAndWait(ctx, message, epochHandler.Quorum, state.WsConns, majority)
 	if !ok {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("alfp:majority_failed:%d:%s", epochHandler.Id, leaderPubKey),
+			5*time.Second,
+			fmt.Sprintf("ALFP: failed to collect majority (epoch=%d leader=%s quorum=%d majority=%d)", epochHandler.Id, leaderPubKey, len(epochHandler.Quorum), majority),
+			utils.YELLOW_COLOR,
+		)
 		return
 	}
 
