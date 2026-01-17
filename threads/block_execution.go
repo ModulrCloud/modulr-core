@@ -1,16 +1,21 @@
 package threads
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/anchors_pack"
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
+	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/system_contracts"
@@ -20,7 +25,28 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
+const (
+	// How many consecutive PoD misses for the same blockID before we start querying the network (quorum/anchors) directly.
+	POD_MISSES_BEFORE_NETWORK_FALLBACK = 3
+
+	// Prevent spamming anchors with HTTP fallbacks if multiple threads call into anchors-PoD getter concurrently.
+	ANCHORS_FALLBACK_MIN_INTERVAL = 500 * time.Millisecond
+)
+
+type AnchorsPodMissState struct {
+	Misses       int
+	LastFallback time.Time
+	LastSeen     time.Time
+}
+
+var ANCHORS_POD_MISSES_MUTEX sync.Mutex
+var ANCHORS_POD_MISSES = make(map[string]*AnchorsPodMissState)
+
 func BlockExecutionThread() {
+
+	// Track PoD misses per blockID so we only fall back to querying the network after several failures.
+	podMisses := make(map[string]int)
+	lastEpochId := -1
 
 	for {
 
@@ -35,6 +61,11 @@ func BlockExecutionThread() {
 		currentEpochAlignmentData := &epochHandlerRef.SequenceAlignmentData
 
 		epochSnapshot := epochHandlerRef.EpochDataHandler
+		if epochSnapshot.Id != lastEpochId {
+			// New epoch: drop stale miss counters (safety against growth across epochs).
+			podMisses = make(map[string]int)
+			lastEpochId = epochSnapshot.Id
+		}
 
 		leaderIndexToExec := currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom
 		if leaderIndexToExec < 0 || leaderIndexToExec >= len(epochSnapshot.LeadersSequence) {
@@ -68,7 +99,50 @@ func BlockExecutionThread() {
 			// Network I/O (PoD) - no locks held.
 			response := getBlockAndAfpFromPoD(blockId)
 			if response == nil || response.Block == nil {
-				break
+				podMisses[blockId]++
+
+				// Safety valve: avoid unbounded growth if keys become highly dynamic.
+				if len(podMisses) > 5000 {
+					podMisses = make(map[string]int)
+				}
+
+				utils.LogWithTimeThrottled(
+					"exec:pod_block_miss:"+blockId,
+					2*time.Second,
+					fmt.Sprintf("EXECUTION: can't fetch block %s from PoD (miss %d/%d)", blockId, podMisses[blockId], POD_MISSES_BEFORE_NETWORK_FALLBACK),
+					utils.YELLOW_COLOR,
+				)
+
+				// After a few PoD misses, try to fetch the block from quorum/network directly (HTTP).
+				if podMisses[blockId] >= POD_MISSES_BEFORE_NETWORK_FALLBACK {
+					utils.LogWithTimeThrottled(
+						"exec:pod_block_fallback:"+blockId,
+						5*time.Second,
+						fmt.Sprintf("EXECUTION: falling back to quorum HTTP for block %s", blockId),
+						utils.DEEP_GRAY,
+					)
+
+					if fallbackBlock := getBlockFromNetworkById(blockId, &epochSnapshot); fallbackBlock != nil {
+						response = &websocket_pack.WsBlockWithAfpResponse{Block: fallbackBlock}
+						// success via fallback - reset counter
+						delete(podMisses, blockId)
+
+						utils.LogWithTimeThrottled(
+							"exec:pod_block_fallback_ok:"+blockId,
+							5*time.Second,
+							fmt.Sprintf("EXECUTION: fetched block %s via quorum HTTP fallback", blockId),
+							utils.CYAN_COLOR,
+						)
+					}
+				}
+
+				// Still nothing - stop this execution cycle and retry later.
+				if response == nil || response.Block == nil {
+					break
+				}
+			} else {
+				// Got data from PoD - reset counter.
+				delete(podMisses, blockId)
 			}
 
 			// Decide whether we can execute this block.
@@ -81,6 +155,13 @@ func BlockExecutionThread() {
 				if nextID := nextBlockId(blockId); nextID != "" {
 					if afp := utils.GetVerifiedAggregatedFinalizationProofByBlockId(nextID, &epochSnapshot); afp != nil {
 						response.Afp = afp
+					} else {
+						utils.LogWithTimeThrottled(
+							"exec:afp_missing:"+blockId,
+							2*time.Second,
+							fmt.Sprintf("EXECUTION: missing AFP for block %s (attempted quorum AFP for %s)", blockId, nextID),
+							utils.YELLOW_COLOR,
+						)
 					}
 				}
 			}
@@ -89,6 +170,14 @@ func BlockExecutionThread() {
 			mustExecWithAfp := false
 			if !canExecWithoutAfp {
 				mustExecWithAfp = response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
+				if response.Afp != nil && !mustExecWithAfp {
+					utils.LogWithTimeThrottled(
+						"exec:afp_invalid:"+blockId,
+						2*time.Second,
+						fmt.Sprintf("EXECUTION: AFP verification failed for block %s", blockId),
+						utils.YELLOW_COLOR,
+					)
+				}
 			}
 
 			if !canExecWithoutAfp && !mustExecWithAfp {
@@ -161,30 +250,215 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures
 
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
 
-				if resp.Block == nil {
+				if resp.Block != nil {
+					// Reset miss state on success from PoD.
+					resetAnchorsPodMisses(blockID)
 
-					return nil
-
-				}
-
-				// Fallback: if anchors PoD hasn't received/stored AFP yet, fetch a verified AFP for (blockID+1)
-				// directly from anchors via HTTP.
-				if resp.Afp == nil && epochHandler != nil {
-					if nextID := nextBlockId(blockID); nextID != "" {
-						if afp := utils.GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(nextID, epochHandler); afp != nil {
-							resp.Afp = afp
+					// Fallback: if anchors PoD hasn't received/stored AFP yet, fetch a verified AFP for (blockID+1)
+					// directly from anchors via HTTP.
+					if resp.Afp == nil && epochHandler != nil {
+						if nextID := nextBlockId(blockID); nextID != "" {
+							if afp := utils.GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(nextID, epochHandler); afp != nil {
+								resp.Afp = afp
+							}
 						}
 					}
-				}
 
-				return &resp
+					return &resp
+				}
 
 			}
 		}
 	}
 
+	// PoD failed / didn't have the block - maybe fall back to anchors directly after a few misses.
+	if shouldFallbackToAnchorsNetwork(blockID) {
+		utils.LogWithTimeThrottled(
+			"anchors:pod_block_fallback:"+blockID,
+			5*time.Second,
+			fmt.Sprintf("ANCHORS: can't fetch anchor block %s from Anchors-PoD, falling back to anchors HTTP", blockID),
+			utils.YELLOW_COLOR,
+		)
+
+		if b := getAnchorBlockFromAnchorsNetworkById(blockID); b != nil {
+			resetAnchorsPodMisses(blockID)
+
+			resp := websocket_pack.WsAnchorBlockWithAfpResponse{Block: b}
+
+			// Keep the existing AFP fallback behavior, even when the block came from anchors directly.
+			if resp.Afp == nil && epochHandler != nil {
+				if nextID := nextBlockId(blockID); nextID != "" {
+					if afp := utils.GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(nextID, epochHandler); afp != nil {
+						resp.Afp = afp
+					}
+				}
+			}
+
+			return &resp
+		}
+
+		utils.LogWithTimeThrottled(
+			"anchors:pod_block_fallback_fail:"+blockID,
+			5*time.Second,
+			fmt.Sprintf("ANCHORS: anchors HTTP fallback failed for anchor block %s", blockID),
+			utils.YELLOW_COLOR,
+		)
+	}
+
 	return nil
 
+}
+
+func parseBlockId(blockId string) (epochIndex int, creator string, index int, ok bool) {
+	parts := strings.Split(blockId, ":")
+	if len(parts) != 3 {
+		return 0, "", 0, false
+	}
+	ei, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, "", 0, false
+	}
+	idx, err := strconv.Atoi(parts[2])
+	if err != nil {
+		return 0, "", 0, false
+	}
+	return ei, parts[1], idx, true
+}
+
+func getBlockFromNetworkById(blockID string, epochHandler *structures.EpochDataHandler) *block_pack.Block {
+	epochIndex, creator, index, ok := parseBlockId(blockID)
+	if !ok || epochHandler == nil {
+		return nil
+	}
+	if index < 0 {
+		return nil
+	}
+
+	b := block_pack.GetBlock(epochIndex, creator, uint(index), epochHandler)
+	if b == nil {
+		return nil
+	}
+	// Basic sanity checks: ensure the fetched block matches the requested ID and is signed by its creator.
+	if b.Creator != creator || b.Index != index || !b.VerifySignature() {
+		return nil
+	}
+	return b
+}
+
+func shouldFallbackToAnchorsNetwork(blockID string) bool {
+	now := time.Now()
+
+	ANCHORS_POD_MISSES_MUTEX.Lock()
+	defer ANCHORS_POD_MISSES_MUTEX.Unlock()
+
+	// TTL cleanup to avoid unbounded growth if blockIDs become highly dynamic.
+	if len(ANCHORS_POD_MISSES) > 5000 {
+		for k, v := range ANCHORS_POD_MISSES {
+			if v == nil {
+				delete(ANCHORS_POD_MISSES, k)
+				continue
+			}
+			if !v.LastSeen.IsZero() && now.Sub(v.LastSeen) > 2*time.Minute {
+				delete(ANCHORS_POD_MISSES, k)
+			}
+		}
+		// Absolute safety valve.
+		if len(ANCHORS_POD_MISSES) > 10000 {
+			ANCHORS_POD_MISSES = make(map[string]*AnchorsPodMissState)
+		}
+	}
+
+	st, ok := ANCHORS_POD_MISSES[blockID]
+	if !ok {
+		st = &AnchorsPodMissState{}
+		ANCHORS_POD_MISSES[blockID] = st
+	}
+
+	st.LastSeen = now
+	st.Misses++
+	if st.Misses < POD_MISSES_BEFORE_NETWORK_FALLBACK {
+		return false
+	}
+
+	if !st.LastFallback.IsZero() && now.Sub(st.LastFallback) < ANCHORS_FALLBACK_MIN_INTERVAL {
+		return false
+	}
+
+	st.LastFallback = now
+	return true
+}
+
+func resetAnchorsPodMisses(blockID string) {
+	ANCHORS_POD_MISSES_MUTEX.Lock()
+	delete(ANCHORS_POD_MISSES, blockID)
+	ANCHORS_POD_MISSES_MUTEX.Unlock()
+}
+
+func getAnchorBlockFromAnchorsNetworkById(blockID string) *anchors_pack.AnchorBlock {
+	_, creator, index, ok := parseBlockId(blockID)
+	if !ok || index < 0 {
+		return nil
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	resultChan := make(chan *anchors_pack.AnchorBlock, len(globals.ANCHORS))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for _, anchor := range globals.ANCHORS {
+		if anchor.AnchorUrl == "" {
+			continue
+		}
+
+		wg.Add(1)
+		go func(endpoint string) {
+			defer wg.Done()
+
+			endpoint = strings.TrimRight(endpoint, "/")
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/block/"+blockID, nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := client.Do(req)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				return
+			}
+			defer resp.Body.Close()
+
+			var b anchors_pack.AnchorBlock
+			if json.NewDecoder(resp.Body).Decode(&b) != nil {
+				return
+			}
+
+			// Sanity check: match requested ID and signature.
+			if b.Creator != creator || b.Index != index || !b.VerifySignature() {
+				return
+			}
+
+			select {
+			case resultChan <- &b:
+				cancel()
+			default:
+			}
+		}(anchor.AnchorUrl)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	for res := range resultChan {
+		if res != nil {
+			return res
+		}
+	}
+
+	return nil
 }
 
 func nextBlockId(blockId string) string {
@@ -200,6 +474,13 @@ func nextBlockId(blockId string) string {
 	return strings.Join(parts, ":")
 }
 
+func shortHash(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
+}
+
 func executeBlock(block *block_pack.Block) {
 
 	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
@@ -210,15 +491,25 @@ func executeBlock(block *block_pack.Block) {
 
 	}
 
-	if epochHandlerRef.ExecutionData[block.Creator].Hash == block.PrevHash {
+	currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
+	currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
+
+	expectedPrevHash := epochHandlerRef.ExecutionData[block.Creator].Hash
+	if expectedPrevHash != block.PrevHash {
+		utils.LogWithTimeThrottled(
+			"exec:prev_hash_mismatch:"+currentBlockId,
+			2*time.Second,
+			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, shortHash(expectedPrevHash), shortHash(block.PrevHash)),
+			utils.YELLOW_COLOR,
+		)
+		return
+	}
+
+	if expectedPrevHash == block.PrevHash {
 
 		// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
 		// while keeping the read caches bounded via LRU.
 		utils.ResetExecTouchedSets()
-
-		currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
-
-		currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
 
 		// To change the state atomically - prepare the atomic batch
 		stateBatch := new(leveldb.Batch)
