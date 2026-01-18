@@ -15,10 +15,10 @@ var APPROVEMENT_THREAD_METADATA = struct {
 	Handler structures.ApprovementThreadMetadataHandler
 
 	// Bounded cache bookkeeping for ValidatorsStoragesCache (keys are DB keys).
-	ValidatorsCacheMax   int
-	ValidatorsLRU        *list.List
-	ValidatorsLRUIndex   map[string]*list.Element
-	ValidatorsTouched    map[string]*structures.ValidatorStorage
+	ValidatorsCacheMax int
+	ValidatorsLRU      *list.List
+	ValidatorsLRUIndex map[string]*list.Element
+	ValidatorsTouched  map[string]*structures.ValidatorStorage
 }{
 	Handler: structures.ApprovementThreadMetadataHandler{
 		CoreMajorVersion:        -1,
@@ -35,14 +35,14 @@ var EXECUTION_THREAD_METADATA = struct {
 	Handler structures.ExecutionThreadMetadataHandler
 
 	// Bounded cache bookkeeping for AccountsCache + ValidatorsStoragesCache.
-	AccountsCacheMax     int
-	AccountsLRU          *list.List
-	AccountsLRUIndex     map[string]*list.Element
-	AccountsTouched      map[string]*structures.Account
-	ValidatorsCacheMax   int
-	ValidatorsLRU        *list.List
-	ValidatorsLRUIndex   map[string]*list.Element
-	ValidatorsTouched    map[string]*structures.ValidatorStorage
+	AccountsCacheMax   int
+	AccountsLRU        *list.List
+	AccountsLRUIndex   map[string]*list.Element
+	AccountsTouched    map[string]*structures.Account
+	ValidatorsCacheMax int
+	ValidatorsLRU      *list.List
+	ValidatorsLRUIndex map[string]*list.Element
+	ValidatorsTouched  map[string]*structures.ValidatorStorage
 }{
 	Handler: structures.ExecutionThreadMetadataHandler{
 		CoreMajorVersion:        -1,
@@ -56,7 +56,8 @@ var EXECUTION_THREAD_METADATA = struct {
 			LastBlocksByLeaders:             make(map[string]structures.ExecutionStats),
 			LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
 		},
-		Statistics: &structures.Statistics{LastHeight: -1},
+		Statistics:      &structures.Statistics{LastHeight: -1},
+		EpochStatistics: &structures.Statistics{LastHeight: -1},
 	},
 	AccountsCacheMax:   constants.DefaultAccountsCacheMax,
 	AccountsLRU:        list.New(),

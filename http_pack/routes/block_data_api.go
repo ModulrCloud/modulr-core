@@ -22,6 +22,7 @@ type lastHeightResponse struct {
 
 type liveStatsResponse struct {
 	Statistics        *structures.Statistics       `json:"statistics"`
+	EpochStatistics   *structures.Statistics       `json:"epochStatistics"`
 	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
 	Epoch             structures.EpochDataHandler  `json:"epoch"`
 }
@@ -60,6 +61,7 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
+	epochStatistics := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
 	networkParameters := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters
 	epoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -67,9 +69,13 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 	if statistics == nil {
 		statistics = &structures.Statistics{LastHeight: -1}
 	}
+	if epochStatistics == nil {
+		epochStatistics = &structures.Statistics{LastHeight: -1}
+	}
 
 	response, err := json.Marshal(liveStatsResponse{
 		Statistics:        statistics,
+		EpochStatistics:   epochStatistics,
 		NetworkParameters: networkParameters,
 		Epoch:             epoch,
 	})

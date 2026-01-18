@@ -505,6 +505,9 @@ func executeBlock(block *block_pack.Block) {
 		epochHandlerRef.Statistics = &structures.Statistics{LastHeight: -1}
 
 	}
+	if epochHandlerRef.EpochStatistics == nil {
+		epochHandlerRef.EpochStatistics = &structures.Statistics{LastHeight: -1}
+	}
 
 	currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
 	currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
@@ -544,10 +547,12 @@ func executeBlock(block *block_pack.Block) {
 			}
 
 			epochHandlerRef.Statistics.TotalTransactions++
+			epochHandlerRef.EpochStatistics.TotalTransactions++
 
 			if success {
 
 				epochHandlerRef.Statistics.SuccessfulTransactions++
+				epochHandlerRef.EpochStatistics.SuccessfulTransactions++
 
 			}
 
@@ -626,6 +631,14 @@ func executeBlock(block *block_pack.Block) {
 		epochHandlerRef.Statistics.LastBlockHash = blockHash
 
 		epochHandlerRef.Statistics.TotalFees += blockFees
+		epochHandlerRef.Statistics.BlocksGenerated++
+
+		epochHandlerRef.EpochStatistics.TotalFees += blockFees
+		epochHandlerRef.EpochStatistics.BlocksGenerated++
+		// For per-epoch stats we still expose the absolute last height / last block hash (useful to know
+		// which exact block finished the epoch).
+		epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
+		epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
 		stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
 
@@ -871,6 +884,16 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		dbBatch := new(leveldb.Batch)
 
+		// Persist per-epoch statistics snapshot for the finishing epoch into STATE.
+		// This allows HTTP API to query historical epoch statistics without bloating the ET payload.
+		finishingEpochStats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
+		if finishingEpochStats == nil {
+			finishingEpochStats = &structures.Statistics{LastHeight: -1}
+		}
+		if rawStats, err := json.Marshal(finishingEpochStats); err == nil {
+			dbBatch.Put([]byte(fmt.Sprintf("EPOCH_STATS:%d", currentEpochIndex)), rawStats)
+		}
+
 		// Exec delayed txs here
 
 		for _, delayedTx := range nextEpochData.DelayedTransactions {
@@ -893,6 +916,8 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = *templateForNextEpoch
 
 		// Nullify values for the upcoming epoch
+
+		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData = make(map[string]structures.ExecutionStats)
 
