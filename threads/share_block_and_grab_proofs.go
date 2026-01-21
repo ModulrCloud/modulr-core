@@ -190,44 +190,41 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
-			responses, ok := QUORUM_WAITER_FOR_FINALIZATION_PROOFS.SendAndWait(ctx, messageJsoned, epochHandler.Quorum, WEBSOCKET_CONNECTIONS, majority)
+			// Validation function for finalization proofs
+			validateProof := func(id string, raw []byte) bool {
+				var parsedFinalizationProof websocket_pack.WsFinalizationProofResponse
+				if err := json.Unmarshal(raw, &parsedFinalizationProof); err != nil {
+					return false
+				}
+
+				// Verify hash matches
+				if parsedFinalizationProof.VotedForHash != blockHash {
+					return false
+				}
+
+				// Verify voter is in quorum and signature is valid
+				dataThatShouldBeSigned := strings.Join(
+					[]string{acceptedHash, blockIdForHunting, blockHash, epochFullId}, ":",
+				)
+
+				return slices.Contains(epochHandler.Quorum, parsedFinalizationProof.Voter) &&
+					cryptography.VerifySignature(
+						dataThatShouldBeSigned, parsedFinalizationProof.Voter, parsedFinalizationProof.FinalizationProof,
+					)
+			}
+
+			responses, ok := QUORUM_WAITER_FOR_FINALIZATION_PROOFS.SendAndWaitValidated(ctx, messageJsoned, epochHandler.Quorum, WEBSOCKET_CONNECTIONS, majority, validateProof)
 
 			if !ok {
 				return
 			}
 
+			// All responses are already validated, just extract proofs
 			for _, raw := range responses {
-
 				var parsedFinalizationProof websocket_pack.WsFinalizationProofResponse
-
 				if err := json.Unmarshal(raw, &parsedFinalizationProof); err == nil {
-
-					// Now verify proof and parse requests
-
-					if parsedFinalizationProof.VotedForHash == blockHash {
-
-						// Verify the finalization proof
-
-						dataThatShouldBeSigned := strings.Join(
-
-							[]string{acceptedHash, blockIdForHunting, blockHash, epochFullId}, ":",
-						)
-
-						finalizationProofIsOk := slices.Contains(epochHandler.Quorum, parsedFinalizationProof.Voter) && cryptography.VerifySignature(
-
-							dataThatShouldBeSigned, parsedFinalizationProof.Voter, parsedFinalizationProof.FinalizationProof,
-						)
-
-						if finalizationProofIsOk {
-
-							proofsCopy[parsedFinalizationProof.Voter] = parsedFinalizationProof.FinalizationProof
-
-						}
-
-					}
-
+					proofsCopy[parsedFinalizationProof.Voter] = parsedFinalizationProof.FinalizationProof
 				}
-
 			}
 
 		}

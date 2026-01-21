@@ -366,7 +366,63 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	responses, ok := state.Waiter.SendAndWait(ctx, message, epochHandler.Quorum, state.WsConns, majority)
+	// Capture cache.SkipData snapshot for validation (it may change during processing)
+	cacheSnapshot := cache.SkipData
+
+	// Validation function for leader finalization proofs
+	validateLeaderFinalization := func(id string, raw []byte) bool {
+		var statusHolder map[string]any
+		if err := json.Unmarshal(raw, &statusHolder); err != nil {
+			return false
+		}
+
+		status, ok := statusHolder["status"].(string)
+		if !ok {
+			return false
+		}
+
+		switch status {
+		case "OK":
+			var response websocket_pack.WsLeaderFinalizationProofResponseOk
+			if json.Unmarshal(raw, &response) != nil {
+				return false
+			}
+
+			if response.ForLeaderPubkey != leaderPubKey {
+				return false
+			}
+
+			// Verify voter is in quorum
+			quorumMap := make(map[string]bool)
+			for _, pk := range epochHandler.Quorum {
+				quorumMap[strings.ToLower(pk)] = true
+			}
+			if !quorumMap[strings.ToLower(response.Voter)] {
+				return false
+			}
+
+			// Verify signature
+			dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(cacheSnapshot.Index), cacheSnapshot.Hash, epochFullID}, ":")
+			return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
+
+		case "UPGRADE":
+			var response websocket_pack.WsLeaderFinalizationProofResponseUpgrade
+			if json.Unmarshal(raw, &response) != nil {
+				return false
+			}
+
+			if response.ForLeaderPubkey != leaderPubKey {
+				return false
+			}
+
+			return validateUpgradePayload(response, epochHandler, leaderPubKey)
+
+		default:
+			return false
+		}
+	}
+
+	responses, ok := state.Waiter.SendAndWaitValidated(ctx, message, epochHandler.Quorum, state.WsConns, majority, validateLeaderFinalization)
 	if !ok {
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("alfp:majority_failed:%d:%s", epochHandler.Id, leaderPubKey),
@@ -377,6 +433,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 		return
 	}
 
+	// All responses are already validated, just process them
 	for _, raw := range responses {
 		handleLeaderFinalizationResponse(raw, epochHandler, leaderPubKey, epochFullID, state)
 	}
