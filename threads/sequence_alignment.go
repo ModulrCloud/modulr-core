@@ -25,6 +25,9 @@ type SequenceAlignmentDataResponse struct {
 
 func SequenceAlignmentThread() {
 
+	var cachedFirstBlockEpoch int = -1
+	var cachedFirstBlockExists bool = false
+
 	for {
 
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
@@ -115,6 +118,34 @@ func SequenceAlignmentThread() {
 					utils.CYAN_COLOR,
 				)
 
+			}
+		}
+
+		// Check if this is the first block of the epoch (blockIndex == 0) and store it if not already stored
+		blockIndex := observedIndex + 1
+		if blockIndex == 0 {
+			// Update cache if epoch changed
+			if cachedFirstBlockEpoch != epochSnapshot.Id {
+				cachedFirstBlockExists = getFirstBlockDataFromDB(epochSnapshot.Id) != nil
+				cachedFirstBlockEpoch = epochSnapshot.Id
+			}
+
+			// Only check DB and store if not already cached
+			if !cachedFirstBlockExists {
+				firstBlockData := &FirstBlockData{
+					FirstBlockCreator: anchorData.Pubkey,
+					FirstBlockHash:    responseBlockHash,
+				}
+				if err := storeFirstBlockData(epochSnapshot.Id, firstBlockData); err != nil {
+					utils.LogWithTime(fmt.Sprintf("failed to store first anchor block data for epoch %d: %v", epochSnapshot.Id, err), utils.RED_COLOR)
+				} else {
+					cachedFirstBlockExists = true
+					hashPreview := responseBlockHash
+					if len(hashPreview) > 8 {
+						hashPreview = hashPreview[:8]
+					}
+					utils.LogWithTime(fmt.Sprintf("First anchor block found for epoch %d: creator=%s, hash=%s...", epochSnapshot.Id, anchorData.Pubkey, hashPreview), utils.GREEN_COLOR)
+				}
 			}
 		}
 
