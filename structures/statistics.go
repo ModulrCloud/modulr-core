@@ -12,4 +12,6 @@ type Statistics struct {
 	TotalTransactions      uint64 `json:"totalTransactions"`
 	SuccessfulTransactions uint64 `json:"successfulTransactions"`
 	TotalFees              uint64 `json:"totalFees"`
+	StakingDelta           int64  `json:"stakingDelta"`
+	AccountsNumber         uint64 `json:"accountsNumber"`
 }

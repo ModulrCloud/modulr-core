@@ -218,6 +218,12 @@ func prepareBlockchain() error {
 		if etHandler.EpochStatistics == nil {
 			etHandler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 		}
+		if etHandler.Statistics.AccountsNumber == 0 {
+			etHandler.Statistics.AccountsNumber = utils.CountStateAccounts()
+		}
+		if etHandler.Statistics.StakingDelta == 0 {
+			etHandler.Statistics.StakingDelta = int64(utils.SumTotalStakedFromState())
+		}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler = etHandler
 
@@ -285,6 +291,9 @@ func setGenesisToState() error {
 
 	// __________________________________ Load info about accounts __________________________________
 
+	genesisAccountsCount := uint64(len(globals.GENESIS.State))
+	var genesisTotalStaked uint64 = 0
+
 	for accountPubkey, accountData := range globals.GENESIS.State {
 
 		serialized, err := json.Marshal(accountData)
@@ -300,6 +309,7 @@ func setGenesisToState() error {
 	// __________________________________ Load info about validators __________________________________
 
 	for _, validatorStorage := range globals.GENESIS.Validators {
+		genesisTotalStaked += validatorStorage.TotalStaked
 
 		validatorPubkey := validatorStorage.Pubkey
 
@@ -331,6 +341,14 @@ func setGenesisToState() error {
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
 
 	handlers.EXECUTION_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
+	if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics == nil {
+		handlers.EXECUTION_THREAD_METADATA.Handler.Statistics = &structures.Statistics{LastHeight: -1}
+	}
+	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics == nil {
+		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
+	}
+	handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.AccountsNumber = genesisAccountsCount
+	handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.StakingDelta = int64(genesisTotalStaked)
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 

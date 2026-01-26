@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 
 	"github.com/modulrcloud/modulr-core/constants"
+	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
 
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 func OpenDb(dbName string) *leveldb.DB {
@@ -42,6 +44,12 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 		acc := &structures.Account{}
 		PutExecAccountCache(accountId, acc)
 		MarkExecAccountTouched(accountId, acc)
+		if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.AccountsNumber++
+		}
+		if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.AccountsNumber++
+		}
 		return acc
 
 	}
@@ -65,6 +73,37 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
 	return nil
 
+}
+
+func CountStateAccounts() uint64 {
+	it := databases.STATE.NewIterator(nil, nil)
+	defer it.Release()
+
+	var count uint64
+	for it.Next() {
+		key := string(it.Key())
+		if cryptography.IsValidPubKey(key) {
+			count++
+		}
+	}
+
+	return count
+}
+
+func SumTotalStakedFromState() uint64 {
+	it := databases.STATE.NewIterator(util.BytesPrefix([]byte(constants.DBKeyPrefixValidatorStorage)), nil)
+	defer it.Release()
+
+	var total uint64
+	for it.Next() {
+		var storage structures.ValidatorStorage
+		if err := json.Unmarshal(it.Value(), &storage); err != nil {
+			continue
+		}
+		total += storage.TotalStaked
+	}
+
+	return total
 }
 
 func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.ValidatorStorage {
