@@ -59,17 +59,27 @@ var (
 	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
 )
 
+// Shared map for per-connection write mutexes.
+// It must be global so that different QuorumWaiters/guards still serialize writes
+// on the same underlying websocket connection.
+var SHARED_WS_WRITE_MU = &sync.Map{}
+
+// Tracks active websocket operations (goroutines in sendMessages).
+// Used to safely clear SHARED_WS_WRITE_MU when no operations are in flight.
+var SHARED_WS_ACTIVE_OPS = &sync.WaitGroup{}
+
 type WebsocketGuards struct {
 	ConnMu *sync.RWMutex
-	// WriteMu keys are *websocket.Conn and values are *sync.Mutex.
-	// This guarantees a single writer per actual websocket connection, regardless of id/pubkey mapping.
+	// WriteMu keys are validator ID strings (pubkeys) and values are *sync.Mutex.
+	// Keying by ID (not connection pointer) avoids race conditions when connections
+	// are replaced or closed while goroutines still hold references to old connections.
 	WriteMu *sync.Map
 }
 
 func NewWebsocketGuards() *WebsocketGuards {
 	return &WebsocketGuards{
 		ConnMu:  &sync.RWMutex{},
-		WriteMu: &sync.Map{},
+		WriteMu: SHARED_WS_WRITE_MU,
 	}
 }
 
@@ -350,17 +360,26 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	// Close and remove any existing connections (called once per your note)
+	// Wait for all active websocket operations to complete before closing connections.
+	// This ensures no goroutines are mid-flight when we close connections and clear mutexes.
+	SHARED_WS_ACTIVE_OPS.Wait()
+
+	// Close and remove any existing connections
 	guards.ConnMu.Lock()
 	for id, conn := range wsConnMap {
 		if conn != nil {
 			_ = conn.Close()
-			// Drop per-connection write mutex to prevent unbounded growth.
-			guards.WriteMu.Delete(conn)
 		}
 		delete(wsConnMap, id)
 	}
 	guards.ConnMu.Unlock()
+
+	// Clear per-validator mutexes to prevent memory growth.
+	// Safe to do now since all operations have completed (Wait() above).
+	guards.WriteMu.Range(func(key, value any) bool {
+		guards.WriteMu.Delete(key)
+		return true
+	})
 
 	// Establish new connections for each validator in the quorum
 	for _, validatorPubkey := range quorum {
@@ -652,15 +671,18 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 	}
 }
 
-func (qw *QuorumWaiter) getWriteMuConn(c *websocket.Conn) *sync.Mutex {
-	if c == nil {
-		return &sync.Mutex{}
-	}
-	if m, ok := qw.guards.WriteMu.Load(c); ok {
+// getWriteMuById returns a per-validator mutex.
+// Keying by ID (pubkey) instead of connection pointer avoids the race where:
+// 1. Goroutine A loads mutex M for connection C
+// 2. Goroutine B (on error) deletes M from the map
+// 3. Goroutine C creates new mutex M2 for the same connection
+// 4. A and C now have different mutexes for the same connection → panic
+func (qw *QuorumWaiter) getWriteMuById(id string) *sync.Mutex {
+	if m, ok := qw.guards.WriteMu.Load(id); ok {
 		return m.(*sync.Mutex)
 	}
 	m := &sync.Mutex{}
-	actual, _ := qw.guards.WriteMu.LoadOrStore(c, m)
+	actual, _ := qw.guards.WriteMu.LoadOrStore(id, m)
 	return actual.(*sync.Mutex)
 }
 
@@ -686,7 +708,6 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 	guards.ConnMu.Lock()
 	if old := wsConnMap[pubkey]; old != nil {
 		_ = old.Close()
-		guards.WriteMu.Delete(old)
 	}
 	wsConnMap[pubkey] = conn
 	guards.ConnMu.Unlock()
@@ -752,12 +773,28 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			continue
 		}
 
+		SHARED_WS_ACTIVE_OPS.Add(1)
 		go func(id string, c *websocket.Conn) {
+			defer SHARED_WS_ACTIVE_OPS.Done()
+
 			// Single-request guard for this websocket.
 			// IMPORTANT: gorilla/websocket requires a single reader AND a single writer per connection.
 			// We therefore guard the whole request (WriteMessage+ReadMessage), not only the write.
-			wmu := qw.getWriteMuConn(c)
+			// The mutex is keyed by validator ID (not connection pointer) to avoid race conditions
+			// when connections are replaced or closed.
+			wmu := qw.getWriteMuById(id)
 			wmu.Lock()
+
+			// Re-check connection validity under lock - it may have been replaced/closed
+			qw.guards.ConnMu.RLock()
+			currentConn, ok := wsConnMap[id]
+			qw.guards.ConnMu.RUnlock()
+			if !ok || currentConn != c {
+				// Connection was replaced, abort this request
+				wmu.Unlock()
+				return
+			}
+
 			_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
 			err := c.WriteMessage(websocket.TextMessage, msg)
 			if err != nil {
@@ -768,10 +805,11 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				qw.mu.Unlock()
 
 				qw.guards.ConnMu.Lock()
-				_ = c.Close()
-				delete(wsConnMap, id)
+				if wsConnMap[id] == c {
+					_ = c.Close()
+					delete(wsConnMap, id)
+				}
 				qw.guards.ConnMu.Unlock()
-				qw.guards.WriteMu.Delete(c)
 				return
 			}
 
@@ -786,10 +824,11 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				qw.mu.Unlock()
 
 				qw.guards.ConnMu.Lock()
-				_ = c.Close()
-				delete(wsConnMap, id)
+				if wsConnMap[id] == c {
+					_ = c.Close()
+					delete(wsConnMap, id)
+				}
 				qw.guards.ConnMu.Unlock()
-				qw.guards.WriteMu.Delete(c)
 				return
 			}
 
