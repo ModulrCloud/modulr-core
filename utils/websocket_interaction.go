@@ -59,14 +59,11 @@ var (
 	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
 )
 
-// Shared map for per-connection write mutexes.
+// Shared map for per-validator write mutexes.
 // It must be global so that different QuorumWaiters/guards still serialize writes
-// on the same underlying websocket connection.
+// for the same validator. Keyed by validator ID (pubkey), not connection pointer.
+// Memory growth is bounded by the number of unique validators ever seen (~200 bytes each).
 var SHARED_WS_WRITE_MU = &sync.Map{}
-
-// Tracks active websocket operations (goroutines in sendMessages).
-// Used to safely clear SHARED_WS_WRITE_MU when no operations are in flight.
-var SHARED_WS_ACTIVE_OPS = &sync.WaitGroup{}
 
 type WebsocketGuards struct {
 	ConnMu *sync.RWMutex
@@ -360,10 +357,6 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	// Wait for all active websocket operations to complete before closing connections.
-	// This ensures no goroutines are mid-flight when we close connections and clear mutexes.
-	SHARED_WS_ACTIVE_OPS.Wait()
-
 	// Close and remove any existing connections
 	guards.ConnMu.Lock()
 	for id, conn := range wsConnMap {
@@ -374,12 +367,9 @@ func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*w
 	}
 	guards.ConnMu.Unlock()
 
-	// Clear per-validator mutexes to prevent memory growth.
-	// Safe to do now since all operations have completed (Wait() above).
-	guards.WriteMu.Range(func(key, value any) bool {
-		guards.WriteMu.Delete(key)
-		return true
-	})
+	// Note: We intentionally do NOT clear per-validator mutexes from SHARED_WS_WRITE_MU.
+	// Memory growth is minimal (~200 bytes per validator) and bounded by total validators seen.
+	// This avoids any potential race conditions and Wait() overhead.
 
 	// Establish new connections for each validator in the quorum
 	for _, validatorPubkey := range quorum {
@@ -773,10 +763,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 			continue
 		}
 
-		SHARED_WS_ACTIVE_OPS.Add(1)
 		go func(id string, c *websocket.Conn) {
-			defer SHARED_WS_ACTIVE_OPS.Done()
-
 			// Single-request guard for this websocket.
 			// IMPORTANT: gorilla/websocket requires a single reader AND a single writer per connection.
 			// We therefore guard the whole request (WriteMessage+ReadMessage), not only the write.
