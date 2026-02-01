@@ -455,6 +455,13 @@ func (qw *QuorumWaiter) SendAndWait(
 	}
 	qw.timer.Reset(time.Second)
 	qw.done = make(chan struct{})
+	defer func() {
+		select {
+		case <-qw.done:
+		default:
+			close(qw.done)
+		}
+	}()
 
 	// First send to the whole quorum
 	qw.sendMessages(quorum, message, wsConnMap)
@@ -554,6 +561,13 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 	}
 	qw.timer.Reset(time.Second)
 	qw.done = make(chan struct{})
+	defer func() {
+		select {
+		case <-qw.done:
+		default:
+			close(qw.done)
+		}
+	}()
 
 	// First send to the whole quorum
 	qw.sendMessages(quorum, message, wsConnMap)
@@ -599,7 +613,6 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 			validMu.Unlock()
 
 			if validCount >= majority {
-				close(qw.done)
 				// Copy validated responses
 				validMu.Lock()
 				out := make(map[string][]byte, len(validResponses))
@@ -631,7 +644,6 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 				validMu.Unlock()
 
 				if validCount >= majority {
-					close(qw.done)
 					validMu.Lock()
 					out := make(map[string][]byte, len(validResponses))
 					for k, v := range validResponses {
@@ -655,7 +667,6 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 			validMu.Unlock()
 
 			if validCount >= majority {
-				close(qw.done)
 				validMu.Lock()
 				out := make(map[string][]byte, len(validResponses))
 				for k, v := range validResponses {
