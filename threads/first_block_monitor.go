@@ -12,11 +12,8 @@ import (
 
 func FirstBlockMonitorThread() {
 
-	var epochUnderObservation int
+	epochUnderObservation := -1
 	var cachedFirstBlockData *FirstBlockData
-	var cachedEpochForFirstBlock int
-
-	initialized := false
 
 	for {
 
@@ -24,17 +21,14 @@ func FirstBlockMonitorThread() {
 		currentEpoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-		if !initialized || currentEpoch != epochUnderObservation {
+		if currentEpoch != epochUnderObservation {
 			epochUnderObservation = currentEpoch
 			cachedFirstBlockData = nil
-			cachedEpochForFirstBlock = -1
-			initialized = true
 		}
 
-		// Use cached value if available, otherwise check DB
-		if cachedEpochForFirstBlock != epochUnderObservation {
+		// Only cache non-nil results; keep checking until found
+		if cachedFirstBlockData == nil {
 			cachedFirstBlockData = getFirstBlockDataFromDB(epochUnderObservation)
-			cachedEpochForFirstBlock = epochUnderObservation
 		}
 
 		if cachedFirstBlockData != nil {
