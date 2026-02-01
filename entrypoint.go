@@ -131,6 +131,8 @@ func waitUntilFirstEpochStart() {
 
 func prepareBlockchain() error {
 
+	applyCacheConfig()
+
 	if info, err := os.Stat(globals.CHAINDATA_PATH); err != nil {
 
 		if os.IsNotExist(err) {
@@ -267,6 +269,16 @@ func prepareBlockchain() error {
 	}
 
 	return nil
+}
+
+func applyCacheConfig() {
+	if globals.CONFIGURATION.AccountsCacheMax > 0 {
+		handlers.EXECUTION_THREAD_METADATA.AccountsCacheMax = globals.CONFIGURATION.AccountsCacheMax
+	}
+	if globals.CONFIGURATION.ValidatorsCacheMax > 0 {
+		handlers.APPROVEMENT_THREAD_METADATA.ValidatorsCacheMax = globals.CONFIGURATION.ValidatorsCacheMax
+		handlers.EXECUTION_THREAD_METADATA.ValidatorsCacheMax = globals.CONFIGURATION.ValidatorsCacheMax
+	}
 }
 
 func setGenesisToState() error {
