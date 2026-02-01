@@ -515,7 +515,11 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 
 	cache := ensureLeaderFinalizationCache(state, epochHandler.Id, leaderPubKey)
 
-	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(cache.SkipData.Index), cache.SkipData.Hash, epochFullID}, ":")
+	ALFP_GRABBING_MUTEX.Lock()
+	skipData := cache.SkipData
+	ALFP_GRABBING_MUTEX.Unlock()
+
+	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(skipData.Index), skipData.Hash, epochFullID}, ":")
 
 	quorumMap := make(map[string]bool)
 	for _, pk := range epochHandler.Quorum {
