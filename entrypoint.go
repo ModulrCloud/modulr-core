@@ -274,10 +274,15 @@ func prepareBlockchain() error {
 func applyCacheConfig() {
 	if globals.CONFIGURATION.AccountsCacheMax > 0 {
 		handlers.EXECUTION_THREAD_METADATA.AccountsCacheMax = globals.CONFIGURATION.AccountsCacheMax
+	} else {
+		handlers.EXECUTION_THREAD_METADATA.AccountsCacheMax = constants.DefaultAccountsCacheMax
 	}
 	if globals.CONFIGURATION.ValidatorsCacheMax > 0 {
 		handlers.APPROVEMENT_THREAD_METADATA.ValidatorsCacheMax = globals.CONFIGURATION.ValidatorsCacheMax
 		handlers.EXECUTION_THREAD_METADATA.ValidatorsCacheMax = globals.CONFIGURATION.ValidatorsCacheMax
+	} else {
+		handlers.APPROVEMENT_THREAD_METADATA.ValidatorsCacheMax = constants.DefaultValidatorsCacheMax
+		handlers.EXECUTION_THREAD_METADATA.ValidatorsCacheMax = constants.DefaultValidatorsCacheMax
 	}
 }
 
