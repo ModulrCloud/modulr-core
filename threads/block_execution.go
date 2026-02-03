@@ -188,11 +188,11 @@ func BlockExecutionThread() {
 				break
 			}
 
-			// Apply block under lock (mutates handler caches/state and writes to DB).
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			// Apply block (executes with internal lock; DB write happens outside lock).
 			executeBlock(response.Block)
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 			execStatsOfLeader = handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[leaderPubkeyToExecBlocks]
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 			progressed = true
 		}
@@ -497,13 +497,28 @@ func shortHash(h string) string {
 }
 
 func executeBlock(block *block_pack.Block) {
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+	stateBatch, logMsg, ok := buildExecutionBatch(block)
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
+	if !ok {
+		return
+	}
+
+	if err := databases.STATE.Write(stateBatch, nil); err == nil {
+		utils.LogWithTime2(logMsg, utils.CYAN_COLOR)
+	} else {
+		panic("Impossible to commit changes in atomic batch to permanent state")
+	}
+}
+
+// buildExecutionBatch mutates in-memory state and builds a LevelDB batch.
+// Caller MUST hold handlers.EXECUTION_THREAD_METADATA.RWMutex in write mode.
+func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool) {
 	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
 
 	if epochHandlerRef.Statistics == nil {
-
 		epochHandlerRef.Statistics = &structures.Statistics{LastHeight: -1}
-
 	}
 	if epochHandlerRef.EpochStatistics == nil {
 		epochHandlerRef.EpochStatistics = &structures.Statistics{LastHeight: -1}
@@ -520,150 +535,103 @@ func executeBlock(block *block_pack.Block) {
 			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, shortHash(expectedPrevHash), shortHash(block.PrevHash)),
 			utils.YELLOW_COLOR,
 		)
-		return
+		return nil, "", false
 	}
 
-	if expectedPrevHash == block.PrevHash {
+	// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
+	// while keeping the read caches bounded via LRU.
+	utils.ResetExecTouchedSets()
 
-		// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
-		// while keeping the read caches bounded via LRU.
-		utils.ResetExecTouchedSets()
+	// To change the state atomically - prepare the atomic batch
+	stateBatch := new(leveldb.Batch)
 
-		// To change the state atomically - prepare the atomic batch
-		stateBatch := new(leveldb.Batch)
+	blockFees := uint64(0)
 
-		blockFees := uint64(0)
+	delayedTxPayloadsForBatch := make([]map[string]string, 0)
 
-		delayedTxPayloadsForBatch := make([]map[string]string, 0)
+	for index, transaction := range block.Transactions {
 
-		for index, transaction := range block.Transactions {
+		success, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
 
-			success, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
-
-			if isDelayed {
-
-				delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
-
-			}
-
-			epochHandlerRef.Statistics.TotalTransactions++
-			epochHandlerRef.EpochStatistics.TotalTransactions++
-
-			if success {
-
-				epochHandlerRef.Statistics.SuccessfulTransactions++
-				epochHandlerRef.EpochStatistics.SuccessfulTransactions++
-
-			}
-
-			blockFees += fee
-
-			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success}); err == nil {
-
-				stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
-
-			} else {
-
-				panic("Impossible to add transaction location data to atomic batch")
-
-			}
-
+		if isDelayed {
+			delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
 		}
 
-		if len(delayedTxPayloadsForBatch) > 0 {
+		epochHandlerRef.Statistics.TotalTransactions++
+		epochHandlerRef.EpochStatistics.TotalTransactions++
 
-			if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, currentEpochIndex, stateBatch); err != nil {
-
-				panic("Impossible to add delayed transactions to atomic batch")
-
-			}
-
+		if success {
+			epochHandlerRef.Statistics.SuccessfulTransactions++
+			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
 		}
 
-		// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
-		sendFeesToValidatorAccount(block.Creator, blockFees)
+		blockFees += fee
 
-		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
-
-			if accountDataBytes, err := json.Marshal(accountData); err == nil {
-
-				stateBatch.Put([]byte(accountID), accountDataBytes)
-
-			} else {
-
-				panic("Impossible to add new account data to atomic batch")
-
-			}
-
-		}
-
-		for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
-
-			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
-
-				// storageKey already includes DBKeyPrefixValidatorStorage.
-				stateBatch.Put([]byte(storageKey), dataBytes)
-
-			} else {
-
-				panic("Impossible to add validator storage to atomic batch")
-
-			}
-
-		}
-
-		// Update the execution data for progress
-
-		blockHash := block.GetHash()
-
-		blockCreatorData := epochHandlerRef.ExecutionData[block.Creator]
-
-		blockCreatorData.Index = block.Index
-
-		blockCreatorData.Hash = blockHash
-
-		epochHandlerRef.ExecutionData[block.Creator] = blockCreatorData
-
-		// Finally set the updated execution thread handler to atomic batch
-
-		epochHandlerRef.Statistics.LastHeight++
-
-		epochHandlerRef.Statistics.LastBlockHash = blockHash
-
-		epochHandlerRef.Statistics.TotalFees += blockFees
-		epochHandlerRef.Statistics.BlocksGenerated++
-
-		epochHandlerRef.EpochStatistics.TotalFees += blockFees
-		epochHandlerRef.EpochStatistics.BlocksGenerated++
-		// For per-epoch stats we still expose the absolute last height / last block hash (useful to know
-		// which exact block finished the epoch).
-		epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
-		epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
-
-		stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
-
-		if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
-
-			stateBatch.Put([]byte("ET"), execThreadRawBytes)
-
+		if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success}); err == nil {
+			stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 		} else {
-
-			panic("Impossible to store updated execution thread version to atomic batch")
-
-		}
-
-		if err := databases.STATE.Write(stateBatch, nil); err == nil {
-
-			utils.LogWithTime2(fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight), utils.CYAN_COLOR)
-
-		} else {
-
-			panic("Impossible to commit changes in atomic batch to permanent state")
-
+			panic("Impossible to add transaction location data to atomic batch")
 		}
 
 	}
 
+	if len(delayedTxPayloadsForBatch) > 0 {
+		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, currentEpochIndex, stateBatch); err != nil {
+			panic("Impossible to add delayed transactions to atomic batch")
+		}
+	}
+
+	// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
+	sendFeesToValidatorAccount(block.Creator, blockFees)
+
+	for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
+		if accountDataBytes, err := json.Marshal(accountData); err == nil {
+			stateBatch.Put([]byte(accountID), accountDataBytes)
+		} else {
+			panic("Impossible to add new account data to atomic batch")
+		}
+	}
+
+	for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
+		if dataBytes, err := json.Marshal(validatorStorage); err == nil {
+			// storageKey already includes DBKeyPrefixValidatorStorage.
+			stateBatch.Put([]byte(storageKey), dataBytes)
+		} else {
+			panic("Impossible to add validator storage to atomic batch")
+		}
+	}
+
+	// Update the execution data for progress
+	blockHash := block.GetHash()
+
+	blockCreatorData := epochHandlerRef.ExecutionData[block.Creator]
+	blockCreatorData.Index = block.Index
+	blockCreatorData.Hash = blockHash
+	epochHandlerRef.ExecutionData[block.Creator] = blockCreatorData
+
+	// Finally set the updated execution thread handler to atomic batch
+	epochHandlerRef.Statistics.LastHeight++
+	epochHandlerRef.Statistics.LastBlockHash = blockHash
+	epochHandlerRef.Statistics.TotalFees += blockFees
+	epochHandlerRef.Statistics.BlocksGenerated++
+
+	epochHandlerRef.EpochStatistics.TotalFees += blockFees
+	epochHandlerRef.EpochStatistics.BlocksGenerated++
+	// For per-epoch stats we still expose the absolute last height / last block hash (useful to know
+	// which exact block finished the epoch).
+	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
+	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
+
+	stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
+
+	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
+		stateBatch.Put([]byte("ET"), execThreadRawBytes)
+	} else {
+		panic("Impossible to store updated execution thread version to atomic batch")
+	}
+
+	logMsg := fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight)
+	return stateBatch, logMsg, true
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {

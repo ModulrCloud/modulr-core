@@ -8,6 +8,8 @@ type NodeLevelConfig struct {
 	DisablePoDOutbox             bool              `json:"DISABLE_POD_OUTBOX"`
 	ExtraDataToBlock             map[string]string `json:"EXTRA_DATA_TO_BLOCK"`
 	TxsMempoolSize               int               `json:"TXS_MEMPOOL_SIZE"`
+	AccountsCacheMax             int               `json:"ACCOUNTS_CACHE_MAX"`
+	ValidatorsCacheMax           int               `json:"VALIDATORS_CACHE_MAX"`
 	BootstrapNodes               []string          `json:"BOOTSTRAP_NODES"`
 	MyHostname                   string            `json:"MY_HOSTNAME"`
 	Interface                    string            `json:"INTERFACE"`
