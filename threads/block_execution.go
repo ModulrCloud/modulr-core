@@ -679,7 +679,12 @@ func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]st
 
 		totalSpend := tx.Fee + tx.Amount
 
-		if accountFrom.Balance >= totalSpend && tx.Nonce == accountFrom.Nonce+1 {
+		nonceOk := tx.Nonce == accountFrom.Nonce+1
+		if constants.ShouldBypassNonceCheck(tx.From) {
+			nonceOk = true
+		}
+
+		if accountFrom.Balance >= totalSpend && nonceOk {
 
 			accountFrom.Balance -= totalSpend
 
@@ -751,7 +756,7 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 
 	}
 
-	if tx.Nonce != accountFrom.Nonce+1 {
+	if !constants.ShouldBypassNonceCheck(tx.From) && tx.Nonce != accountFrom.Nonce+1 {
 
 		return false
 

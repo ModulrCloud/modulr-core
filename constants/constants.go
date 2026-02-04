@@ -6,6 +6,19 @@ const (
 	ContextExecutionThread   = "EXECUTION_THREAD"
 )
 
+// Nonce-check bypass (temporary compatibility for high-rate faucet usage).
+// When many faucet requests arrive concurrently, nonce races cause otherwise valid tx to fail.
+// For these specific sender addresses we intentionally disable nonce validation during execution.
+var NonceCheckBypassFromAddresses = map[string]struct{}{
+	"58mwkdnD1jejKhRQFrSgSwNbU4ajebSYqPvzVxfbDCHT": {},
+	"ALkfNAViKa13c9KT7Zo6GUJ8ccq8Liy5aqpZwNQb1rL6": {},
+}
+
+func ShouldBypassNonceCheck(from string) bool {
+	_, ok := NonceCheckBypassFromAddresses[from]
+	return ok
+}
+
 // Websocket routes (PoD + node-to-node).
 const (
 	WsRouteGetFinalizationProof                 = "get_finalization_proof"
