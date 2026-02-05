@@ -551,7 +551,7 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 	for index, transaction := range block.Transactions {
 
-		success, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
+		success, reason, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
 
 		if isDelayed {
 			delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
@@ -567,7 +567,11 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 		blockFees += fee
 
-		if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success}); err == nil {
+		receiptReason := ""
+		if !success {
+			receiptReason = reason
+		}
+		if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success, Reason: receiptReason}); err == nil {
 			stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 		} else {
 			panic("Impossible to add transaction location data to atomic batch")
@@ -644,12 +648,12 @@ func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) 
 
 }
 
-func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]string, bool) {
+func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[string]string, bool) {
 
 	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
 	// Account IDs must be canonical pubkeys.
 	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
-		return false, 0, nil, false
+		return false, "invalid pubkey", 0, nil, false
 	}
 
 	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
@@ -659,9 +663,9 @@ func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]st
 
 		if delayedTxPayload, delayedTxType, isDelayed := getDelayedTransactionPayload(tx); isDelayed {
 
-			if !validateDelayedTransaction(delayedTxType, tx, delayedTxPayload, accountFrom) {
+			if ok, reason := validateDelayedTransaction(delayedTxType, tx, delayedTxPayload, accountFrom); !ok {
 
-				return false, 0, nil, false
+				return false, reason, 0, nil, false
 
 			}
 
@@ -671,7 +675,7 @@ func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]st
 
 			accountFrom.SuccessfulInitiatedTransactions++
 
-			return true, tx.Fee, delayedTxPayload, true
+			return true, "", tx.Fee, delayedTxPayload, true
 
 		}
 
@@ -684,7 +688,11 @@ func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]st
 			nonceOk = true
 		}
 
-		if accountFrom.Balance >= totalSpend && nonceOk {
+		if !nonceOk {
+			return false, "wrong nonce", 0, nil, false
+		}
+
+		if accountFrom.Balance >= totalSpend {
 
 			accountFrom.Balance -= totalSpend
 
@@ -694,15 +702,15 @@ func executeTransaction(tx *structures.Transaction) (bool, uint64, map[string]st
 
 			accountFrom.SuccessfulInitiatedTransactions++
 
-			return true, tx.Fee, nil, false
+			return true, "", tx.Fee, nil, false
 
 		}
 
-		return false, 0, nil, false
+		return false, "insufficient balance", 0, nil, false
 
 	}
 
-	return false, 0, nil, false
+	return false, "invalid signature", 0, nil, false
 
 }
 
@@ -748,23 +756,23 @@ func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string
 
 }
 
-func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) bool {
+func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) (bool, string) {
 
 	if accountFrom == nil {
 
-		return false
+		return false, "missing sender account"
 
 	}
 
 	if !constants.ShouldBypassNonceCheck(tx.From) && tx.Nonce != accountFrom.Nonce+1 {
 
-		return false
+		return false, "wrong nonce"
 
 	}
 
 	if accountFrom.Balance < tx.Fee {
 
-		return false
+		return false, "insufficient balance for fee"
 
 	}
 
@@ -772,7 +780,10 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 
 	case "createValidator", "updateValidator":
 
-		return tx.From == payload["creator"]
+		if tx.From != payload["creator"] {
+			return false, "invalid delayed transaction creator"
+		}
+		return true, ""
 
 	case "stake":
 
@@ -780,15 +791,19 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 
 		if err != nil {
 
-			return false
+			return false, "invalid delayed transaction amount"
 
 		}
 
-		return accountFrom.Balance >= amount+tx.Fee
+		if accountFrom.Balance < amount+tx.Fee {
+			return false, "insufficient balance"
+		}
+
+		return true, ""
 
 	default:
 
-		return true
+		return true, ""
 
 	}
 
