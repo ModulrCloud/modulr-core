@@ -212,6 +212,7 @@ Finds a transaction by its hash.
 - **Success (200)**: Object containing both the transaction and its receipt:
   - `tx`: [`structures.Transaction`](../structures/transaction.go).
   - `receipt`: [`structures.TransactionReceipt`](../structures/transaction.go).
+    - `reason`: Empty string when `success=true`, otherwise contains the failure reason.
 - **Errors**
   - `400` — missing or invalid hash.
   - `404` — transaction does not exist.
@@ -240,7 +241,8 @@ curl https://localhost:7332/transaction/ab5f5cb2...
   "receipt": {
     "block": "42:ed25519_abcd...:0",
     "position": 3,
-    "success": true
+    "success": true,
+    "reason": ""
   }
 }
 ```

@@ -18,6 +18,7 @@ type TransactionReceipt struct {
 	Block    string `json:"block"`    // reference to block where tx located
 	Position int    `json:"position"` // position in this block
 	Success  bool   `json:"success"`  // status of execution
+	Reason   string `json:"reason"`   // empty on success; failure reason otherwise
 }
 
 type Transaction struct {
