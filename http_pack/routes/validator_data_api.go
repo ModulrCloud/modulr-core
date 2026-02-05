@@ -70,4 +70,3 @@ func GetValidatorByPubkey(ctx *fasthttp.RequestCtx) {
 	ctx.SetContentType("application/json")
 	ctx.Write(out)
 }
-
