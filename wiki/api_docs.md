@@ -319,6 +319,39 @@ curl https://localhost:7332/account/6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE
 }
 ```
 
+## Validators
+
+### `GET /validator/{validatorPubkey}`
+Fetches validator storage (staking and metadata) from the state store.
+
+- **Path parameters**
+  - `validatorPubkey`: Validator public key string.
+- **Success (200)**: [`structures.ValidatorStorage`](../structures/genesis.go).
+- **Errors**
+  - `400` — invalid validator pubkey.
+  - `404` — validator not found.
+  - `500` — storage read or JSON parse error.
+
+**Example request**
+```bash
+curl https://localhost:7332/validator/6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE
+```
+
+**Example response**
+```json
+{
+  "pubkey": "6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE",
+  "percentage": 10,
+  "totalStaked": 1500000000,
+  "stakers": {
+    "staker_1_pubkey": 1000000000,
+    "staker_2_pubkey": 500000000
+  },
+  "validatorURL": "https://validator.example.com",
+  "wssValidatorURL": "wss://validator.example.com/ws"
+}
+```
+
 ## Epoch data
 
 ### `GET /epoch_data/{epochIndex}`
