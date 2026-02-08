@@ -1,5 +1,7 @@
 package structures
 
+import "github.com/ethereum/go-ethereum/core/types"
+
 type NetworkParameters struct {
 	ValidatorRequiredStake uint64 `json:"VALIDATOR_REQUIRED_STAKE"`
 	MinimalStakePerStaker  uint64 `json:"MINIMAL_STAKE_PER_STAKER"`
@@ -40,4 +42,12 @@ type Genesis struct {
 	NetworkParameters        NetworkParameters  `json:"NETWORK_PARAMETERS"`
 	Validators               []ValidatorStorage `json:"VALIDATORS"`
 	State                    map[string]Account `json:"STATE"`
+	// EVM_ALLOC seeds the embedded EVM state at genesis (balances/nonces/code/storage),
+	// keyed by EVM address (0x... 20 bytes).
+	//
+	// Example:
+	// "EVM_ALLOC": {
+	//   "0x0123456789abcdef0123456789abcdef01234567": { "balance": "0x3635c9adc5dea00000" }
+	// }
+	EVMAlloc types.GenesisAlloc `json:"EVM_ALLOC,omitempty"`
 }

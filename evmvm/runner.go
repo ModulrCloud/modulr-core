@@ -17,7 +17,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
-	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/holiman/uint256"
@@ -28,7 +27,7 @@ type Options struct {
 	VMConfig    vm.Config
 
 	DBPath    string // directory path
-	DBEngine  string // "pebble" (default) or "leveldb"
+	DBEngine  string // "leveldb" (default). Pebble is intentionally not used in modulr-core to keep deps smaller.
 	DBCacheMB int
 	DBHandles int
 	ReadOnly  bool
@@ -330,19 +329,12 @@ func openKV(path string, engine string, cacheMB int, handles int, readonly bool)
 	if handles == 0 {
 		handles = 64
 	}
+	// modulr uses leveldb; default to it.
+	// Note: even if a preexisting DB was created as pebble, modulr-core currently doesn't support it.
 	if engine == "" {
-		engine = rawdb.PreexistingDatabase(path)
-	}
-	if engine == "" {
-		engine = rawdb.DBLeveldb // modulr uses leveldb; default to it
+		engine = rawdb.DBLeveldb
 	}
 	switch engine {
-	case rawdb.DBPebble:
-		kv, err := pebble.New(path, cacheMB, handles, "modulr-evm", readonly)
-		if err != nil {
-			return nil, err
-		}
-		return rawdb.NewDatabase(kv), nil
 	case rawdb.DBLeveldb:
 		kv, err := leveldb.New(path, cacheMB, handles, "modulr-evm", readonly)
 		if err != nil {
@@ -350,7 +342,7 @@ func openKV(path string, engine string, cacheMB int, handles int, readonly bool)
 		}
 		return rawdb.NewDatabase(kv), nil
 	default:
-		return nil, fmt.Errorf("unknown DBEngine %q (expected %q or %q)", engine, rawdb.DBPebble, rawdb.DBLeveldb)
+		return nil, fmt.Errorf("unknown DBEngine %q (expected %q)", engine, rawdb.DBLeveldb)
 	}
 }
 

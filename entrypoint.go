@@ -324,9 +324,17 @@ func setGenesisToState() error {
 
 	}
 
-	// Initialize embedded EVM root marker in STATE so JSON-RPC can reliably open the EVM state DB.
-	// (EVM state DB itself is created lazily on first use.)
-	execThreadBatch.Put([]byte(constants.DBKeyEVMRoot), []byte(types.EmptyRootHash.Hex()))
+	// Seed embedded EVM state (optional) and store EVM root marker in STATE.
+	// If EVM_ALLOC is absent, we store EmptyRootHash and the EVM DB will be created lazily on first use.
+	evmRoot := types.EmptyRootHash
+	if len(globals.GENESIS.EVMAlloc) > 0 {
+		root, err := threads.SeedEVMGenesisAlloc(globals.GENESIS.EVMAlloc)
+		if err != nil {
+			return fmt.Errorf("seed evm alloc: %w", err)
+		}
+		evmRoot = root
+	}
+	execThreadBatch.Put([]byte(constants.DBKeyEVMRoot), []byte(evmRoot.Hex()))
 
 	// __________________________________ Load info about validators __________________________________
 
