@@ -35,11 +35,12 @@ const (
 	DBKeyPrefixEpochFinish      = "EPOCH_FINISH:"
 	DBKeyPrefixTxReceipt        = "TX:"
 	DBKeyPrefixValidatorStorage = "VALIDATOR_STORAGE:"
+	DBKeyEVMRoot                = "EVM_ROOT"
 )
 
 // Default in-memory cache limits (bounded caches to avoid unbounded growth).
 // These are intentionally conservative; adjust after profiling on real testnet load.
 const (
-	DefaultAccountsCacheMax  = 50_000
+	DefaultAccountsCacheMax   = 50_000
 	DefaultValidatorsCacheMax = 5_000
 )
