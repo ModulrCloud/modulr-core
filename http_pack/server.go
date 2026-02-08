@@ -32,6 +32,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/transaction/{hash}", routes.GetTransactionByHash)
 	r.POST("/transaction", routes.AcceptTransaction)
 	r.POST("/delayed_transactions_signature", routes.SignDelayedTransactions)
+	r.POST("/evm_rpc", routes.EVMRPC)
 
 	return r.Handler
 }

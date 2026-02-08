@@ -18,6 +18,7 @@ import (
 	"github.com/modulrcloud/modulr-core/utils"
 	"github.com/modulrcloud/modulr-core/websocket_pack"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -322,6 +323,10 @@ func setGenesisToState() error {
 		execThreadBatch.Put([]byte(accountPubkey), serialized)
 
 	}
+
+	// Initialize embedded EVM root marker in STATE so JSON-RPC can reliably open the EVM state DB.
+	// (EVM state DB itself is created lazily on first use.)
+	execThreadBatch.Put([]byte(constants.DBKeyEVMRoot), []byte(types.EmptyRootHash.Hex()))
 
 	// __________________________________ Load info about validators __________________________________
 

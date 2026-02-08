@@ -23,6 +23,7 @@ import (
 	"github.com/modulrcloud/modulr-core/utils"
 	"github.com/modulrcloud/modulr-core/websocket_pack"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
@@ -549,7 +550,75 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 	delayedTxPayloadsForBatch := make([]map[string]string, 0)
 
+	// If EVM is used within this block, take a per-block snapshot so partial EVM changes
+	// don't leak if this block isn't committed.
+	_, _ = ensureEVMRunner()
+	nextHeight := epochHandlerRef.Statistics.LastHeight + 1
+	modulrBlockHash := block.GetHash()
+	evmBlockHash := deriveEVMBlockHash(modulrBlockHash)
+	evmBlockTimeSec := uint64(0)
+	if block.Time > 0 {
+		evmBlockTimeSec = uint64(block.Time / 1000)
+	}
+
+	var evmTxHashes []string
+	var evmGasUsed uint64
+	var evmLogs []any
+	var evmBloom types.Bloom
+	var evmStateRootHex string
+	var evmSnapshot int
+	if execEVMRunner != nil {
+		evmSnapshot = execEVMRunner.StateDB().Snapshot()
+		evmStateRootHex = execEVMRunner.Root().Hex()
+	}
+	evmCommitted := false
+	defer func() {
+		if execEVMRunner != nil && !evmCommitted {
+			execEVMRunner.StateDB().RevertToSnapshot(evmSnapshot)
+			execEVMDirtied = false
+		}
+	}()
+
 	for index, transaction := range block.Transactions {
+
+		// Embedded Ethereum signed tx path (wallet-compat). We do not require Modulr signature here.
+		if raw0x, ok := getEVMRawPayload(&transaction); ok {
+			okExec, reason, feeSpent, ethHashHex, gasUsed, txBloom := executeEVMSignedTxInBlock(raw0x, index, uint64(nextHeight), evmBlockHash, evmBlockTimeSec, stateBatch, &evmLogs)
+			if okExec {
+				evmTxHashes = append(evmTxHashes, ethHashHex)
+				evmGasUsed += gasUsed
+				// OR blooms to build block-level logsBloom.
+				for i := 0; i < len(evmBloom); i++ {
+					evmBloom[i] |= txBloom[i]
+				}
+				blockFees += feeSpent
+			} else {
+				// Still record Modulr receipt as failed.
+				blockFees += feeSpent
+				reasonStr := reason
+				if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: false, Reason: reasonStr}); err == nil {
+					stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
+				} else {
+					panic("Impossible to add transaction location data to atomic batch")
+				}
+				epochHandlerRef.Statistics.TotalTransactions++
+				epochHandlerRef.EpochStatistics.TotalTransactions++
+				continue
+			}
+
+			epochHandlerRef.Statistics.TotalTransactions++
+			epochHandlerRef.EpochStatistics.TotalTransactions++
+			epochHandlerRef.Statistics.SuccessfulTransactions++
+			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
+
+			// Record Modulr receipt (success).
+			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: true, Reason: ""}); err == nil {
+				stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
+			} else {
+				panic("Impossible to add transaction location data to atomic batch")
+			}
+			continue
+		}
 
 		success, reason, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
 
@@ -587,6 +656,18 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 	// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
 	sendFeesToValidatorAccount(block.Creator, blockFees)
+
+	// Commit EVM state once per block, and store the resulting root atomically in STATE.
+	if execEVMRunner != nil && execEVMDirtied {
+		newRoot, err := execEVMRunner.Commit()
+		if err != nil {
+			panic("EVM commit failed: " + err.Error())
+		}
+		storeEVMRootToBatch(stateBatch, newRoot)
+		evmStateRootHex = newRoot.Hex()
+		evmCommitted = true
+		execEVMDirtied = false
+	}
 
 	for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
 		if accountDataBytes, err := json.Marshal(accountData); err == nil {
@@ -626,6 +707,10 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
 	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
+	// Persist minimal EVM block metadata keyed by Modulr absolute height.
+	// Wallets expect eth_blockNumber and eth_getBlockByNumber to work. We store one EVM block per Modulr block.
+	storeEVMBlockToBatch(stateBatch, uint64(nextHeight), evmBlockHash, evmBlockTimeSec, evmStateRootHex, evmGasUsed, evmTxHashes, evmBloom, evmLogs)
+
 	stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
 
 	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
@@ -649,6 +734,39 @@ func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) 
 }
 
 func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[string]string, bool) {
+
+	// EVM txs use only tx.From as a Modulr pubkey and carry EVM details in payload.
+	if tx.Payload != nil {
+		if payloadType, ok := tx.Payload["type"].(string); ok && payloadType == "evm" {
+			if !cryptography.IsValidPubKey(tx.From) {
+				return false, "invalid pubkey", 0, nil, false
+			}
+			if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
+				accountFrom := utils.GetAccountFromExecThreadState(tx.From)
+				accountFrom.InitiatedTransactions++
+
+				nonceOk := tx.Nonce == accountFrom.Nonce+1
+				if constants.ShouldBypassNonceCheck(tx.From) {
+					nonceOk = true
+				}
+				if !nonceOk {
+					return false, "wrong nonce", 0, nil, false
+				}
+				if accountFrom.Balance < tx.Fee {
+					return false, "insufficient balance for fee", 0, nil, false
+				}
+				success, reason, feeSpent := executeEVMTransaction(tx.From, tx.Payload, tx.Fee)
+				if !success {
+					return false, reason, 0, nil, false
+				}
+				accountFrom.Balance -= feeSpent
+				accountFrom.Nonce++
+				accountFrom.SuccessfulInitiatedTransactions++
+				return true, "", feeSpent, nil, false
+			}
+			return false, "invalid signature", 0, nil, false
+		}
+	}
 
 	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
 	// Account IDs must be canonical pubkeys.
