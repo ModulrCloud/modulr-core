@@ -162,6 +162,30 @@ func (r *Runner) ChainConfig() *params.ChainConfig {
 	return r.chainConfig
 }
 
+// SetBlockContext updates the EVM block environment (NUMBER, TIMESTAMP, BASEFEE, GASLIMIT).
+// Caller is responsible for external synchronization if Runner is shared.
+func (r *Runner) SetBlockContext(blockNumber uint64, time uint64, gasLimit uint64, baseFee *big.Int) {
+	if blockNumber == 0 {
+		blockNumber = 1
+	}
+	if time == 0 {
+		time = 1
+	}
+	if gasLimit == 0 {
+		gasLimit = 30_000_000
+	}
+	if baseFee == nil {
+		baseFee = big.NewInt(0)
+	}
+	r.blockCtx.BlockNumber = new(big.Int).SetUint64(blockNumber)
+	r.blockCtx.Time = time
+	r.blockCtx.GasLimit = gasLimit
+	r.blockCtx.BaseFee = new(big.Int).Set(baseFee)
+	// Update fork rules and EVM context copy.
+	r.rules = r.chainConfig.Rules(r.blockCtx.BlockNumber, r.blockCtx.Random != nil, r.blockCtx.Time)
+	r.evm.Context = r.blockCtx
+}
+
 func (r *Runner) Close() error {
 	if r.kvdb != nil {
 		return r.kvdb.Close()
@@ -252,6 +276,11 @@ func (r *Runner) ApplySignedTx(tx *types.Transaction, chainID *big.Int, txIndex 
 	if err != nil {
 		return nil, nil, common.Address{}, err
 	}
+	// Ensure ORIGIN/GASPRICE opcodes match this tx (EVM keeps tx context separately from msg).
+	r.evm.SetTxContext(vm.TxContext{
+		Origin:   sender,
+		GasPrice: msg.GasPrice,
+	})
 	res, err = core.ApplyMessage(r.evm, msg, new(core.GasPool).AddGas(msg.GasLimit))
 	if err != nil {
 		return res, nil, sender, err

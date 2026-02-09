@@ -60,12 +60,15 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 		Status:            status,
 		CumulativeGasUsed: res.UsedGas,
 		GasUsed:           res.UsedGas,
-		EffectiveGasPrice: big.NewInt(0),
+		EffectiveGasPrice: effectiveGasPrice(tx, EVMBaseFee()),
 		TxHash:            tx.Hash(),
 		BlockHash:         blockHash,
 		BlockNumber:       new(big.Int).SetUint64(blockNumber),
 		TransactionIndex:  uint(txIndex),
 		Logs:              logs,
+	}
+	if receipt.Logs == nil {
+		receipt.Logs = []*types.Log{}
 	}
 	// Derive contract address if needed.
 	if tx.To() == nil {
@@ -88,20 +91,51 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 		}
 	}
 
+	effGasPrice := effectiveGasPrice(tx, EVMBaseFee())
+	feeCap := tx.GasFeeCap()
+	tipCap := tx.GasTipCap()
+	if feeCap == nil {
+		feeCap = big.NewInt(0)
+	}
+	if tipCap == nil {
+		tipCap = big.NewInt(0)
+	}
+	v, r, s := tx.RawSignatureValues()
+	if v == nil {
+		v = big.NewInt(0)
+	}
+	if r == nil {
+		r = big.NewInt(0)
+	}
+	if s == nil {
+		s = big.NewInt(0)
+	}
+
 	txJSON := map[string]any{
-		"hash":             hashHex,
-		"from":             sender.Hex(),
-		"to":               func() any { if tx.To() == nil { return nil }; return tx.To().Hex() }(),
-		"nonce":            "0x" + strconv.FormatUint(tx.Nonce(), 16),
-		"gas":              "0x" + strconv.FormatUint(tx.Gas(), 16),
-		"gasPrice":         "0x" + tx.GasPrice().Text(16),
-		"maxPriorityFeePerGas": "0x0",
-		"maxFeePerGas":         "0x0",
-		"input":            "0x" + common.Bytes2Hex(tx.Data()),
-		"value":            "0x" + tx.Value().Text(16),
-		"blockHash":        blockHash.Hex(),
-		"blockNumber":      "0x" + strconv.FormatUint(blockNumber, 16),
-		"transactionIndex": "0x" + strconv.FormatUint(uint64(txIndex), 16),
+		"type":    "0x" + strconv.FormatUint(uint64(tx.Type()), 16),
+		"chainId": "0x" + evmChainID.Text(16),
+		"hash":    hashHex,
+		"from":    sender.Hex(),
+		"to": func() any {
+			if tx.To() == nil {
+				return nil
+			}
+			return tx.To().Hex()
+		}(),
+		"nonce": "0x" + strconv.FormatUint(tx.Nonce(), 16),
+		"gas":   "0x" + strconv.FormatUint(tx.Gas(), 16),
+		// For EIP-1559 txs, many clients return the effective gasPrice here.
+		"gasPrice":             "0x" + effGasPrice.Text(16),
+		"maxPriorityFeePerGas": "0x" + tipCap.Text(16),
+		"maxFeePerGas":         "0x" + feeCap.Text(16),
+		"input":                "0x" + common.Bytes2Hex(tx.Data()),
+		"value":                "0x" + tx.Value().Text(16),
+		"blockHash":            blockHash.Hex(),
+		"blockNumber":          "0x" + strconv.FormatUint(blockNumber, 16),
+		"transactionIndex":     "0x" + strconv.FormatUint(uint64(txIndex), 16),
+		"v":                    "0x" + v.Text(16),
+		"r":                    "0x" + r.Text(16),
+		"s":                    "0x" + s.Text(16),
 	}
 
 	putJSON(batch, "TX:"+hashHex, map[string]any{
@@ -113,6 +147,37 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 	return !res.Failed(), "evm", 0, hashHex, res.UsedGas, receipt.Bloom
 }
 
+func effectiveGasPrice(tx *types.Transaction, baseFee *big.Int) *big.Int {
+	if tx == nil {
+		return big.NewInt(0)
+	}
+	if baseFee == nil {
+		baseFee = big.NewInt(0)
+	}
+	// Legacy (0) and access list (1) have explicit gasPrice.
+	if tx.Type() != types.DynamicFeeTxType {
+		gp := tx.GasPrice()
+		if gp == nil {
+			return big.NewInt(0)
+		}
+		return new(big.Int).Set(gp)
+	}
+	feeCap := tx.GasFeeCap()
+	tipCap := tx.GasTipCap()
+	if feeCap == nil {
+		feeCap = big.NewInt(0)
+	}
+	if tipCap == nil {
+		tipCap = big.NewInt(0)
+	}
+	// effective = min(feeCap, baseFee+tipCap)
+	sum := new(big.Int).Add(baseFee, tipCap)
+	if sum.Cmp(feeCap) > 0 {
+		return new(big.Int).Set(feeCap)
+	}
+	return sum
+}
+
 func storeEVMErrorTxToBatch(batch *leveldb.Batch, hashHex string, errMsg string, raw0x string) {
 	putJSON(batch, "TX:"+hashHex, map[string]any{
 		"error": errMsg,
@@ -122,6 +187,13 @@ func storeEVMErrorTxToBatch(batch *leveldb.Batch, hashHex string, errMsg string,
 
 func storeEVMBlockToBatch(batch *leveldb.Batch, height uint64, blockHash common.Hash, blockTimeSec uint64, stateRootHex string, gasUsed uint64, txHashes []string, logsBloom types.Bloom, logs []any) {
 	heightHex := "0x" + strconv.FormatUint(height, 16)
+	// JSON-RPC clients expect arrays, not null. Keep these non-nil.
+	if txHashes == nil {
+		txHashes = []string{}
+	}
+	if logs == nil {
+		logs = []any{}
+	}
 
 	parentHash := common.Hash{}
 	if height > 0 && databases.STATE != nil {
@@ -154,7 +226,7 @@ func storeEVMBlockToBatch(batch *leveldb.Batch, height uint64, blockHash common.
 		"gasLimit":         "0x1c9c380", // 30_000_000
 		"gasUsed":          "0x" + strconv.FormatUint(gasUsed, 16),
 		"timestamp":        "0x" + strconv.FormatUint(blockTimeSec, 16),
-		"baseFeePerGas":    "0x0",
+		"baseFeePerGas":    "0x" + EVMBaseFee().Text(16),
 		"transactions":     txHashes,
 		"uncles":           []string{},
 	}
@@ -212,4 +284,3 @@ func putJSON(batch *leveldb.Batch, key string, v any) {
 	}
 	batch.Put([]byte(key), b)
 }
-

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -17,9 +18,19 @@ import (
 )
 
 var (
-	execEVMRunner  *evmvm.Runner
-	execEVMDirtied bool
+	execEVMRunner   *evmvm.Runner
+	execEVMDirtied  bool
+	execEVMRunnerMu sync.Mutex
 )
+
+// EVMLock/EVMUnlock guard access to the embedded EVM runner/state.
+// The EVM runner is not safe for concurrent use: block execution and RPC may run in parallel.
+func EVMLock()   { execEVMRunnerMu.Lock() }
+func EVMUnlock() { execEVMRunnerMu.Unlock() }
+
+// EVMRunnerUnsafe returns the singleton embedded EVM runner.
+// Callers MUST hold EVMLock() while using the returned runner.
+func EVMRunnerUnsafe() (*evmvm.Runner, error) { return ensureEVMRunner() }
 
 func ensureEVMRunner() (*evmvm.Runner, error) {
 	if execEVMRunner != nil {
@@ -31,6 +42,9 @@ func ensureEVMRunner() (*evmvm.Runner, error) {
 		DBPath:    evmdbPath,
 		DBEngine:  "leveldb",
 		StateRoot: &root,
+		// Fee hints & London semantics for wallet UX.
+		BaseFee:  EVMBaseFee(),
+		GasPrice: EVMBaseFee(),
 	})
 	if err != nil {
 		return nil, err

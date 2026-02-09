@@ -539,6 +539,11 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 		return nil, "", false
 	}
 
+	// EVM runner/state is not safe for concurrent use. Hold the lock for the whole block batch
+	// so RPC reads/simulations don't race with block execution (and vice versa).
+	EVMLock()
+	defer EVMUnlock()
+
 	// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
 	// while keeping the read caches bounded via LRU.
 	utils.ResetExecTouchedSets()
@@ -559,6 +564,12 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	evmBlockTimeSec := uint64(0)
 	if block.Time > 0 {
 		evmBlockTimeSec = uint64(block.Time / 1000)
+	}
+
+	// Keep EVM block env in sync with Modulr absolute height/time.
+	// This affects opcodes like NUMBER/TIMESTAMP/BASEFEE and also EffectiveGasPrice for EIP-1559 txs.
+	if execEVMRunner != nil && nextHeight >= 0 {
+		execEVMRunner.SetBlockContext(uint64(nextHeight), evmBlockTimeSec, 30_000_000, EVMBaseFee())
 	}
 
 	var evmTxHashes []string

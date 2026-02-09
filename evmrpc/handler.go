@@ -1,9 +1,9 @@
 package evmrpc
 
 import (
-	"errors"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"math/big"
 	"strconv"
 	"strings"
@@ -18,7 +18,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/evmvm"
-	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/threads"
 )
 
@@ -33,6 +32,13 @@ const (
 	maxGasCap          = 30_000_000
 )
 
+// Fee hints for wallet UX.
+// We run a simple fixed-fee model for now; execution still follows EVM rules.
+const (
+	defaultBaseFeeWeiHex     = "0x3b9aca00" // 1 gwei
+	defaultPriorityFeeWeiHex = "0x3b9aca00" // 1 gwei
+)
+
 func Handle(req Request) []byte {
 	if req.JSONRPC != "2.0" || req.Method == "" {
 		return ErrorResponse(req.ID, -32600, "Invalid Request")
@@ -44,16 +50,17 @@ func Handle(req Request) []byte {
 		return handleWeb3Sha3(req)
 	case "net_version":
 		// Network id (decimal string).
-		return ResultResponse(req.ID, "7337")
+		return ResultResponse(req.ID, "7338")
 	case "eth_chainId":
 		// Chain id in hex.
-		return ResultResponse(req.ID, "0x1ca9")
+		return ResultResponse(req.ID, "0x1caa")
 	case "eth_protocolVersion":
 		return ResultResponse(req.ID, "0x0")
 	case "eth_syncing":
 		return ResultResponse(req.ID, false)
 	case "eth_gasPrice":
-		return ResultResponse(req.ID, "0x0")
+		// For legacy txs and as a UX fallback. Wallets often require non-zero here.
+		return ResultResponse(req.ID, defaultBaseFeeWeiHex)
 	case "eth_accounts":
 		return ResultResponse(req.ID, []any{})
 	case "eth_coinbase":
@@ -105,7 +112,7 @@ func Handle(req Request) []byte {
 	case "eth_getFilterChanges", "eth_getFilterLogs":
 		return ResultResponse(req.ID, []any{})
 	case "eth_maxPriorityFeePerGas":
-		return ResultResponse(req.ID, "0x0")
+		return ResultResponse(req.ID, defaultPriorityFeeWeiHex)
 	case "eth_feeHistory":
 		return handleFeeHistory(req)
 	case "eth_getProof":
@@ -264,7 +271,8 @@ func handleGetBlockByNumber(req Request) []byte {
 		}
 	}
 	var heightHex string
-	if tag == "latest" || tag == "" {
+	// Wallets often query "pending" for fee estimation. We map it to latest for now.
+	if tag == "latest" || tag == "" || tag == "pending" {
 		h := threads.GetLastExecutedHeight()
 		if h < 0 {
 			heightHex = "0x0"
@@ -278,16 +286,17 @@ func handleGetBlockByNumber(req Request) []byte {
 	if err != nil {
 		return ResultResponse(req.ID, nil)
 	}
-	if !full {
-		return ResultResponse(req.ID, json.RawMessage(b))
-	}
 	var blk map[string]any
 	if err := json.Unmarshal(b, &blk); err != nil {
 		return ResultResponse(req.ID, nil)
 	}
-	// Ensure baseFeePerGas is present (EIP-1559 UX). We run baseFee=0 for now.
-	if _, ok := blk["baseFeePerGas"]; !ok {
-		blk["baseFeePerGas"] = "0x0"
+	// Ensure baseFeePerGas is present for wallet fee estimation, regardless of `full`.
+	// Also overwrite "0x0" from older persisted blocks.
+	if v, ok := blk["baseFeePerGas"].(string); !ok || v == "" || strings.EqualFold(v, "0x0") {
+		blk["baseFeePerGas"] = defaultBaseFeeWeiHex
+	}
+	if !full {
+		return ResultResponse(req.ID, blk)
 	}
 	hashes, _ := blk["transactions"].([]any)
 	fullTxs := make([]any, 0, len(hashes))
@@ -466,14 +475,14 @@ func handleGetLogs(req Request) []byte {
 		// - else -> fall back to full block logs EVM_LOGS:<heightHex>
 		if len(addrList) > 0 {
 			for _, addr := range addrList {
-				lst := loadIndexedLogs("EVM_LOGS_ADDR:"+addr+":"+heightHex)
+				lst := loadIndexedLogs("EVM_LOGS_ADDR:" + addr + ":" + heightHex)
 				if len(lst) > 0 {
 					logs = append(logs, lst...)
 				}
 			}
 		} else if len(topic0List) > 0 {
 			for _, t0 := range topic0List {
-				lst := loadIndexedLogs("EVM_LOGS_TOPIC0:"+t0+":"+heightHex)
+				lst := loadIndexedLogs("EVM_LOGS_TOPIC0:" + t0 + ":" + heightHex)
 				if len(lst) > 0 {
 					logs = append(logs, lst...)
 				}
@@ -626,11 +635,11 @@ func handleGetBalance(req Request) []byte {
 	}
 	addrStr, _ := params[0].(string)
 	addr := common.HexToAddress(addrStr)
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	bal := r.StateDB().GetBalance(addr)
 	return ResultResponse(req.ID, "0x"+bal.ToBig().Text(16))
 }
@@ -642,11 +651,11 @@ func handleGetTransactionCount(req Request) []byte {
 	}
 	addrStr, _ := params[0].(string)
 	addr := common.HexToAddress(addrStr)
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	nonce := r.StateDB().GetNonce(addr)
 	return ResultResponse(req.ID, "0x"+strconv.FormatUint(nonce, 16))
 }
@@ -658,11 +667,11 @@ func handleGetCode(req Request) []byte {
 	}
 	addrStr, _ := params[0].(string)
 	addr := common.HexToAddress(addrStr)
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	code := r.StateDB().GetCode(addr)
 	return ResultResponse(req.ID, "0x"+common.Bytes2Hex(code))
 }
@@ -679,11 +688,11 @@ func handleGetStorageAt(req Request) []byte {
 	if err != nil {
 		return ErrorResponse(req.ID, -32602, "Invalid params")
 	}
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	val := r.StateDB().GetState(addr, slot)
 	return ResultResponse(req.ID, val.Hex())
 }
@@ -717,11 +726,11 @@ func handleEthCall(req Request) []byte {
 	if gas > maxGasCap {
 		gas = maxGasCap
 	}
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	ret, _, err := r.Simulate(from, to, dataBytes, gas)
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
@@ -767,11 +776,11 @@ func handleEstimateGas(req Request) []byte {
 		hi = lo
 	}
 
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 
 	// First, ensure the call succeeds with the upper bound.
 	if err := simulateWithGas(r, from, to, dataBytes, hi); err != nil {
@@ -837,17 +846,40 @@ func handleFeeHistory(req Request) []byte {
 	// baseFeePerGas length is blockCount+1, gasUsedRatio length is blockCount.
 	baseFees := make([]string, 0, blockCount+1)
 	ratios := make([]float64, 0, blockCount)
+	// reward length is blockCount; each entry is len(percentiles) hex strings.
+	var percentiles []float64
+	if len(params) >= 3 {
+		if raw, ok := params[2].([]any); ok {
+			for _, p := range raw {
+				switch v := p.(type) {
+				case float64:
+					percentiles = append(percentiles, v)
+				case int:
+					percentiles = append(percentiles, float64(v))
+				}
+			}
+		}
+	}
+	rewards := make([][]string, 0, blockCount)
 	for i := uint64(0); i < blockCount+1; i++ {
-		baseFees = append(baseFees, "0x0")
+		baseFees = append(baseFees, defaultBaseFeeWeiHex)
 		if i < blockCount {
 			ratios = append(ratios, 0)
+			if len(percentiles) > 0 {
+				row := make([]string, 0, len(percentiles))
+				// Fixed priority fee for UX; wallets just need a sane shape.
+				for range percentiles {
+					row = append(row, defaultPriorityFeeWeiHex)
+				}
+				rewards = append(rewards, row)
+			}
 		}
 	}
 	resp := map[string]any{
-		"oldestBlock":  "0x" + strconv.FormatUint(oldest, 16),
+		"oldestBlock":   "0x" + strconv.FormatUint(oldest, 16),
 		"baseFeePerGas": baseFees,
 		"gasUsedRatio":  ratios,
-		"reward":        [][]string{},
+		"reward":        rewards,
 	}
 	return ResultResponse(req.ID, resp)
 }
@@ -861,32 +893,19 @@ func handleUninstallFilter(req Request) []byte {
 	return ResultResponse(req.ID, true)
 }
 
-func openReadOnlyRunner() (*evmvm.Runner, error) {
-	root := threadsLoadEVMRoot()
-	dbPath := globals.CHAINDATA_PATH + "/DATABASES/EVM"
-	return evmvm.NewRunner(evmvm.Options{
-		DBPath:    dbPath,
-		DBEngine:  "leveldb",
-		ReadOnly:  true,
-		StateRoot: &root,
-		BaseFee:   big.NewInt(0),
-		GasPrice:  big.NewInt(0),
-	})
-}
-
-func threadsLoadEVMRoot() common.Hash {
-	if databases.STATE == nil {
-		return types.EmptyRootHash
-	}
-	b, err := databases.STATE.Get([]byte("EVM_ROOT"), nil)
+// openRunnerLocked returns the singleton embedded EVM runner, holding the global EVM mutex.
+// The returned unlock function MUST be called (typically via defer).
+//
+// NOTE: We intentionally do NOT open a separate LevelDB instance in RPC handlers because LevelDB
+// holds an exclusive file lock even for read-only opens (causing "resource temporarily unavailable").
+func openRunnerLocked() (*evmvm.Runner, func(), error) {
+	threads.EVMLock()
+	r, err := threads.EVMRunnerUnsafe()
 	if err != nil {
-		return types.EmptyRootHash
+		threads.EVMUnlock()
+		return nil, nil, err
 	}
-	s := strings.TrimSpace(string(b))
-	if len(s) == 66 && strings.HasPrefix(s, "0x") {
-		return common.HexToHash(s)
-	}
-	return types.EmptyRootHash
+	return r, threads.EVMUnlock, nil
 }
 
 func mustJSON(v any) json.RawMessage {
@@ -1006,13 +1025,13 @@ func parseQuantityIndex(s string) (int, error) {
 // ---- eth_getProof (EIP-1186) ----
 
 type accountResult struct {
-	Address      common.Address   `json:"address"`
-	AccountProof []string         `json:"accountProof"`
-	Balance      *hexutil.Big     `json:"balance"`
-	CodeHash     common.Hash      `json:"codeHash"`
-	Nonce        hexutil.Uint64   `json:"nonce"`
-	StorageHash  common.Hash      `json:"storageHash"`
-	StorageProof []storageResult  `json:"storageProof"`
+	Address      common.Address  `json:"address"`
+	AccountProof []string        `json:"accountProof"`
+	Balance      *hexutil.Big    `json:"balance"`
+	CodeHash     common.Hash     `json:"codeHash"`
+	Nonce        hexutil.Uint64  `json:"nonce"`
+	StorageHash  common.Hash     `json:"storageHash"`
+	StorageProof []storageResult `json:"storageProof"`
 }
 
 type storageResult struct {
@@ -1049,11 +1068,11 @@ func handleGetProof(req Request) []byte {
 	}
 	// We currently ignore the optional block tag and always use latest embedded EVM root.
 
-	r, err := openReadOnlyRunner()
+	r, unlock, err := openRunnerLocked()
 	if err != nil {
 		return ErrorResponse(req.ID, -32000, err.Error())
 	}
-	defer r.Close()
+	defer unlock()
 	statedb := r.StateDB()
 	root := r.Root()
 
@@ -1140,4 +1159,3 @@ func decodeStorageKey(s string) (h common.Hash, inputLength int, err error) {
 	}
 	return common.BytesToHash(b), len(b), nil
 }
-
