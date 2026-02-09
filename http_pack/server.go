@@ -24,6 +24,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/epoch_stats/{epochIndex}", routes.GetEpochStatsByEpochIndex)
 
 	r.GET("/account/{accountId}", routes.GetAccountById)
+	r.GET("/validator/{validatorPubkey}", routes.GetValidatorByPubkey)
 
 	r.GET("/epoch_data/{epochIndex}", routes.GetEpochData)
 
