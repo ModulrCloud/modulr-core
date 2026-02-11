@@ -241,40 +241,102 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 		if b, err := databases.STATE.Get([]byte("TX:"+hash), nil); err == nil && len(b) > 0 {
 			var doc map[string]any
 			if err := json.Unmarshal(b, &doc); err == nil {
-				resp := map[string]any{
-					"type":    "evm",
-					"hash":    hash,
-					"tx":      doc["tx"],
-					"receipt": doc["receipt"],
-					"error":   doc["error"],
-				}
-				// Add a couple of explorer-friendly convenience fields (decimal + MDR units).
-				if txm, ok := doc["tx"].(map[string]any); ok {
-					if vhex, ok := txm["value"].(string); ok {
-						wei := parseHexQuantityToBig(vhex)
-						resp["valueWei"] = wei.String()
-						resp["value"] = formatWeiToEtherString(wei)
+				// Parse the stored ethereum-formatted tx/receipt and convert into the legacy
+				// modulr-core API shape: { tx: structures.Transaction, receipt: structures.TransactionReceipt }.
+				//
+				// The full Ethereum objects are still returned under "evm".
+				evmTx, _ := doc["tx"].(map[string]any)
+				evmRcpt, _ := doc["receipt"].(map[string]any)
+				errStr, _ := doc["error"].(string)
+
+				fromStr, _ := evmTx["from"].(string)
+				toStr := ""
+				if toAny, ok := evmTx["to"]; ok {
+					if ts, ok := toAny.(string); ok {
+						toStr = ts
 					}
 				}
-				if rm, ok := doc["receipt"].(map[string]any); ok {
-					gasUsed := uint64(0)
-					if gu, ok := rm["gasUsed"].(string); ok {
-						if strings.HasPrefix(gu, "0x") {
-							if v, err := strconv.ParseUint(strings.TrimPrefix(gu, "0x"), 16, 64); err == nil {
-								gasUsed = v
-							}
-						}
-					}
-					egp := big.NewInt(0)
-					if egpHex, ok := rm["effectiveGasPrice"].(string); ok {
-						egp = parseHexQuantityToBig(egpHex)
-					}
-					feeWei := new(big.Int).Mul(egp, new(big.Int).SetUint64(gasUsed))
-					resp["feeWei"] = feeWei.String()
-					resp["fee"] = formatWeiToEtherString(feeWei)
+				nonceU64 := uint64(0)
+				if nhex, ok := evmTx["nonce"].(string); ok {
+					nonceU64 = parseHexQuantityToBig(nhex).Uint64()
 				}
 
-				out, _ := json.Marshal(resp)
+				valueWei := big.NewInt(0)
+				if vhex, ok := evmTx["value"].(string); ok {
+					valueWei = parseHexQuantityToBig(vhex)
+				}
+				valueEthStr := formatWeiToEtherString(valueWei)
+
+				feeWei := big.NewInt(0)
+				if evmRcpt != nil {
+					gasUsed := uint64(0)
+					if gu, ok := evmRcpt["gasUsed"].(string); ok {
+						gasUsed = parseHexQuantityToBig(gu).Uint64()
+					}
+					egp := big.NewInt(0)
+					if egpHex, ok := evmRcpt["effectiveGasPrice"].(string); ok {
+						egp = parseHexQuantityToBig(egpHex)
+					}
+					feeWei = new(big.Int).Mul(egp, new(big.Int).SetUint64(gasUsed))
+				}
+				feeEthStr := formatWeiToEtherString(feeWei)
+
+				// Legacy-compatible tx object.
+				legacyTx := structures.Transaction{
+					V:      1,
+					From:   fromStr,
+					To:     toStr,
+					Amount: etherFloorUint64(valueWei), // legacy uint64; exact value is in payload.valueWei
+					// Keep the legacy modulr-style unit conversion (same approach as Amount).
+					// Exact fee is still exposed via payload.feeWei/fee.
+					Fee:   etherFloorUint64(feeWei),
+					Sig:   "",
+					Nonce: nonceU64,
+					Payload: map[string]any{
+						"type":     "evm",
+						"txHash":   hash,
+						"error":    errStr,
+						"valueWei": valueWei.String(),
+						"value":    valueEthStr,
+						"feeWei":   feeWei.String(),
+						"fee":      feeEthStr,
+						"evm": map[string]any{
+							"tx":      doc["tx"],
+							"receipt": doc["receipt"],
+						},
+					},
+				}
+
+				// Legacy-compatible receipt object.
+				legacyRcpt := structures.TransactionReceipt{
+					Block:    "",
+					Position: 0,
+					Success:  errStr == "",
+					Reason:   errStr,
+				}
+				if evmRcpt != nil {
+					// status: "0x1" / "0x0"
+					if st, ok := evmRcpt["status"].(string); ok {
+						legacyRcpt.Success = strings.TrimSpace(st) == "0x1" && errStr == ""
+					}
+					if ti, ok := evmRcpt["transactionIndex"].(string); ok {
+						legacyRcpt.Position = int(parseHexQuantityToBig(ti).Int64())
+					}
+					// blockNumber can be used as a stable "block" identifier for the explorer.
+					if bn, ok := evmRcpt["blockNumber"].(string); ok {
+						heightDec := parseHexQuantityToBig(bn).Text(10)
+						// Prefer the native block id using the existing index STATE["BLOCK_INDEX:<heightDec>"].
+						if bid, err := databases.STATE.Get([]byte("BLOCK_INDEX:"+heightDec), nil); err == nil && len(bid) > 0 {
+							legacyRcpt.Block = string(bid)
+						} else {
+							legacyRcpt.Block = "evm:" + heightDec
+						}
+					}
+				}
+
+				// Return strictly the legacy API shape: { tx, receipt }.
+				// EVM-specific data is stored inside tx.payload.* (see payload["evm"], valueWei/feeWei, etc).
+				out, _ := json.Marshal(structures.TxWithReceipt{Tx: legacyTx, Receipt: legacyRcpt})
 				ctx.SetStatusCode(fasthttp.StatusOK)
 				ctx.SetContentType("application/json")
 				ctx.Write(out)
@@ -338,13 +400,8 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 		Receipt: txReceipt,
 	}
 
-	// Keep legacy fields but add a type discriminator for the explorer UI.
-	transactionBytes, err := json.Marshal(map[string]any{
-		"type":    "native",
-		"hash":    hash,
-		"tx":      response.Tx,
-		"receipt": response.Receipt,
-	})
+	// Return strictly the legacy API shape: { tx, receipt }.
+	transactionBytes, err := json.Marshal(response)
 
 	if err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)

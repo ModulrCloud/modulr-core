@@ -213,6 +213,15 @@ Finds a transaction by its hash.
   - `tx`: [`structures.Transaction`](../structures/transaction.go).
   - `receipt`: [`structures.TransactionReceipt`](../structures/transaction.go).
     - `reason`: Empty string when `success=true`, otherwise contains the failure reason.
+- **EVM extension**:
+  - If `hash` starts with `0x` (EVM tx hash), the API still returns `tx`/`receipt` in the **same legacy format**
+    so the existing explorer can render it.
+  - Additional Ethereum-formatted objects are available inside `tx.payload.evm`:
+    - `tx.payload.evm.tx`: Ethereum JSON-RPC tx object
+    - `tx.payload.evm.receipt`: Ethereum JSON-RPC receipt object
+  - Convenience fields:
+    - `tx.payload.valueWei`, `tx.payload.value` (decimal wei + human-readable ether string)
+    - `tx.payload.feeWei`, `tx.payload.fee`
 - **Errors**
   - `400` — missing or invalid hash.
   - `404` — transaction does not exist.
@@ -299,6 +308,8 @@ Fetches account state from the LevelDB-backed state store.
 - **Path parameters**
   - `accountId`: Account identifier (public key string).
 - **Success (200)**: [`structures.Account`](../structures/account.go) with `balance`, `nonce`, `initiatedTransactions`, and `successfulInitiatedTransactions` counters for the sender's activity.
+- **Additional fields**:
+  - The response may include extra fields like `type`, `id`, and `evm` for UI convenience.
 - **Errors**
   - `400` — invalid account identifier.
   - `404` — account not found.
@@ -318,6 +329,15 @@ curl https://localhost:7332/account/6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE
   "successfulInitiatedTransactions": 30
 }
 ```
+
+**EVM extension**
+
+If `accountId` starts with `0x` (EVM address), the API returns the same legacy keys but also includes an `evm` object:
+
+- `balance`: whole-ether floor as `uint64` (legacy compatibility)
+- `evm.balanceWei`: exact wei as a decimal string
+- `evm.balanceEth`: human-readable ether string
+- `evm.hasCode`, `evm.codeSize`
 
 ## Epoch data
 

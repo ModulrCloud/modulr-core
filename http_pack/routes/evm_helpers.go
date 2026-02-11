@@ -50,6 +50,22 @@ func formatWeiToEtherString(wei *big.Int) string {
 	return sign + intPart.String() + "." + fracStr
 }
 
+// etherFloorUint64 returns floor(wei / 1e18) clamped to uint64 max.
+// Useful for legacy modulr-core APIs that represent balances as uint64.
+func etherFloorUint64(wei *big.Int) uint64 {
+	if wei == nil || wei.Sign() <= 0 {
+		return 0
+	}
+	q := new(big.Int).Quo(wei, weiPerEther)
+	if q.Sign() <= 0 {
+		return 0
+	}
+	if q.BitLen() > 64 {
+		return ^uint64(0)
+	}
+	return q.Uint64()
+}
+
 func is0xHexLen(s string, hexLen int) bool {
 	s = strings.TrimSpace(s)
 	if !(strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
@@ -68,4 +84,3 @@ func is0xHexLen(s string, hexLen int) bool {
 	}
 	return true
 }
-
