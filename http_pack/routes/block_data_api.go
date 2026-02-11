@@ -2,7 +2,9 @@ package routes
 
 import (
 	"encoding/json"
+	"math/big"
 	"strconv"
+	"strings"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
@@ -234,6 +236,53 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
+	// EVM lookup path: transaction hashes are 0x + 64 hex chars and stored as TX:<hash> in STATE.
+	if is0xHexLen(hash, 64) {
+		if b, err := databases.STATE.Get([]byte("TX:"+hash), nil); err == nil && len(b) > 0 {
+			var doc map[string]any
+			if err := json.Unmarshal(b, &doc); err == nil {
+				resp := map[string]any{
+					"type":    "evm",
+					"hash":    hash,
+					"tx":      doc["tx"],
+					"receipt": doc["receipt"],
+					"error":   doc["error"],
+				}
+				// Add a couple of explorer-friendly convenience fields (decimal + MDR units).
+				if txm, ok := doc["tx"].(map[string]any); ok {
+					if vhex, ok := txm["value"].(string); ok {
+						wei := parseHexQuantityToBig(vhex)
+						resp["valueWei"] = wei.String()
+						resp["value"] = formatWeiToEtherString(wei)
+					}
+				}
+				if rm, ok := doc["receipt"].(map[string]any); ok {
+					gasUsed := uint64(0)
+					if gu, ok := rm["gasUsed"].(string); ok {
+						if strings.HasPrefix(gu, "0x") {
+							if v, err := strconv.ParseUint(strings.TrimPrefix(gu, "0x"), 16, 64); err == nil {
+								gasUsed = v
+							}
+						}
+					}
+					egp := big.NewInt(0)
+					if egpHex, ok := rm["effectiveGasPrice"].(string); ok {
+						egp = parseHexQuantityToBig(egpHex)
+					}
+					feeWei := new(big.Int).Mul(egp, new(big.Int).SetUint64(gasUsed))
+					resp["feeWei"] = feeWei.String()
+					resp["fee"] = formatWeiToEtherString(feeWei)
+				}
+
+				out, _ := json.Marshal(resp)
+				ctx.SetStatusCode(fasthttp.StatusOK)
+				ctx.SetContentType("application/json")
+				ctx.Write(out)
+				return
+			}
+		}
+	}
+
 	txReceiptRawBytes, err := databases.STATE.Get([]byte(constants.DBKeyPrefixTxReceipt+hash), nil)
 
 	if err != nil {
@@ -289,7 +338,13 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 		Receipt: txReceipt,
 	}
 
-	transactionBytes, err := json.Marshal(response)
+	// Keep legacy fields but add a type discriminator for the explorer UI.
+	transactionBytes, err := json.Marshal(map[string]any{
+		"type":    "native",
+		"hash":    hash,
+		"tx":      response.Tx,
+		"receipt": response.Receipt,
+	})
 
 	if err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)

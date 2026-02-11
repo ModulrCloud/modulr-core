@@ -2,10 +2,13 @@ package routes
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/structures"
+	"github.com/modulrcloud/modulr-core/threads"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/valyala/fasthttp"
 )
@@ -22,6 +25,42 @@ func GetAccountById(ctx *fasthttp.RequestCtx) {
 		ctx.SetContentType("application/json")
 		ctx.Write([]byte(`{"err": "Invalid account id"}`))
 		return
+	}
+
+	// EVM lookup path: if the identifier looks like an EVM address.
+	if strings.HasPrefix(accountId, "0x") || strings.HasPrefix(accountId, "0X") {
+		if common.IsHexAddress(accountId) {
+			addr := common.HexToAddress(accountId)
+			threads.EVMLock()
+			defer threads.EVMUnlock()
+			r, err := threads.EVMRunnerUnsafe()
+			if err != nil {
+				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+				ctx.SetContentType("application/json")
+				ctx.Write([]byte(`{"err":"Failed to init EVM"}`))
+				return
+			}
+			st := r.StateDB()
+			balWei := st.GetBalance(addr).ToBig()
+			nonce := st.GetNonce(addr)
+			code := st.GetCode(addr)
+
+			resp := map[string]any{
+				"type":       "evm",
+				"id":         addr.Hex(),
+				"address":    addr.Hex(),
+				"balanceWei": balWei.String(),                // exact, decimal
+				"balance":    formatWeiToEtherString(balWei), // human-readable (MDR/ETH units)
+				"nonce":      nonce,
+				"hasCode":    len(code) > 0,
+				"codeSize":   len(code),
+			}
+			b, _ := json.Marshal(resp)
+			ctx.SetStatusCode(fasthttp.StatusOK)
+			ctx.SetContentType("application/json")
+			ctx.Write(b)
+			return
+		}
 	}
 
 	accountBytes, err := databases.STATE.Get([]byte(accountId), nil)
@@ -55,7 +94,16 @@ func GetAccountById(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	response, err := json.Marshal(account)
+	// Keep legacy fields but add a type discriminator for the explorer UI.
+	response, err := json.Marshal(map[string]any{
+		"type": "native",
+		"id":   accountId,
+		// legacy fields:
+		"balance":                         account.Balance,
+		"nonce":                           account.Nonce,
+		"initiatedTransactions":           account.InitiatedTransactions,
+		"successfulInitiatedTransactions": account.SuccessfulInitiatedTransactions,
+	})
 	if err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
 		ctx.SetContentType("application/json")
