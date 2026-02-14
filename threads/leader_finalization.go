@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -549,9 +550,27 @@ func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizatio
 	cache := ensureLeaderFinalizationCache(state, epochHandler.Id, leaderPubKey)
 
 	ALFP_GRABBING_MUTEX.Lock()
+	prevIndex := cache.SkipData.Index
+	prevHash := cache.SkipData.Hash
 	cache.SkipData = response.SkipData
 	cache.Proofs = make(map[string]string)
 	ALFP_GRABBING_MUTEX.Unlock()
+
+	// Helpful debug log: shows how the cluster converges on skipData via UPGRADE responses.
+	utils.LogWithTimeThrottled(
+		fmt.Sprintf("alfp:upgrade:%d:%s:%d->%d", epochHandler.Id, leaderPubKey, prevIndex, response.SkipData.Index),
+		2*time.Second,
+		fmt.Sprintf(
+			"ALFP: UPGRADE skipData for leader %s in epoch %d (%d/%s... -> %d/%s...)",
+			leaderPubKey,
+			epochHandler.Id,
+			prevIndex,
+			shortHash8(prevHash),
+			response.SkipData.Index,
+			shortHash8(response.SkipData.Hash),
+		),
+		utils.CYAN_COLOR,
+	)
 }
 
 func validateUpgradePayload(response websocket_pack.WsLeaderFinalizationProofResponseUpgrade, epochHandler *structures.EpochDataHandler, leaderPubKey string) bool {
@@ -678,8 +697,15 @@ func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.Aggre
 
 		go func(anchor structures.Anchor) {
 
-			req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/accept_aggregated_leader_finalization_proof", anchor.AnchorUrl), bytes.NewReader(body))
+			url := fmt.Sprintf("%s/accept_aggregated_leader_finalization_proof", strings.TrimRight(anchor.AnchorUrl, "/"))
+			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 			if err != nil {
+				utils.LogWithTimeThrottled(
+					fmt.Sprintf("alfp:anchors:req_build:%d:%s:%s", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl),
+					5*time.Second,
+					fmt.Sprintf("ALFP: failed to build anchors request (epoch=%d leader=%s anchor=%s): %v", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl, err),
+					utils.YELLOW_COLOR,
+				)
 				return
 			}
 
@@ -687,10 +713,34 @@ func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.Aggre
 
 			resp, err := client.Do(req)
 			if err != nil {
+				utils.LogWithTimeThrottled(
+					fmt.Sprintf("alfp:anchors:post_err:%d:%s:%s", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl),
+					5*time.Second,
+					fmt.Sprintf("ALFP: anchors POST failed (epoch=%d leader=%s anchor=%s): %v", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl, err),
+					utils.YELLOW_COLOR,
+				)
+				return
+			}
+			defer resp.Body.Close()
+
+			// Read small body for debugging (anchors returns {"accepted":N} or {"err":...}).
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+			if resp.StatusCode != http.StatusOK {
+				utils.LogWithTimeThrottled(
+					fmt.Sprintf("alfp:anchors:post_bad_status:%d:%s:%s:%d", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl, resp.StatusCode),
+					5*time.Second,
+					fmt.Sprintf("ALFP: anchors POST bad status (epoch=%d leader=%s anchor=%s http=%d body=%s)", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl, resp.StatusCode, strings.TrimSpace(string(respBody))),
+					utils.YELLOW_COLOR,
+				)
 				return
 			}
 
-			resp.Body.Close()
+			utils.LogWithTimeThrottled(
+				fmt.Sprintf("alfp:anchors:post_ok:%d:%s:%s", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl),
+				5*time.Second,
+				fmt.Sprintf("ALFP: anchors POST ok (epoch=%d leader=%s anchor=%s http=%d body=%s)", aggregated.EpochIndex, aggregated.Leader, anchor.AnchorUrl, resp.StatusCode, strings.TrimSpace(string(respBody))),
+				utils.GREEN_COLOR,
+			)
 		}(anchor)
 	}
 }
@@ -720,4 +770,11 @@ func requestLeaderFinalizationFromPoD(epochHandler *structures.EpochDataHandler,
 
 		persistAggregatedLeaderFinalizationProofDirect(aggregated)
 	}()
+}
+
+func shortHash8(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
 }
