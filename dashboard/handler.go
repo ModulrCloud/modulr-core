@@ -125,28 +125,6 @@ func ServeLeaderFinalization(ctx *fasthttp.RequestCtx) {
 	writeJSON(ctx, threads.GetLeaderFinalizationState())
 }
 
-func ServeAlfpWatcher(ctx *fasthttp.RequestCtx) {
-	ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-	ctx.SetContentType("application/json")
-	writeJSON(ctx, threads.GetAlfpWatcherState())
-}
-
-type BlockGenerationResponse struct {
-	Generation   threads.GenerationThreadState `json:"generation"`
-	ProofsGrabber threads.ProofsGrabberState   `json:"proofsGrabber"`
-}
-
-func ServeBlockGeneration(ctx *fasthttp.RequestCtx) {
-	ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-	ctx.SetContentType("application/json")
-
-	resp := BlockGenerationResponse{
-		Generation:    threads.GetGenerationThreadState(),
-		ProofsGrabber: threads.GetProofsGrabberState(),
-	}
-
-	writeJSON(ctx, resp)
-}
 
 func writeJSON(ctx *fasthttp.RequestCtx, v any) {
 	data, err := json.Marshal(v)

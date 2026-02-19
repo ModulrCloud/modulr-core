@@ -40,9 +40,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/dashboard/api/overview", dashboard.ServeOverview)
 	r.GET("/dashboard/api/execution", dashboard.ServeExecutionThread)
 	r.GET("/dashboard/api/approvement", dashboard.ServeApprovementThread)
-	r.GET("/dashboard/api/generation", dashboard.ServeBlockGeneration)
 	r.GET("/dashboard/api/leader_finalization", dashboard.ServeLeaderFinalization)
-	r.GET("/dashboard/api/alfp_watcher", dashboard.ServeAlfpWatcher)
 
 	return r.Handler
 }
