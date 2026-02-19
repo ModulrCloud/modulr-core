@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modulr Node Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--fg:#0a0a0a;--panel:#ffffff;
+  --panel-border:rgba(0,0,0,0.10);--muted:rgba(10,10,10,0.55);
+  --accent:#5e7cff;--accent-light:rgba(94,124,255,0.08);
+  --success:#16a34a;--success-bg:rgba(22,163,74,0.08);
+  --warning:#d97706;--warning-bg:rgba(217,119,6,0.08);
+  --danger:#dc2626;--danger-bg:rgba(220,38,38,0.08);
+  --sidebar-w:280px;--topbar-h:56px;
+  --radius:16px;--radius-sm:10px;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+html,body{background:var(--bg);color:var(--fg);min-height:100dvh;font-size:14px;line-height:1.5}
+a{color:inherit;text-decoration:none}
+button{font:inherit;border:none;background:none;cursor:pointer}
+
+/* Top bar */
+.topbar{
+  position:fixed;top:0;left:0;right:0;height:var(--topbar-h);z-index:30;
+  display:flex;align-items:center;gap:16px;padding:0 24px;
+  border-bottom:1px solid var(--panel-border);
+  background:rgba(255,255,255,0.85);backdrop-filter:blur(12px);
+}
+.topbar-logo{font-weight:700;font-size:15px;letter-spacing:-0.02em;display:flex;align-items:center;gap:8px}
+.topbar-logo svg{width:22px;height:22px}
+.topbar-badge{
+  font-size:10px;font-weight:600;letter-spacing:0.08em;
+  padding:3px 8px;border-radius:6px;
+  background:var(--accent-light);color:var(--accent);
+}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.topbar-uptime{font-size:12px;color:var(--muted)}
+.topbar-refresh{
+  font-size:12px;font-weight:600;color:var(--accent);
+  padding:6px 12px;border-radius:8px;border:1px solid var(--panel-border);
+  transition:background .15s;
+}
+.topbar-refresh:hover{background:var(--accent-light)}
+
+/* Sidebar */
+.sidebar{
+  position:fixed;left:0;top:var(--topbar-h);z-index:20;
+  width:var(--sidebar-w);height:calc(100dvh - var(--topbar-h));
+  overflow-y:auto;
+  border-right:1px solid var(--panel-border);background:var(--bg);
+  padding:20px 16px;
+}
+.sidebar-section{margin-bottom:24px}
+.sidebar-label{
+  font-size:10px;font-weight:700;letter-spacing:0.22em;
+  color:var(--muted);padding:0 12px;margin-bottom:8px;
+}
+.sidebar-nav{display:grid;gap:4px}
+.sidebar-item{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 12px;border-radius:var(--radius);
+  border:1px solid transparent;
+  transition:all .15s;font-size:13px;font-weight:600;
+  color:rgba(10,10,10,0.7);
+}
+.sidebar-item:hover{border-color:var(--panel-border);background:rgba(0,0,0,0.03)}
+.sidebar-item.active{
+  border-color:var(--panel-border);
+  background:rgba(0,0,0,0.05);
+  color:rgba(10,10,10,0.9);
+}
+.sidebar-item svg{width:16px;height:16px;opacity:.7;flex-shrink:0}
+.sidebar-item-text{min-width:0}
+.sidebar-item-desc{font-size:11px;font-weight:400;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sidebar-status{margin-left:auto;flex-shrink:0}
+
+/* Status dot */
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot-green{background:var(--success)}
+.dot-yellow{background:var(--warning)}
+.dot-red{background:var(--danger)}
+.dot-gray{background:rgba(0,0,0,0.2)}
+
+/* Main content */
+.main{margin-left:var(--sidebar-w);padding-top:var(--topbar-h)}
+.content{max-width:1400px;margin:0 auto;padding:24px}
+
+/* Cards */
+.card{
+  background:var(--panel);border:1px solid var(--panel-border);
+  border-radius:var(--radius);padding:20px 24px;margin-bottom:16px;
+}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-title{font-size:15px;font-weight:700;letter-spacing:-0.01em}
+.card-badge{
+  font-size:10px;font-weight:600;letter-spacing:0.06em;
+  padding:3px 10px;border-radius:6px;
+}
+.badge-ok{background:var(--success-bg);color:var(--success)}
+.badge-warn{background:var(--warning-bg);color:var(--warning)}
+.badge-err{background:var(--danger-bg);color:var(--danger)}
+.badge-neutral{background:rgba(0,0,0,0.05);color:var(--muted)}
+
+/* Stat grid */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:16px}
+.stat-box{
+  padding:14px 16px;border-radius:var(--radius-sm);
+  border:1px solid var(--panel-border);
+}
+.stat-label{font-size:10px;font-weight:600;letter-spacing:0.15em;color:var(--muted);margin-bottom:4px;text-transform:uppercase}
+.stat-value{font-size:18px;font-weight:700;letter-spacing:-0.02em}
+.stat-value.mono{font-family:"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;word-break:break-all}
+
+/* Table */
+.table-wrap{overflow-x:auto;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{
+  text-align:left;font-size:10px;font-weight:700;letter-spacing:0.12em;
+  color:var(--muted);text-transform:uppercase;
+  padding:8px 12px;border-bottom:1px solid var(--panel-border);
+}
+tbody td{
+  padding:10px 12px;border-bottom:1px solid rgba(0,0,0,0.04);
+  vertical-align:middle;
+}
+tbody tr:last-child td{border-bottom:none}
+.mono{font-family:"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.truncate{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
+.text-muted{color:var(--muted)}
+.text-success{color:var(--success)}
+.text-warning{color:var(--warning)}
+.text-danger{color:var(--danger)}
+.text-accent{color:var(--accent)}
+
+/* Loading */
+.loading{text-align:center;padding:48px 24px;color:var(--muted)}
+.loading-spinner{
+  display:inline-block;width:24px;height:24px;border:2px solid var(--panel-border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
+  margin-bottom:8px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Responsive */
+@media(max-width:768px){
+  :root{--sidebar-w:0px}
+  .sidebar{display:none}
+  .content{padding:16px}
+}
+
+/* Progress bar */
+.progress-bar{height:6px;border-radius:3px;background:rgba(0,0,0,0.06);overflow:hidden;margin-top:6px}
+.progress-fill{height:100%;border-radius:3px;transition:width .3s ease}
+.progress-green{background:var(--success)}
+.progress-yellow{background:var(--warning)}
+.progress-blue{background:var(--accent)}
+
+/* Timeline items */
+.timeline{display:flex;flex-direction:column;gap:8px}
+.timeline-item{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:12px 16px;border-radius:var(--radius-sm);
+  border:1px solid var(--panel-border);
+}
+.timeline-idx{
+  width:28px;height:28px;border-radius:8px;
+  display:grid;place-items:center;font-weight:700;font-size:12px;
+  flex-shrink:0;
+}
+.timeline-idx.done{background:var(--success-bg);color:var(--success)}
+.timeline-idx.active{background:var(--accent-light);color:var(--accent)}
+.timeline-idx.pending{background:rgba(0,0,0,0.05);color:var(--muted)}
+.timeline-body{flex:1;min-width:0}
+.timeline-title{font-weight:600;font-size:13px}
+.timeline-meta{font-size:11px;color:var(--muted);margin-top:2px}
+.timeline-meta .mono{font-size:11px}
+
+/* Hide section helper */
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<header class="topbar">
+  <div class="topbar-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    Modulr Dashboard
+  </div>
+  <span class="topbar-badge">NODE</span>
+  <div class="topbar-right">
+    <span class="topbar-uptime" id="uptime"></span>
+    <span class="topbar-uptime" id="refresh-timer"></span>
+    <button class="topbar-refresh" onclick="fetchAll()">Refresh</button>
+  </div>
+</header>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-label">OVERVIEW</div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-item active" data-page="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        <div class="sidebar-item-text">
+          <div>Overview</div>
+          <div class="sidebar-item-desc">Node status & stats</div>
+        </div>
+      </button>
+    </nav>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-label">THREADS</div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-item" data-page="execution">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <div class="sidebar-item-text">
+          <div>Execution Thread</div>
+          <div class="sidebar-item-desc">Block execution & state</div>
+        </div>
+        <span class="sidebar-status"><span class="dot dot-gray" id="dot-exec"></span></span>
+      </button>
+      <button class="sidebar-item" data-page="approvement">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div class="sidebar-item-text">
+          <div>Approvement Thread</div>
+          <div class="sidebar-item-desc">Epoch rotation & consensus</div>
+        </div>
+        <span class="sidebar-status"><span class="dot dot-gray" id="dot-approve"></span></span>
+      </button>
+      <button class="sidebar-item" data-page="generation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a4 4 0 00-8 0v2"/></svg>
+        <div class="sidebar-item-text">
+          <div>Block Generation</div>
+          <div class="sidebar-item-desc">Generation & proofs grabbing</div>
+        </div>
+        <span class="sidebar-status"><span class="dot dot-gray" id="dot-gen"></span></span>
+      </button>
+      <button class="sidebar-item" data-page="leader_finalization">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <div class="sidebar-item-text">
+          <div>Leader Finalization</div>
+          <div class="sidebar-item-desc">ALFP collection & delivery</div>
+        </div>
+        <span class="sidebar-status"><span class="dot dot-gray" id="dot-alfp"></span></span>
+      </button>
+      <button class="sidebar-item" data-page="alfp_watcher">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <div class="sidebar-item-text">
+          <div>ALFP Inclusion Watcher</div>
+          <div class="sidebar-item-desc">Anchor block scanning</div>
+        </div>
+        <span class="sidebar-status"><span class="dot dot-gray" id="dot-watcher"></span></span>
+      </button>
+    </nav>
+  </div>
+</aside>
+
+<!-- Main -->
+<div class="main">
+  <div class="content">
+
+    <!-- Overview page -->
+    <div id="page-overview">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Node Overview</div>
+          <span class="card-badge badge-neutral" id="overview-version"></span>
+        </div>
+        <div class="stats-grid" id="overview-stats"></div>
+        <div id="overview-anchors"></div>
+      </div>
+    </div>
+
+    <!-- Execution Thread page -->
+    <div id="page-execution" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Execution Thread</div>
+          <span class="card-badge badge-neutral" id="exec-epoch-badge"></span>
+        </div>
+        <div class="stats-grid" id="exec-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Epoch Statistics</div></div>
+        <div class="stats-grid" id="exec-epoch-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Execution Data (per Leader)</div></div>
+        <div class="table-wrap" id="exec-data-table"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Sequence Alignment</div></div>
+        <div class="stats-grid" id="exec-alignment"></div>
+        <div class="table-wrap" id="exec-alignment-leaders"></div>
+      </div>
+    </div>
+
+    <!-- Approvement Thread page -->
+    <div id="page-approvement" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Approvement Thread</div>
+          <span class="card-badge badge-neutral" id="approve-epoch-badge"></span>
+        </div>
+        <div class="stats-grid" id="approve-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Leaders Sequence</div></div>
+        <div class="table-wrap" id="approve-leaders-table"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Quorum Members</div></div>
+        <div class="table-wrap" id="approve-quorum-table"></div>
+      </div>
+    </div>
+
+    <!-- Block Generation page -->
+    <div id="page-generation" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Block Generation</div>
+        </div>
+        <div class="stats-grid" id="gen-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Proofs Grabber</div></div>
+        <div class="stats-grid" id="gen-proofs-stats"></div>
+      </div>
+    </div>
+
+    <!-- Leader Finalization page -->
+    <div id="page-leader_finalization" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Leader Finalization Thread (ALFP)</div>
+          <span class="card-badge badge-neutral" id="alfp-epoch-badge"></span>
+        </div>
+        <div class="stats-grid" id="alfp-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Leaders ALFP Status</div></div>
+        <div class="timeline" id="alfp-leaders"></div>
+      </div>
+    </div>
+
+    <!-- ALFP Watcher page -->
+    <div id="page-alfp_watcher" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">ALFP Inclusion Watcher</div>
+          <span class="card-badge badge-neutral" id="watcher-badge"></span>
+        </div>
+        <div class="stats-grid" id="watcher-stats"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Leader Inclusion Status</div></div>
+        <div class="table-wrap" id="watcher-leaders"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Anchor Scan Progress</div></div>
+        <div class="table-wrap" id="watcher-anchors"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const BASE = '';
+const REFRESH_INTERVAL = 3000;
+
+let currentPage = 'overview';
+let lastFetch = Date.now();
+let dataCache = {};
+
+// Navigation
+document.querySelectorAll('.sidebar-item[data-page]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentPage = btn.dataset.page;
+    document.querySelectorAll('.sidebar-item[data-page]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('[id^="page-"]').forEach(p => p.classList.add('hidden'));
+    document.getElementById('page-' + currentPage).classList.remove('hidden');
+    renderCurrent();
+  });
+});
+
+function shortKey(key, len = 12) {
+  if (!key) return '—';
+  if (key.length <= len * 2) return key;
+  return key.slice(0, len) + '…' + key.slice(-len);
+}
+
+function shortHash(hash, len = 8) {
+  if (!hash) return '—';
+  if (hash.length <= len) return hash;
+  return hash.slice(0, len) + '…';
+}
+
+function formatNumber(n) {
+  if (n === undefined || n === null) return '—';
+  return Number(n).toLocaleString();
+}
+
+function dotClass(ok) {
+  return ok ? 'dot dot-green' : 'dot dot-yellow';
+}
+
+function badgeFor(ok, textOk = 'ACTIVE', textErr = 'WAITING') {
+  return `<span class="card-badge ${ok ? 'badge-ok' : 'badge-warn'}">${ok ? textOk : textErr}</span>`;
+}
+
+function statBox(label, value, cls = '') {
+  return `<div class="stat-box"><div class="stat-label">${label}</div><div class="stat-value ${cls}">${value}</div></div>`;
+}
+
+function renderOverview() {
+  const d = dataCache.overview;
+  if (!d) return;
+
+  document.getElementById('overview-version').textContent = 'v' + d.coreVersion;
+  document.getElementById('uptime').textContent = 'Uptime: ' + d.uptime;
+
+  const et = dataCache.execution;
+  const at = dataCache.approvement;
+
+  let html = '';
+  html += statBox('Public Key', `<span class="mono truncate" title="${d.publicKey}">${shortKey(d.publicKey, 16)}</span>`);
+  html += statBox('Network ID', d.networkId || '—');
+  html += statBox('Core Version', d.coreVersion);
+  html += statBox('Uptime', d.uptime);
+
+  if (et) {
+    html += statBox('ET Epoch', et.epoch.id);
+    html += statBox('Last Height', formatNumber(et.statistics?.lastHeight));
+    html += statBox('Total TXs', formatNumber(et.statistics?.totalTransactions));
+    html += statBox('Successful TXs', formatNumber(et.statistics?.successfulTransactions));
+  }
+  if (at) {
+    html += statBox('AT Epoch', at.epoch.id);
+    html += statBox('Current Leader', `#${at.epoch.currentLeaderIndex}`);
+  }
+
+  document.getElementById('overview-stats').innerHTML = html;
+
+  if (d.anchors && d.anchors.length > 0) {
+    let anchorsHtml = '<div style="margin-top:8px"><div class="stat-label" style="margin-bottom:8px">ANCHORS (' + d.anchors.length + ')</div>';
+    anchorsHtml += '<table><thead><tr><th>#</th><th>Pubkey</th><th>URL</th></tr></thead><tbody>';
+    d.anchors.forEach((a, i) => {
+      anchorsHtml += `<tr><td>${i}</td><td class="mono"><span class="truncate" title="${a.pubkey}">${shortKey(a.pubkey)}</span></td><td class="mono text-muted">${a.anchorURL || '—'}</td></tr>`;
+    });
+    anchorsHtml += '</tbody></table></div>';
+    document.getElementById('overview-anchors').innerHTML = anchorsHtml;
+  }
+}
+
+function renderExecution() {
+  const d = dataCache.execution;
+  if (!d) return;
+
+  document.getElementById('exec-epoch-badge').textContent = 'Epoch #' + d.epoch.id;
+
+  let html = '';
+  html += statBox('Epoch ID', d.epoch.id);
+  html += statBox('Epoch Hash', shortHash(d.epoch.hash), 'mono');
+  html += statBox('Start Timestamp', d.epoch.startTimestamp);
+  html += statBox('Current Leader Index', d.epoch.currentLeaderIndex);
+  html += statBox('Leaders Count', d.epoch.leadersSequence?.length || 0);
+  html += statBox('Quorum Size', d.epoch.quorum?.length || 0);
+  document.getElementById('exec-stats').innerHTML = html;
+
+  // Global stats
+  const s = d.statistics || {};
+  let shtml = '';
+  shtml += statBox('Last Height', formatNumber(s.lastHeight));
+  shtml += statBox('Blocks Generated', formatNumber(s.blocksGenerated));
+  shtml += statBox('Total TXs', formatNumber(s.totalTransactions));
+  shtml += statBox('Successful TXs', formatNumber(s.successfulTransactions));
+  shtml += statBox('Total Fees', formatNumber(s.totalFees));
+  shtml += statBox('Accounts', formatNumber(s.accountsNumber));
+  shtml += statBox('Staking Delta', formatNumber(s.stakingDelta));
+
+  // Epoch stats
+  const es = d.epochStatistics || {};
+  shtml += statBox('Epoch Blocks', formatNumber(es.blocksGenerated));
+  shtml += statBox('Epoch TXs', formatNumber(es.totalTransactions));
+  shtml += statBox('Epoch Fees', formatNumber(es.totalFees));
+  document.getElementById('exec-epoch-stats').innerHTML = shtml;
+
+  // Execution Data table
+  const execData = d.executionData || {};
+  const leaders = d.epoch.leadersSequence || [];
+  let thtml = '<table><thead><tr><th>#</th><th>Leader</th><th>Index</th><th>Hash</th></tr></thead><tbody>';
+  leaders.forEach((l, i) => {
+    const ed = execData[l] || {};
+    thtml += `<tr><td>${i}</td><td class="mono"><span class="truncate" title="${l}">${shortKey(l)}</span></td><td>${ed.Index !== undefined ? ed.Index : '—'}</td><td class="mono">${shortHash(ed.Hash)}</td></tr>`;
+  });
+  thtml += '</tbody></table>';
+  document.getElementById('exec-data-table').innerHTML = thtml;
+
+  // Sequence Alignment
+  const sa = d.sequenceAlignment || {};
+  let ahtml = '';
+  ahtml += statBox('Current Anchor', sa.currentAnchorAssumption);
+  ahtml += statBox('Anchor Block Observed', sa.currentAnchorBlockIndexObserved);
+  ahtml += statBox('Leader To Execute From', sa.currentToExecute);
+  document.getElementById('exec-alignment').innerHTML = ahtml;
+
+  const lbl = sa.lastBlocksByLeaders || {};
+  let alhtml = '<table><thead><tr><th>Leader</th><th>Last Index</th><th>Last Hash</th></tr></thead><tbody>';
+  for (const [leader, stats] of Object.entries(lbl)) {
+    alhtml += `<tr><td class="mono"><span class="truncate" title="${leader}">${shortKey(leader)}</span></td><td>${stats.Index}</td><td class="mono">${shortHash(stats.Hash)}</td></tr>`;
+  }
+  if (Object.keys(lbl).length === 0) {
+    alhtml += '<tr><td colspan="3" class="text-muted">No alignment data yet</td></tr>';
+  }
+  alhtml += '</tbody></table>';
+  document.getElementById('exec-alignment-leaders').innerHTML = alhtml;
+}
+
+function renderApprovement() {
+  const d = dataCache.approvement;
+  if (!d) return;
+
+  document.getElementById('approve-epoch-badge').textContent = 'Epoch #' + d.epoch.id;
+
+  const np = d.networkParameters || {};
+  let html = '';
+  html += statBox('Epoch ID', d.epoch.id);
+  html += statBox('Epoch Hash', shortHash(d.epoch.hash), 'mono');
+  html += statBox('Start Timestamp', d.epoch.startTimestamp);
+  html += statBox('Current Leader Index', d.epoch.currentLeaderIndex);
+  html += statBox('Core Version', d.coreVersion);
+  html += statBox('Quorum Size', np.QUORUM_SIZE);
+  html += statBox('Epoch Duration', np.EPOCH_DURATION ? (np.EPOCH_DURATION / 1000) + 's' : '—');
+  html += statBox('Leadership Duration', np.LEADERSHIP_DURATION ? (np.LEADERSHIP_DURATION / 1000) + 's' : '—');
+  html += statBox('Block Time', np.BLOCK_TIME ? np.BLOCK_TIME + 'ms' : '—');
+  html += statBox('TX Limit / Block', np.TXS_LIMIT_PER_BLOCK);
+  document.getElementById('approve-stats').innerHTML = html;
+
+  // Leaders
+  const leaders = d.epoch.leadersSequence || [];
+  let lhtml = '<table><thead><tr><th>#</th><th>Leader Pubkey</th><th>Status</th></tr></thead><tbody>';
+  leaders.forEach((l, i) => {
+    const isCurrent = i === d.epoch.currentLeaderIndex;
+    lhtml += `<tr><td>${i}</td><td class="mono"><span class="truncate" title="${l}">${shortKey(l)}</span></td><td>${isCurrent ? '<span class="text-accent" style="font-weight:600">● ACTIVE</span>' : (i < d.epoch.currentLeaderIndex ? '<span class="text-success">✓ Done</span>' : '<span class="text-muted">Pending</span>')}</td></tr>`;
+  });
+  lhtml += '</tbody></table>';
+  document.getElementById('approve-leaders-table').innerHTML = lhtml;
+
+  // Quorum
+  const quorum = d.epoch.quorum || [];
+  let qhtml = '<table><thead><tr><th>#</th><th>Quorum Member Pubkey</th></tr></thead><tbody>';
+  quorum.forEach((q, i) => {
+    qhtml += `<tr><td>${i}</td><td class="mono"><span class="truncate" title="${q}">${shortKey(q)}</span></td></tr>`;
+  });
+  qhtml += '</tbody></table>';
+  document.getElementById('approve-quorum-table').innerHTML = qhtml;
+}
+
+function renderGeneration() {
+  const d = dataCache.generation;
+  if (!d) return;
+
+  const g = d.generation || {};
+  let html = '';
+  html += statBox('Epoch Full ID', shortHash(g.epochFullId, 20), 'mono');
+  html += statBox('Next Index', g.nextIndex);
+  html += statBox('Prev Hash', shortHash(g.prevHash), 'mono');
+  document.getElementById('gen-stats').innerHTML = html;
+
+  const pg = d.proofsGrabber || {};
+  let phtml = '';
+  phtml += statBox('Epoch', pg.epochId);
+  phtml += statBox('Accepted Index', pg.acceptedIndex);
+  phtml += statBox('Accepted Hash', shortHash(pg.acceptedHash), 'mono');
+  phtml += statBox('Hunting Block ID', pg.huntingForBlockId || '—', 'mono');
+  phtml += statBox('Hunting Block Hash', shortHash(pg.huntingForBlockHash), 'mono');
+  document.getElementById('gen-proofs-stats').innerHTML = phtml;
+}
+
+function renderLeaderFinalization() {
+  const d = dataCache.leader_finalization;
+  if (!d) return;
+
+  document.getElementById('alfp-epoch-badge').textContent = 'Epoch #' + d.processingEpochId;
+
+  let html = '';
+  html += statBox('Processing Epoch', d.processingEpochId);
+  html += statBox('In Quorum', d.inQuorum ? '✓ Yes' : '✗ No');
+  html += statBox('WS Connections', d.wsConnectionCount);
+
+  const leaders = d.leaders || [];
+  const done = leaders.filter(l => l.included || l.confirmedByAlignment).length;
+  const total = leaders.length;
+  html += statBox('Progress', `${done} / ${total}`);
+  document.getElementById('alfp-stats').innerHTML = html;
+
+  // Timeline of leaders
+  let thtml = '';
+  leaders.forEach(l => {
+    let state, stateLabel;
+    if (l.included) {
+      state = 'done';
+      stateLabel = '<span class="text-success" style="font-weight:600">INCLUDED</span>';
+    } else if (l.confirmedByAlignment) {
+      state = 'done';
+      stateLabel = '<span class="text-success">CONFIRMED (alignment)</span>';
+    } else if (l.hasAlfp) {
+      state = 'active';
+      stateLabel = '<span class="text-accent" style="font-weight:600">ALFP COLLECTED — awaiting inclusion</span>';
+    } else if (l.proofsCollected > 0) {
+      state = 'active';
+      stateLabel = `<span class="text-warning" style="font-weight:600">COLLECTING PROOFS (${l.proofsCollected})</span>`;
+    } else {
+      state = 'pending';
+      stateLabel = '<span class="text-muted">Pending</span>';
+    }
+
+    thtml += `<div class="timeline-item">
+      <div class="timeline-idx ${state}">${l.leaderIndex}</div>
+      <div class="timeline-body">
+        <div class="timeline-title"><span class="mono truncate" title="${l.pubkey}" style="max-width:220px">${shortKey(l.pubkey, 16)}</span></div>
+        <div class="timeline-meta">
+          ${stateLabel}
+          &nbsp;&middot;&nbsp; SkipData: <span class="mono">${l.skipDataIndex}</span> / <span class="mono">${shortHash(l.skipDataHash)}</span>
+          &nbsp;&middot;&nbsp; Proofs: <span style="font-weight:600">${l.proofsCollected}</span>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  if (leaders.length === 0) {
+    thtml = '<div class="text-muted" style="padding:16px">No leaders data available</div>';
+  }
+
+  document.getElementById('alfp-leaders').innerHTML = thtml;
+}
+
+function renderAlfpWatcher() {
+  const d = dataCache.alfp_watcher;
+  if (!d) return;
+
+  const badge = document.getElementById('watcher-badge');
+  if (d.allIncluded) {
+    badge.className = 'card-badge badge-ok';
+    badge.textContent = 'ALL INCLUDED';
+  } else {
+    badge.className = 'card-badge badge-warn';
+    badge.textContent = 'SCANNING';
+  }
+
+  let html = '';
+  html += statBox('Epoch', d.epochId);
+  html += statBox('Current Anchor', d.currentAnchorAssumption);
+  html += statBox('Anchor Block Observed', d.currentAnchorBlockIndexObserved);
+  html += statBox('All Included', d.allIncluded ? '✓ Yes' : '✗ No');
+  document.getElementById('watcher-stats').innerHTML = html;
+
+  // Leader inclusion
+  const lStatus = d.leaderInclusionStatus || {};
+  let lhtml = '<table><thead><tr><th>Leader</th><th>Included</th></tr></thead><tbody>';
+  for (const [leader, included] of Object.entries(lStatus)) {
+    lhtml += `<tr><td class="mono"><span class="truncate" title="${leader}">${shortKey(leader)}</span></td><td>${included ? '<span class="text-success" style="font-weight:600">✓ Yes</span>' : '<span class="text-warning">✗ No</span>'}</td></tr>`;
+  }
+  if (Object.keys(lStatus).length === 0) {
+    lhtml += '<tr><td colspan="2" class="text-muted">No data</td></tr>';
+  }
+  lhtml += '</tbody></table>';
+  document.getElementById('watcher-leaders').innerHTML = lhtml;
+
+  // Anchor scan progress
+  const anchors = d.lastBlocksByAnchors || {};
+  let ahtml = '<table><thead><tr><th>Anchor Index</th><th>Last Block Index</th><th>Last Block Hash</th></tr></thead><tbody>';
+  for (const [idx, stats] of Object.entries(anchors)) {
+    ahtml += `<tr><td>${idx}</td><td>${stats.Index}</td><td class="mono">${shortHash(stats.Hash)}</td></tr>`;
+  }
+  if (Object.keys(anchors).length === 0) {
+    ahtml += '<tr><td colspan="3" class="text-muted">No anchor data scanned yet</td></tr>';
+  }
+  ahtml += '</tbody></table>';
+  document.getElementById('watcher-anchors').innerHTML = ahtml;
+}
+
+function renderCurrent() {
+  switch (currentPage) {
+    case 'overview': renderOverview(); break;
+    case 'execution': renderExecution(); break;
+    case 'approvement': renderApprovement(); break;
+    case 'generation': renderGeneration(); break;
+    case 'leader_finalization': renderLeaderFinalization(); break;
+    case 'alfp_watcher': renderAlfpWatcher(); break;
+  }
+}
+
+// Update sidebar dots
+function updateDots() {
+  const et = dataCache.execution;
+  const at = dataCache.approvement;
+  const gen = dataCache.generation;
+  const alfp = dataCache.leader_finalization;
+  const watcher = dataCache.alfp_watcher;
+
+  if (et) document.getElementById('dot-exec').className = dotClass(et.statistics?.lastHeight >= 0);
+  if (at) document.getElementById('dot-approve').className = dotClass(at.epoch?.id >= 0);
+  if (gen) document.getElementById('dot-gen').className = dotClass(gen.generation?.nextIndex >= 0);
+  if (alfp) {
+    const allDone = alfp.leaders && alfp.leaders.length > 0 && alfp.leaders.every(l => l.included || l.confirmedByAlignment);
+    document.getElementById('dot-alfp').className = allDone ? 'dot dot-green' : (alfp.leaders?.length > 0 ? 'dot dot-yellow' : 'dot dot-gray');
+  }
+  if (watcher) document.getElementById('dot-watcher').className = watcher.allIncluded ? 'dot dot-green' : 'dot dot-yellow';
+}
+
+async function fetchEndpoint(name, path) {
+  try {
+    const res = await fetch(BASE + path);
+    if (res.ok) dataCache[name] = await res.json();
+  } catch (e) {
+    console.warn('Failed to fetch', path, e);
+  }
+}
+
+async function fetchAll() {
+  await Promise.all([
+    fetchEndpoint('overview', '/dashboard/api/overview'),
+    fetchEndpoint('execution', '/dashboard/api/execution'),
+    fetchEndpoint('approvement', '/dashboard/api/approvement'),
+    fetchEndpoint('generation', '/dashboard/api/generation'),
+    fetchEndpoint('leader_finalization', '/dashboard/api/leader_finalization'),
+    fetchEndpoint('alfp_watcher', '/dashboard/api/alfp_watcher'),
+  ]);
+  lastFetch = Date.now();
+  updateDots();
+  renderCurrent();
+}
+
+// Refresh timer display
+setInterval(() => {
+  const ago = Math.round((Date.now() - lastFetch) / 1000);
+  document.getElementById('refresh-timer').textContent = `Updated ${ago}s ago`;
+}, 500);
+
+// Auto-refresh
+setInterval(fetchAll, REFRESH_INTERVAL);
+
+// Initial load
+fetchAll();
+</script>
+</body>
+</html>
