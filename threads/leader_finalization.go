@@ -47,6 +47,43 @@ var (
 	ALFP_PROCESS_METADATA *AlfpProcessMetadata
 )
 
+// GetLeaderFinalizationWsConnectionCount returns the number of non-nil WS connections
+// currently maintained by LeaderFinalizationThread for the given epoch.
+// Returns 0 if the thread is not processing this epoch.
+func GetLeaderFinalizationWsConnectionCount(epochId int) int {
+	ALFP_GRABBING_MUTEX.Lock()
+	defer ALFP_GRABBING_MUTEX.Unlock()
+
+	if ALFP_PROCESS_METADATA == nil || ALFP_PROCESS_METADATA.EpochId != epochId {
+		return 0
+	}
+	wsCount := 0
+	for _, conn := range ALFP_PROCESS_METADATA.WsConns {
+		if conn != nil {
+			wsCount++
+		}
+	}
+	return wsCount
+}
+
+// GetLeaderFinalizationLiveCache returns a snapshot of in-memory collection progress
+// for the (epochId, leader) pair.
+// ok=false if there is no active metadata/caches for this epoch or leader.
+func GetLeaderFinalizationLiveCache(epochId int, leader string) (skipDataIndex int, skipDataHash string, proofsCollected int, ok bool) {
+	ALFP_GRABBING_MUTEX.Lock()
+	defer ALFP_GRABBING_MUTEX.Unlock()
+
+	if ALFP_PROCESS_METADATA == nil || ALFP_PROCESS_METADATA.EpochId != epochId {
+		return 0, "", 0, false
+	}
+	key := fmt.Sprintf("%d:%s", epochId, leader)
+	cache, exists := ALFP_PROCESS_METADATA.Caches[key]
+	if !exists || cache == nil {
+		return 0, "", 0, false
+	}
+	return cache.SkipData.Index, cache.SkipData.Hash, len(cache.Proofs), true
+}
+
 func LeaderFinalizationThread() {
 
 	processingEpochIndex := loadFinalizationProgress()

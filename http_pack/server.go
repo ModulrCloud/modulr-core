@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/modulrcloud/modulr-core/dashboard"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/http_pack/routes"
 	"github.com/modulrcloud/modulr-core/utils"
@@ -36,11 +35,11 @@ func createRouter() fasthttp.RequestHandler {
 	r.POST("/delayed_transactions_signature", routes.SignDelayedTransactions)
 
 	// Dashboard
-	r.GET("/dashboard", dashboard.ServeDashboard)
-	r.GET("/dashboard/api/overview", dashboard.ServeOverview)
-	r.GET("/dashboard/api/execution", dashboard.ServeExecutionThread)
-	r.GET("/dashboard/api/approvement", dashboard.ServeApprovementThread)
-	r.GET("/dashboard/api/leader_finalization", dashboard.ServeLeaderFinalization)
+	r.GET("/dashboard", routes.ServeDashboard)
+	r.GET("/dashboard/api/overview", routes.ServeDashboardOverview)
+	r.GET("/dashboard/api/execution", routes.ServeDashboardExecutionThread)
+	r.GET("/dashboard/api/approvement", routes.ServeDashboardApprovementThread)
+	r.GET("/dashboard/api/leader_finalization", routes.ServeDashboardLeaderFinalization)
 
 	return r.Handler
 }

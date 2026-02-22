@@ -8,6 +8,7 @@ import (
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
+	"github.com/modulrcloud/modulr-core/http_pack/helpers"
 	"github.com/modulrcloud/modulr-core/utils"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -24,18 +25,14 @@ type delayedTransactionsSignResponse struct {
 
 func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 
-	ctx.Response.Header.Set("Access-Control-Allow-Origin", "*")
-
 	var request delayedTransactionsSignRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
-		ctx.SetStatusCode(fasthttp.StatusBadRequest)
-		ctx.Write([]byte(`{"err":"Invalid JSON"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")
 		return
 	}
 
 	if request.EpochIndex < 0 {
-		ctx.SetStatusCode(fasthttp.StatusBadRequest)
-		ctx.Write([]byte(`{"err":"Invalid epoch index"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid epoch index")
 		return
 	}
 
@@ -52,8 +49,7 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 	}
 
 	if !inQuorum {
-		ctx.SetStatusCode(fasthttp.StatusForbidden)
-		ctx.Write([]byte(`{"err":"Not in quorum"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusForbidden, "Not in quorum")
 		return
 	}
 
@@ -62,35 +58,27 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 
 	if err != nil {
 		if err == leveldb.ErrNotFound {
-			ctx.SetStatusCode(fasthttp.StatusNotFound)
-			ctx.Write([]byte(`{"err":"No delayed transactions found"}`))
+			helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No delayed transactions found")
 			return
 		}
 
-		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-		ctx.Write([]byte(`{"err":"Failed to load delayed transactions"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to load delayed transactions")
 		return
 	}
 
 	var cachedPayloads []map[string]string
 	if unmarshalErr := json.Unmarshal(payloadBytes, &cachedPayloads); unmarshalErr != nil {
-		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-		ctx.Write([]byte(`{"err":"Failed to parse delayed transactions"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse delayed transactions")
 		return
 	}
 
 	if len(cachedPayloads) == 0 {
-		ctx.SetStatusCode(fasthttp.StatusNotFound)
-		ctx.Write([]byte(`{"err":"No delayed transactions found"}`))
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No delayed transactions found")
 		return
 	}
 
 	hashOfPayloads := utils.Blake3(string(payloadBytes))
 	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, hashOfPayloads)
 
-	response, _ := json.Marshal(delayedTransactionsSignResponse{Signature: signature})
-
-	ctx.SetStatusCode(fasthttp.StatusOK)
-	ctx.SetContentType("application/json")
-	ctx.Write(response)
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, delayedTransactionsSignResponse{Signature: signature})
 }
