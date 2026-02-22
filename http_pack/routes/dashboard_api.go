@@ -64,11 +64,11 @@ func ServeDashboardOverview(ctx *fasthttp.RequestCtx) {
 
 type dashboardExecutionThreadResponse struct {
 	Epoch             structures.EpochDataHandler          `json:"epoch"`
-	Statistics        *structures.Statistics                `json:"statistics"`
-	EpochStatistics   *structures.Statistics                `json:"epochStatistics"`
-	ExecutionData     map[string]structures.ExecutionStats  `json:"executionData"`
-	SequenceAlignment structures.AlignmentDataHandler       `json:"sequenceAlignment"`
-	NetworkParameters structures.NetworkParameters          `json:"networkParameters"`
+	Statistics        *structures.Statistics               `json:"statistics"`
+	EpochStatistics   *structures.Statistics               `json:"epochStatistics"`
+	ExecutionData     map[string]structures.ExecutionStats `json:"executionData"`
+	SequenceAlignment structures.AlignmentDataHandler      `json:"sequenceAlignment"`
+	NetworkParameters structures.NetworkParameters         `json:"networkParameters"`
 }
 
 func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
@@ -90,7 +90,7 @@ func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 type dashboardApprovementThreadResponse struct {
 	Epoch             structures.EpochDataHandler  `json:"epoch"`
 	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
-	CoreVersion       int                         `json:"coreVersion"`
+	CoreVersion       int                          `json:"coreVersion"`
 }
 
 func ServeDashboardApprovementThread(ctx *fasthttp.RequestCtx) {
@@ -109,4 +109,3 @@ func ServeDashboardApprovementThread(ctx *fasthttp.RequestCtx) {
 func ServeDashboardLeaderFinalization(ctx *fasthttp.RequestCtx) {
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, dashboard.GetLeaderFinalizationState())
 }
-

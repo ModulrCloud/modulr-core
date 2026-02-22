@@ -205,4 +205,3 @@ func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
 	_, exists := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
 	return exists
 }
-
