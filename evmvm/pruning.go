@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/trie"
 )
 
@@ -34,6 +35,20 @@ func (r *Runner) CompactTo(newDBPath string, newEngine string) (common.Hash, err
 
 	if err := os.MkdirAll(newDBPath, 0o755); err != nil {
 		return common.Hash{}, err
+	}
+
+	// Special-case: empty root has no reachable nodes/codes. Some geth versions reject syncing it
+	// because it's not "available" in DB. For pruning purposes, an empty DB + root marker is enough.
+	if r.root == types.EmptyRootHash {
+		dst, err := openKV(newDBPath, newEngine, 0, 0, false)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		_ = dst.Close()
+		if err := writeRootFile(newDBPath, r.root); err != nil {
+			return common.Hash{}, err
+		}
+		return r.root, nil
 	}
 
 	// Create destination DB.
