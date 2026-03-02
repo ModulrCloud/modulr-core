@@ -2,6 +2,7 @@ package tests
 
 import (
 	"container/list"
+
 	_ "github.com/modulrcloud/modulr-core/tests/testenv"
 
 	"path/filepath"
