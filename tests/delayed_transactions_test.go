@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"container/list"
 	_ "github.com/modulrcloud/modulr-core/tests/testenv"
 
 	"path/filepath"
@@ -11,16 +12,26 @@ import (
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/system_contracts"
+	"github.com/modulrcloud/modulr-core/utils"
 
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
-func setupApprovementHandler(network structures.NetworkParameters) {
+func setupApprovementHandler(t *testing.T, network structures.NetworkParameters) {
 	handlers.APPROVEMENT_THREAD_METADATA.Handler = structures.ApprovementThreadMetadataHandler{
 		NetworkParameters:       network,
 		EpochDataHandler:        structures.EpochDataHandler{},
 		ValidatorsStoragesCache: make(map[string]*structures.ValidatorStorage),
 	}
+
+	// Isolate tests from each other: contract helpers prioritize ValidatorsTouched over cache,
+	// so we must reset touched sets + cache bookkeeping between tests.
+	utils.ResetApprovementTouchedSets()
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRU = list.New()
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRUIndex = make(map[string]*list.Element)
+
+	// Ensure DB handle is always valid (some getters fall back to DB on cache misses).
+	databases.APPROVEMENT_THREAD_METADATA = openTempDB(t)
 }
 
 func openTempDB(t *testing.T) *leveldb.DB {
@@ -38,8 +49,7 @@ func openTempDB(t *testing.T) *leveldb.DB {
 }
 
 func TestCreateValidatorAddsNewValidatorToApprovementCache(t *testing.T) {
-	setupApprovementHandler(structures.NetworkParameters{})
-	databases.APPROVEMENT_THREAD_METADATA = openTempDB(t)
+	setupApprovementHandler(t, structures.NetworkParameters{})
 
 	delayedTx := map[string]string{
 		"creator":         "validator1",
@@ -63,7 +73,7 @@ func TestCreateValidatorAddsNewValidatorToApprovementCache(t *testing.T) {
 }
 
 func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T) {
-	setupApprovementHandler(structures.NetworkParameters{})
+	setupApprovementHandler(t, structures.NetworkParameters{})
 	existing := &structures.ValidatorStorage{
 		Pubkey:          "validator1",
 		Percentage:      50,
@@ -93,7 +103,7 @@ func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T)
 }
 
 func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
-	setupApprovementHandler(structures.NetworkParameters{
+	setupApprovementHandler(t, structures.NetworkParameters{
 		ValidatorRequiredStake: 100,
 		MinimalStakePerStaker:  10,
 	})
@@ -132,7 +142,7 @@ func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
 }
 
 func TestUnstakeRemovesValidatorFromRegistryWhenBelowRequiredStake(t *testing.T) {
-	setupApprovementHandler(structures.NetworkParameters{
+	setupApprovementHandler(t, structures.NetworkParameters{
 		ValidatorRequiredStake: 100,
 		MinimalStakePerStaker:  10,
 	})
