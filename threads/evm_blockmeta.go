@@ -29,13 +29,13 @@ func getEVMRawPayload(tx *structures.Transaction) (string, bool) {
 	return raw, true
 }
 
-func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, blockHash common.Hash, blockTimeSec uint64, batch *leveldb.Batch, logsOut *[]any) (bool, string, uint64, string, uint64, types.Bloom) {
+func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, blockHash common.Hash, blockTimeSec uint64, batch *leveldb.Batch, logsOut *[]any) (bool, bool, string, uint64, string, uint64, types.Bloom) {
 	if execEVMRunner == nil {
-		return false, "evm is not initialized", 0, "", 0, types.Bloom{}
+		return false, false, "evm is not initialized", 0, "", 0, types.Bloom{}
 	}
 	tx, err := parseSignedTx0x(raw0x)
 	if err != nil {
-		return false, "invalid raw tx", 0, "", 0, types.Bloom{}
+		return false, false, "invalid raw tx", 0, "", 0, types.Bloom{}
 	}
 	hashHex := tx.Hash().Hex()
 
@@ -43,11 +43,11 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 	if err != nil {
 		// Core error: invalid tx for this state.
 		storeEVMErrorTxToBatch(batch, hashHex, err.Error(), raw0x)
-		return false, "evm core error: " + err.Error(), 0, hashHex, 0, types.Bloom{}
+		return false, false, "evm core error: " + err.Error(), 0, hashHex, 0, types.Bloom{}
 	}
 	if res == nil {
 		storeEVMErrorTxToBatch(batch, hashHex, "missing execution result", raw0x)
-		return false, "evm: missing execution result", 0, hashHex, 0, types.Bloom{}
+		return false, false, "evm: missing execution result", 0, hashHex, 0, types.Bloom{}
 	}
 
 	status := types.ReceiptStatusSuccessful
@@ -144,7 +144,10 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 	})
 
 	execEVMDirtied = true
-	return !res.Failed(), "evm", 0, hashHex, res.UsedGas, receipt.Bloom
+	if res.Failed() {
+		return true, false, "evm reverted", 0, hashHex, res.UsedGas, receipt.Bloom
+	}
+	return true, true, "evm", 0, hashHex, res.UsedGas, receipt.Bloom
 }
 
 func effectiveGasPrice(tx *types.Transaction, baseFee *big.Int) *big.Int {

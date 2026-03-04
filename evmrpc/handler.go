@@ -129,9 +129,14 @@ func handleWeb3Sha3(req Request) []byte {
 	if err := json.Unmarshal(req.Params, &params); err != nil || len(params) < 1 {
 		return ErrorResponse(req.ID, -32602, "Invalid params")
 	}
-	input := params[0]
-	sum := crypto.Keccak256([]byte(input))
-	return ResultResponse(req.ID, "0x"+common.Bytes2Hex(sum))
+	input := strings.TrimSpace(params[0])
+	// web3_sha3 expects DATA: hex string representing bytes.
+	b, err := hexutil.Decode(input)
+	if err != nil {
+		return ErrorResponse(req.ID, -32602, "Invalid params")
+	}
+	sum := crypto.Keccak256(b)
+	return ResultResponse(req.ID, hexutil.Encode(sum))
 }
 
 func handleSendRawTransaction(req Request) []byte {
@@ -506,44 +511,52 @@ func handleGetLogs(req Request) []byte {
 				}
 			}
 			if len(topicsFilter) > 0 {
-				if topics, ok := lm["topics"].([]any); ok {
-					match := true
-					for i := 0; i < len(topicsFilter) && i < len(topics); i++ {
-						want := topicsFilter[i]
-						if want == nil {
-							continue
-						}
-						// Support topic OR-list: [t1, [t2,t3], null ...]
-						switch w := want.(type) {
-						case string:
-							if w != "" {
-								ts, _ := topics[i].(string)
-								if !strings.EqualFold(w, ts) {
-									match = false
-									break
-								}
-							}
-						case []any:
-							ts, _ := topics[i].(string)
-							okAny := false
-							for _, cand := range w {
-								cs, _ := cand.(string)
-								if cs != "" && strings.EqualFold(cs, ts) {
-									okAny = true
-									break
-								}
-							}
-							if !okAny {
-								match = false
-								break
-							}
-						default:
-							// ignore unknown types
-						}
-					}
-					if !match {
+				topics, ok := lm["topics"].([]any)
+				if !ok {
+					continue
+				}
+				// Enforce full arity: if filter specifies N topic positions,
+				// the log must have at least N topics.
+				if len(topics) < len(topicsFilter) {
+					continue
+				}
+				match := true
+				for i := 0; i < len(topicsFilter); i++ {
+					want := topicsFilter[i]
+					if want == nil {
 						continue
 					}
+					ts, ok := topics[i].(string)
+					if !ok {
+						match = false
+						break
+					}
+					// Support topic OR-list: [t1, [t2,t3], null ...]
+					switch w := want.(type) {
+					case string:
+						if w != "" && !strings.EqualFold(w, ts) {
+							match = false
+							break
+						}
+					case []any:
+						okAny := false
+						for _, cand := range w {
+							cs, ok := cand.(string)
+							if ok && cs != "" && strings.EqualFold(cs, ts) {
+								okAny = true
+								break
+							}
+						}
+						if !okAny {
+							match = false
+							break
+						}
+					default:
+						match = false
+					}
+				}
+				if !match {
+					continue
 				}
 			}
 			out = append(out, lm)
