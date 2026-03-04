@@ -594,36 +594,32 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 		// Embedded Ethereum signed tx path (wallet-compat). We do not require Modulr signature here.
 		if raw0x, ok := getEVMRawPayload(&transaction); ok {
-			okExec, reason, feeSpent, ethHashHex, gasUsed, txBloom := executeEVMSignedTxInBlock(raw0x, index, uint64(nextHeight), evmBlockHash, evmBlockTimeSec, stateBatch, &evmLogs)
-			if okExec {
+			included, success, reason, feeSpent, ethHashHex, gasUsed, txBloom := executeEVMSignedTxInBlock(raw0x, index, uint64(nextHeight), evmBlockHash, evmBlockTimeSec, stateBatch, &evmLogs)
+			blockFees += feeSpent
+
+			// Even reverted EVM txs are included in the EVM block and consume gas.
+			if included {
 				evmTxHashes = append(evmTxHashes, ethHashHex)
 				evmGasUsed += gasUsed
 				// OR blooms to build block-level logsBloom.
 				for i := 0; i < len(evmBloom); i++ {
 					evmBloom[i] |= txBloom[i]
 				}
-				blockFees += feeSpent
-			} else {
-				// Still record Modulr receipt as failed.
-				blockFees += feeSpent
-				reasonStr := reason
-				if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: false, Reason: reasonStr}); err == nil {
-					stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
-				} else {
-					panic("Impossible to add transaction location data to atomic batch")
-				}
-				epochHandlerRef.Statistics.TotalTransactions++
-				epochHandlerRef.EpochStatistics.TotalTransactions++
-				continue
 			}
 
 			epochHandlerRef.Statistics.TotalTransactions++
 			epochHandlerRef.EpochStatistics.TotalTransactions++
-			epochHandlerRef.Statistics.SuccessfulTransactions++
-			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
+			if included && success {
+				epochHandlerRef.Statistics.SuccessfulTransactions++
+				epochHandlerRef.EpochStatistics.SuccessfulTransactions++
+			}
 
-			// Record Modulr receipt (success).
-			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: true, Reason: ""}); err == nil {
+			receiptSuccess := included && success
+			receiptReason := ""
+			if !receiptSuccess {
+				receiptReason = reason
+			}
+			if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: receiptSuccess, Reason: receiptReason}); err == nil {
 				stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 			} else {
 				panic("Impossible to add transaction location data to atomic batch")
