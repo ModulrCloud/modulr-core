@@ -44,3 +44,17 @@ const (
 	DefaultAccountsCacheMax   = 50_000
 	DefaultValidatorsCacheMax = 5_000
 )
+
+// Native currency precision:
+// 1 coin = 10^9 smallest units.
+const (
+	NativeDecimals uint8  = 9
+	NativeScale    uint64 = 1_000_000_000
+)
+
+// 1 coin in EVM is represented as 1e18 wei.
+// Therefore 1 native smallest unit (1e-9 coin) = 1e9 wei.
+const WeiPerNativeUnit uint64 = 1_000_000_000
+
+// Special EVM connector contract/account that accepts bridge transfers from EVM to native.
+const EVMBridgeConnectorAddress = "0x000000000000000000000000000000000000dEaD"
