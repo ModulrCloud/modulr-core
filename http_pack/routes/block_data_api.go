@@ -12,6 +12,7 @@ import (
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
+	"github.com/modulrcloud/modulr-core/units"
 	"github.com/modulrcloud/modulr-core/utils"
 	"github.com/syndtr/goleveldb/leveldb"
 
@@ -266,6 +267,7 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 					valueWei = parseHexQuantityToBig(vhex)
 				}
 				valueEthStr := formatWeiToEtherString(valueWei)
+				valueNativeUnits := etherFloorUint64(valueWei)
 
 				feeWei := big.NewInt(0)
 				if evmRcpt != nil {
@@ -280,26 +282,29 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 					feeWei = new(big.Int).Mul(egp, new(big.Int).SetUint64(gasUsed))
 				}
 				feeEthStr := formatWeiToEtherString(feeWei)
+				feeNativeUnits := etherFloorUint64(feeWei)
 
 				// Legacy-compatible tx object.
 				legacyTx := structures.Transaction{
 					V:      1,
 					From:   fromStr,
 					To:     toStr,
-					Amount: etherFloorUint64(valueWei), // legacy uint64; exact value is in payload.valueWei
-					// Keep the legacy modulr-style unit conversion (same approach as Amount).
-					// Exact fee is still exposed via payload.feeWei/fee.
-					Fee:   etherFloorUint64(feeWei),
-					Sig:   "",
-					Nonce: nonceU64,
+					Amount: valueNativeUnits,
+					Fee:    feeNativeUnits,
+					Sig:    "",
+					Nonce:  nonceU64,
 					Payload: map[string]any{
-						"type":     "evm",
-						"txHash":   hash,
-						"error":    errStr,
-						"valueWei": valueWei.String(),
-						"value":    valueEthStr,
-						"feeWei":   feeWei.String(),
-						"fee":      feeEthStr,
+						"type":             "evm",
+						"txHash":           hash,
+						"error":            errStr,
+						"valueWei":         valueWei.String(),
+						"value":            valueEthStr,
+						"valueNativeUnits": valueNativeUnits,
+						"valueNative":      units.FormatNativeUnits(valueNativeUnits),
+						"feeWei":           feeWei.String(),
+						"fee":              feeEthStr,
+						"feeNativeUnits":   feeNativeUnits,
+						"feeNative":        units.FormatNativeUnits(feeNativeUnits),
 						"evm": map[string]any{
 							"tx":      doc["tx"],
 							"receipt": doc["receipt"],

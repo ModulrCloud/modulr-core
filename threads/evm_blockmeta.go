@@ -143,6 +143,18 @@ func executeEVMSignedTxInBlock(raw0x string, txIndex int, blockNumber uint64, bl
 		"receipt": receipt,
 	})
 
+	if !res.Failed() {
+		_, bridgeErr := processEVMToNativeConnectorTransfer(tx)
+		if bridgeErr != "" {
+			putJSON(batch, "TX:"+hashHex, map[string]any{
+				"tx":      txJSON,
+				"receipt": receipt,
+				"error":   bridgeErr,
+			})
+			return false, bridgeErr, 0, hashHex, res.UsedGas, receipt.Bloom
+		}
+	}
+
 	execEVMDirtied = true
 	return !res.Failed(), "evm", 0, hashHex, res.UsedGas, receipt.Bloom
 }

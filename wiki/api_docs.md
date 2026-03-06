@@ -222,6 +222,8 @@ Finds a transaction by its hash.
   - Convenience fields:
     - `tx.payload.valueWei`, `tx.payload.value` (decimal wei + human-readable ether string)
     - `tx.payload.feeWei`, `tx.payload.fee`
+    - `tx.payload.valueNativeUnits`, `tx.payload.valueNative` (native 1e-9 units + decimal string)
+    - `tx.payload.feeNativeUnits`, `tx.payload.feeNative`
 - **Errors**
   - `400` — missing or invalid hash.
   - `404` — transaction does not exist.
@@ -334,9 +336,10 @@ curl https://localhost:7332/account/6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE
 
 If `accountId` starts with `0x` (EVM address), the API returns the same legacy keys but also includes an `evm` object:
 
-- `balance`: whole-ether floor as `uint64` (legacy compatibility)
+- `balance`: floor in native smallest units (`1e-9` coin) as `uint64`
 - `evm.balanceWei`: exact wei as a decimal string
 - `evm.balanceEth`: human-readable ether string
+- `evm.balanceNativeUnits`, `evm.balanceNative`: native-scaled balance
 - `evm.hasCode`, `evm.codeSize`
 
 ## Epoch data
