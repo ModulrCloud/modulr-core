@@ -40,6 +40,13 @@ const (
 // Default in-memory cache limits (bounded caches to avoid unbounded growth).
 // These are intentionally conservative; adjust after profiling on real testnet load.
 const (
-	DefaultAccountsCacheMax  = 50_000
+	DefaultAccountsCacheMax   = 50_000
 	DefaultValidatorsCacheMax = 5_000
+)
+
+// Native currency precision:
+// 1 coin = 10^9 smallest units.
+const (
+	NativeDecimals uint8  = 9
+	NativeScale    uint64 = 1_000_000_000
 )
