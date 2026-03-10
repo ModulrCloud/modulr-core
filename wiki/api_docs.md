@@ -2,6 +2,15 @@
 
 This document describes every HTTP endpoint registered in [`server.go`](../http_pack/server.go), the expected request inputs, and the response formats returned by the node.
 
+## Native units
+
+- Modulr native token uses fixed-point units.
+- `1 coin = 1_000_000_000 units`.
+- Fields such as `amount`, `fee`, `balance`, and `totalFees` are integer units (`uint64` semantics).
+- UI/SDK should convert:
+  - coin -> units for inputs
+  - units -> coin for display
+
 ## Live statistics
 
 ### `GET /last_height`
