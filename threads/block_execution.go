@@ -23,6 +23,7 @@ import (
 	"github.com/modulrcloud/modulr-core/utils"
 	"github.com/modulrcloud/modulr-core/websocket_pack"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/syndtr/goleveldb/leveldb"
 )
@@ -775,9 +776,12 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 		}
 	}
 
+	toIsNative := cryptography.IsValidPubKey(tx.To)
+	toIsEVM := common.IsHexAddress(tx.To)
+
 	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
-	// Account IDs must be canonical pubkeys.
-	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
+	// Sender must be a canonical pubkey; recipient can be native pubkey or EVM hex address.
+	if !cryptography.IsValidPubKey(tx.From) || (!toIsNative && !toIsEVM) {
 		return false, "invalid pubkey", 0, nil, false
 	}
 
@@ -804,8 +808,6 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 
 		}
 
-		accountTo := utils.GetAccountFromExecThreadState(tx.To)
-
 		totalSpend := tx.Fee + tx.Amount
 
 		nonceOk := tx.Nonce == accountFrom.Nonce+1
@@ -821,7 +823,14 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 
 			accountFrom.Balance -= totalSpend
 
-			accountTo.Balance += tx.Amount
+			if toIsNative {
+				accountTo := utils.GetAccountFromExecThreadState(tx.To)
+				accountTo.Balance += tx.Amount
+			} else {
+				if err := transferNativeToEVMAddress(tx.To, tx.Amount); err != nil {
+					return false, "evm bridge transfer failed", 0, nil, false
+				}
+			}
 
 			accountFrom.Nonce++
 

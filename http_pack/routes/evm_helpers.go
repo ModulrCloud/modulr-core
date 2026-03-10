@@ -3,6 +3,8 @@ package routes
 import (
 	"math/big"
 	"strings"
+
+	"github.com/modulrcloud/modulr-core/units"
 )
 
 var (
@@ -50,20 +52,10 @@ func formatWeiToEtherString(wei *big.Int) string {
 	return sign + intPart.String() + "." + fracStr
 }
 
-// etherFloorUint64 returns floor(wei / 1e18) clamped to uint64 max.
-// Useful for legacy modulr-core APIs that represent balances as uint64.
+// etherFloorUint64 returns floor(wei / 1e9) in native smallest units (1e-9 coin).
+// Kept as legacy helper name to avoid broad refactors in route code.
 func etherFloorUint64(wei *big.Int) uint64 {
-	if wei == nil || wei.Sign() <= 0 {
-		return 0
-	}
-	q := new(big.Int).Quo(wei, weiPerEther)
-	if q.Sign() <= 0 {
-		return 0
-	}
-	if q.BitLen() > 64 {
-		return ^uint64(0)
-	}
-	return q.Uint64()
+	return units.WeiToNativeUnitsFloor(wei)
 }
 
 func is0xHexLen(s string, hexLen int) bool {

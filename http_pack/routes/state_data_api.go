@@ -7,6 +7,7 @@ import (
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/threads"
+	"github.com/modulrcloud/modulr-core/units"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -45,13 +46,15 @@ func GetAccountById(ctx *fasthttp.RequestCtx) {
 			nonce := st.GetNonce(addr)
 			code := st.GetCode(addr)
 
+			balNativeUnits := etherFloorUint64(balWei)
+
 			// Keep the legacy account fields expected by existing explorer code and api_docs.md:
 			// balance/nonce/initiatedTransactions/successfulInitiatedTransactions
-			// For EVM accounts, "balance" is represented as whole-ether floor (uint64) for legacy compatibility.
+			// For EVM accounts, "balance" is represented in native smallest units (1e-9 coin).
 			resp := map[string]any{
 				"type":    "evm",
 				"id":      addr.Hex(),
-				"balance": etherFloorUint64(balWei),
+				"balance": balNativeUnits,
 				"nonce":   nonce,
 				// Ethereum nonce increments for every included tx from the sender (even if it reverts),
 				// so it's the closest "initiated tx count" we can expose without extra per-address indexes.
@@ -59,11 +62,13 @@ func GetAccountById(ctx *fasthttp.RequestCtx) {
 				"successfulInitiatedTransactions": nonce,
 				// EVM extension fields:
 				"evm": map[string]any{
-					"address":    addr.Hex(),
-					"balanceWei": balWei.String(),                // exact, decimal
-					"balanceEth": formatWeiToEtherString(balWei), // human-readable string
-					"hasCode":    len(code) > 0,
-					"codeSize":   len(code),
+					"address":            addr.Hex(),
+					"balanceWei":         balWei.String(),                         // exact, decimal
+					"balanceEth":         formatWeiToEtherString(balWei),          // human-readable string
+					"balanceNativeUnits": balNativeUnits,                          // uint64 floor(wei / 1e9)
+					"balanceNative":      units.FormatNativeUnits(balNativeUnits), // decimal string (9 digits)
+					"hasCode":            len(code) > 0,
+					"codeSize":           len(code),
 				},
 			}
 			b, _ := json.Marshal(resp)
