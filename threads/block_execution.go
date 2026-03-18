@@ -650,133 +650,164 @@ func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) 
 
 func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[string]string, bool) {
 
-	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
-	// Account IDs must be canonical pubkeys.
-	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
-		return false, "invalid pubkey", 0, nil, false
+	if !cryptography.IsValidPubKey(tx.From) {
+		return false, "invalid sender pubkey", 0, nil, false
 	}
 
-	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
+	if tx.To != "system" && !cryptography.IsValidPubKey(tx.To) {
+		return false, "invalid recipient", 0, nil, false
+	}
 
-		accountFrom := utils.GetAccountFromExecThreadState(tx.From)
-		accountFrom.InitiatedTransactions++
+	if !cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
+		return false, "invalid signature", 0, nil, false
+	}
 
-		if delayedTxPayload, delayedTxType, isDelayed := getDelayedTransactionPayload(tx); isDelayed {
+	accountFrom := utils.GetAccountFromExecThreadState(tx.From)
+	accountFrom.InitiatedTransactions++
 
-			if ok, reason := validateDelayedTransaction(delayedTxType, tx, delayedTxPayload, accountFrom); !ok {
+	nonceOk := tx.Nonce == accountFrom.Nonce+1
+	if constants.ShouldBypassNonceCheck(tx.From) {
+		nonceOk = true
+	}
 
-				return false, reason, 0, nil, false
+	if !nonceOk {
+		return false, "wrong nonce", 0, nil, false
+	}
 
-			}
+	if tx.To == "system" {
+		return executeSystemContractCall(tx, accountFrom)
+	}
 
-			accountFrom.Balance -= tx.Fee
+	// Regular transfer
+	accountTo := utils.GetAccountFromExecThreadState(tx.To)
 
-			accountFrom.Nonce++
+	totalSpend := tx.Fee + tx.Amount
 
-			accountFrom.SuccessfulInitiatedTransactions++
-
-			return true, "", tx.Fee, delayedTxPayload, true
-
-		}
-
-		accountTo := utils.GetAccountFromExecThreadState(tx.To)
-
-		totalSpend := tx.Fee + tx.Amount
-
-		nonceOk := tx.Nonce == accountFrom.Nonce+1
-		if constants.ShouldBypassNonceCheck(tx.From) {
-			nonceOk = true
-		}
-
-		if !nonceOk {
-			return false, "wrong nonce", 0, nil, false
-		}
-
-		if accountFrom.Balance >= totalSpend {
-
-			accountFrom.Balance -= totalSpend
-
-			accountTo.Balance += tx.Amount
-
-			accountFrom.Nonce++
-
-			accountFrom.SuccessfulInitiatedTransactions++
-
-			return true, "", tx.Fee, nil, false
-
-		}
-
+	if accountFrom.Balance < totalSpend {
 		return false, "insufficient balance", 0, nil, false
-
 	}
 
-	return false, "invalid signature", 0, nil, false
+	accountFrom.Balance -= totalSpend
+	accountTo.Balance += tx.Amount
+	accountFrom.Nonce++
+	accountFrom.SuccessfulInitiatedTransactions++
+
+	return true, "", tx.Fee, nil, false
 
 }
 
-func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string, string, bool) {
+func executeSystemContractCall(tx *structures.Transaction, accountFrom *structures.Account) (bool, string, uint64, map[string]string, bool) {
+
+	contract, method, payload, ok := parseSystemContractPayload(tx)
+
+	if !ok {
+		return false, "invalid system contract payload", 0, nil, false
+	}
+
+	contractMap, contractExists := system_contracts.SYSTEM_CONTRACTS_MAP[contract]
+
+	if !contractExists {
+		return false, "unknown system contract", 0, nil, false
+	}
+
+	_, methodExists := contractMap[method]
+
+	if !methodExists {
+		return false, "unknown system contract method", 0, nil, false
+	}
+
+	if contract == "delayedTransactions" {
+
+		if ok, reason := validateDelayedTransaction(method, tx, payload, accountFrom); !ok {
+			return false, reason, 0, nil, false
+		}
+
+		accountFrom.Balance -= tx.Fee
+		accountFrom.Nonce++
+		accountFrom.SuccessfulInitiatedTransactions++
+
+		return true, "", tx.Fee, payload, true
+
+	}
+
+	// Immediate execution (bridge, etc.)
+	payload["from"] = tx.From
+
+	payloadAmount := uint64(0)
+	if amountStr, exists := payload["amount"]; exists {
+		if amt, err := strconv.ParseUint(amountStr, 10, 64); err == nil {
+			payloadAmount = amt
+		}
+	}
+
+	totalSpend := tx.Fee + payloadAmount
+
+	if accountFrom.Balance < totalSpend {
+		return false, "insufficient balance", 0, nil, false
+	}
+
+	handler := contractMap[method]
+	success := handler(payload, constants.ContextExecutionThread)
+
+	if !success {
+		return false, "system contract execution failed", 0, nil, false
+	}
+
+	accountFrom.Balance -= tx.Fee
+	accountFrom.Nonce++
+	accountFrom.SuccessfulInitiatedTransactions++
+
+	return true, "", tx.Fee, nil, false
+
+}
+
+func parseSystemContractPayload(tx *structures.Transaction) (string, string, map[string]string, bool) {
 
 	if tx.Payload == nil {
-
-		return nil, "", false
-
+		return "", "", nil, false
 	}
 
-	payloadType, ok := tx.Payload["type"]
+	contractRaw, exists := tx.Payload["contract"]
+	if !exists {
+		return "", "", nil, false
+	}
 
+	contract, ok := contractRaw.(string)
 	if !ok {
-
-		return nil, "", false
-
+		return "", "", nil, false
 	}
 
-	payloadTypeStr, ok := payloadType.(string)
+	methodRaw, exists := tx.Payload["method"]
+	if !exists {
+		return "", "", nil, false
+	}
 
+	method, ok := methodRaw.(string)
 	if !ok {
-
-		return nil, "", false
-
-	}
-
-	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadTypeStr]; !exists {
-
-		return nil, "", false
-
+		return "", "", nil, false
 	}
 
 	payload := make(map[string]string)
 
 	for key, value := range tx.Payload {
-
 		payload[key] = fmt.Sprint(value)
-
 	}
 
-	return payload, payloadTypeStr, true
+	return contract, method, payload, true
 
 }
 
-func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) (bool, string) {
+func validateDelayedTransaction(method string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) (bool, string) {
 
 	if accountFrom == nil {
-
 		return false, "missing sender account"
-
-	}
-
-	if !constants.ShouldBypassNonceCheck(tx.From) && tx.Nonce != accountFrom.Nonce+1 {
-
-		return false, "wrong nonce"
-
 	}
 
 	if accountFrom.Balance < tx.Fee {
-
 		return false, "insufficient balance for fee"
-
 	}
 
-	switch delayedTxType {
+	switch method {
 
 	case "createValidator", "updateValidator":
 
@@ -790,9 +821,7 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 		amount, err := strconv.ParseUint(payload["amount"], 10, 64)
 
 		if err != nil {
-
 			return false, "invalid delayed transaction amount"
-
 		}
 
 		if accountFrom.Balance < amount+tx.Fee {

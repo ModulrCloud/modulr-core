@@ -346,15 +346,16 @@ func firstBlockDataKey(epochIndex int) []byte {
 
 }
 
-func executeDelayedTransaction(delayedTransaction map[string]string, contextTag string) {
+func executeDelayedTransaction(delayedTransactionPayload map[string]string, contextTag string) {
 
-	if delayedTxType, ok := delayedTransaction["type"]; ok {
+	contract := delayedTransactionPayload["contract"]
+	method := delayedTransactionPayload["method"]
 
-		// Now find the handler
+	if contractMap, ok := system_contracts.SYSTEM_CONTRACTS_MAP[contract]; ok {
 
-		if funcHandler, ok := system_contracts.DELAYED_TRANSACTIONS_MAP[delayedTxType]; ok {
+		if handler, ok := contractMap[method]; ok {
 
-			funcHandler(delayedTransaction, contextTag)
+			handler(delayedTransactionPayload, contextTag)
 
 		}
 
