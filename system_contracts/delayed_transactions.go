@@ -11,15 +11,6 @@ import (
 	"github.com/modulrcloud/modulr-core/utils"
 )
 
-type DelayedTxExecutorFunction = func(map[string]string, string) bool
-
-var DELAYED_TRANSACTIONS_MAP = map[string]DelayedTxExecutorFunction{
-	"createValidator": CreateValidator,
-	"updateValidator": UpdateValidator,
-	"stake":           Stake,
-	"unstake":         Unstake,
-}
-
 func CreateValidator(delayedTransaction map[string]string, context string) bool {
 
 	validatorPubkey := delayedTransaction["creator"]
