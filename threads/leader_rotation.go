@@ -1,3 +1,4 @@
+// Thread to rotate the leaders and move from one to another within the epoch
 package threads
 
 import (

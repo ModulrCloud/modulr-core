@@ -33,7 +33,9 @@ var CHAINDATA_PATH = func() string {
 
 	dirPath := os.Getenv("CHAINDATA_PATH")
 
-	if dirPath == "" && isTestBinary() {
+	exeName := filepath.Base(os.Args[0])
+
+	if dirPath == "" && (strings.HasSuffix(exeName, ".test") || strings.Contains(exeName, ".test")) {
 		if tempDir, err := os.MkdirTemp("", "chaindata"); err == nil {
 			dirPath = tempDir
 		}
@@ -68,14 +70,6 @@ var CHAINDATA_PATH = func() string {
 	return dirPath
 
 }()
-
-func isTestBinary() bool {
-
-	exeName := filepath.Base(os.Args[0])
-
-	return strings.HasSuffix(exeName, ".test") || strings.Contains(exeName, ".test")
-
-}
 
 var CONFIGURATION structures.NodeLevelConfig
 

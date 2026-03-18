@@ -1,3 +1,4 @@
+// Thread to handle epoch transitions and execute delayed transactions
 package threads
 
 import (

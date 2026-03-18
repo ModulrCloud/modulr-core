@@ -1,3 +1,4 @@
+// Thread to fetch blocks from the network and execute them sequentially based on the sequence alignment (sequence_alignment.go)
 package threads
 
 import (

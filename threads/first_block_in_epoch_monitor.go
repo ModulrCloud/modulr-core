@@ -1,3 +1,5 @@
+// Thread to monitor and cache the first block of each epoch
+// From this block we'll retrieve the delayed transactions and execute them on the end of epoch
 package threads
 
 import (

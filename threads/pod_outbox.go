@@ -1,3 +1,4 @@
+// Thread to retry sending pending Proof-of-Delivery messages from the outbox
 package threads
 
 import (

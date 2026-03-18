@@ -1,3 +1,10 @@
+// Thread to iterate over anchor blocks and collect the ALFP - aggregated leader finalization proof
+// This is a special proof which shows that quorum members agree that the last block by leader X was block with ID - Y
+// Based on this proof we are filling the SequenceAlignmentData.LastBlocksByLeaders map
+// This map is used by block_execution.go to fetch blocks from the network and execute them sequentially
+//
+// TLDR - if we know that the leaders sequence for epoch X is [L0, L1, L2, ... Ln] then
+// In this thread we'll get the map like {L0:{lastBlockIndex,lastBlockHash},...Ln:{lastBlockIndex,lastBlockHash}}
 package threads
 
 import (

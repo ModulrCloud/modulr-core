@@ -1,3 +1,5 @@
+// Thread to scan anchor blocks for included ALFP
+// We need this for durability to have a 100% guarantee that we'll have ALFP for each leader in each epoch
 package threads
 
 import (

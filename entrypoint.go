@@ -72,6 +72,9 @@ func RunBlockchain() {
 	//✅ 9.Thread to asynchronously find and store first block data in each epoch
 	go threads.FirstBlockInEpochMonitorThread()
 
+	//✅ 10.Thread to make "last mile finalization" (important for recovery)
+	go threads.LastMileFinalizerThread()
+
 	//___________________ RUN SERVERS - WEBSOCKET AND HTTP __________________
 
 	// Set the atomic flag to true

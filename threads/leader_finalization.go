@@ -1,3 +1,4 @@
+// Thread to collect and broadcast ALFP - aggregated leader finalization proof to the anchors
 package threads
 
 import (

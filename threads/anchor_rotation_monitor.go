@@ -1,3 +1,5 @@
+// Thread to monitor anchor rotation event and know the actual anchor for epoch
+// This is important for the sequence_alignment.go thread to know the actual anchor for the epoch
 package threads
 
 import (

@@ -1,3 +1,4 @@
+// Thread to generate new blocks using transactions from the mempool
 package threads
 
 import (
