@@ -10,7 +10,7 @@ import (
 	"github.com/modulrcloud/modulr-core/utils"
 )
 
-func FirstBlockMonitorThread() {
+func FirstBlockInEpochMonitorThread() {
 
 	epochUnderObservation := -1
 	var cachedFirstBlockData *FirstBlockData
@@ -49,7 +49,7 @@ func FirstBlockMonitorThread() {
 	}
 }
 
-func storeFirstBlockData(epochIndex int, data *FirstBlockData) error {
+func storeDataAboutFirstBlockInEpoch(epochIndex int, data *FirstBlockData) error {
 
 	raw, err := json.Marshal(data)
 

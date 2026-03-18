@@ -136,7 +136,7 @@ func SequenceAlignmentThread() {
 					FirstBlockCreator: anchorData.Pubkey,
 					FirstBlockHash:    responseBlockHash,
 				}
-				if err := storeFirstBlockData(epochSnapshot.Id, firstBlockData); err != nil {
+				if err := storeDataAboutFirstBlockInEpoch(epochSnapshot.Id, firstBlockData); err != nil {
 					utils.LogWithTime(fmt.Sprintf("failed to store first anchor block data for epoch %d: %v", epochSnapshot.Id, err), utils.RED_COLOR)
 				} else {
 					cachedFirstBlockExists = true

@@ -70,7 +70,7 @@ func RunBlockchain() {
 	go threads.AlfpInclusionWatcherThread()
 
 	//✅ 9.Thread to asynchronously find and store first block data in each epoch
-	go threads.FirstBlockMonitorThread()
+	go threads.FirstBlockInEpochMonitorThread()
 
 	//___________________ RUN SERVERS - WEBSOCKET AND HTTP __________________
 
