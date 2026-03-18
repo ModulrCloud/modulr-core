@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
-
-const POD_OUTBOX_PREFIX = "POD_OUTBOX:"
 
 type PodStatusResponse struct {
 	Status string `json:"status"`
@@ -25,7 +24,7 @@ func isPodAck(resp []byte) bool {
 }
 
 func podOutboxKey(id string) []byte {
-	return []byte(POD_OUTBOX_PREFIX + id)
+	return []byte(constants.DBKeyPrefixPodOutbox + id)
 }
 
 // SendToPoDWithOutbox sends a message to PoD and requires an OK ack.
@@ -55,7 +54,7 @@ func FlushPoDOutboxOnce(limit int) int {
 		limit = 50
 	}
 
-	it := databases.FINALIZATION_VOTING_STATS.NewIterator(util.BytesPrefix([]byte(POD_OUTBOX_PREFIX)), nil)
+	it := databases.FINALIZATION_VOTING_STATS.NewIterator(util.BytesPrefix([]byte(constants.DBKeyPrefixPodOutbox)), nil)
 	defer it.Release()
 
 	sent := 0
@@ -64,10 +63,10 @@ func FlushPoDOutboxOnce(limit int) int {
 			break
 		}
 		key := string(it.Key())
-		if !strings.HasPrefix(key, POD_OUTBOX_PREFIX) {
+		if !strings.HasPrefix(key, constants.DBKeyPrefixPodOutbox) {
 			continue
 		}
-		id := strings.TrimPrefix(key, POD_OUTBOX_PREFIX)
+		id := strings.TrimPrefix(key, constants.DBKeyPrefixPodOutbox)
 		payload := append([]byte(nil), it.Value()...)
 		if len(payload) == 0 {
 			_ = databases.FINALIZATION_VOTING_STATS.Delete([]byte(key), nil)

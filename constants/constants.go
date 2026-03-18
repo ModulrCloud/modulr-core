@@ -35,6 +35,7 @@ const (
 	DBKeyPrefixEpochFinish      = "EPOCH_FINISH:"
 	DBKeyPrefixTxReceipt        = "TX:"
 	DBKeyPrefixValidatorStorage = "VALIDATOR_STORAGE:"
+	DBKeyPrefixPodOutbox        = "POD_OUTBOX:"
 )
 
 // Default in-memory cache limits (bounded caches to avoid unbounded growth).
