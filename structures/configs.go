@@ -3,6 +3,8 @@ package structures
 type NodeLevelConfig struct {
 	PublicKey                    string            `json:"PUBLIC_KEY"`
 	PrivateKey                   string            `json:"PRIVATE_KEY"`
+	AnchorPubKey                 string            `json:"ANCHOR_PUBKEY"`
+	AnchorPrivateKey             string            `json:"ANCHOR_PRIVATEKEY"`
 	PointOfDistributionWS        string            `json:"POINT_OF_DISTRIBUTION_WS"`
 	AnchorsPointOfDistributionWS string            `json:"ANCHORS_POINT_OF_DISTRIBUTION_WS"`
 	DisablePoDOutbox             bool              `json:"DISABLE_POD_OUTBOX"`
