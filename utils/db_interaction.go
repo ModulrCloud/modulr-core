@@ -39,6 +39,10 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
 	data, err := databases.STATE.Get([]byte(accountId), nil)
 
+	if err != nil && err != leveldb.ErrNotFound {
+		panic("STATE.Get failed for account " + accountId + ": " + err.Error())
+	}
+
 	if err == leveldb.ErrNotFound {
 
 		acc := &structures.Account{}
@@ -54,24 +58,16 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 
 	}
 
-	if err == nil {
+	var account structures.Account
 
-		var account structures.Account
-
-		parseErr := json.Unmarshal(data, &account)
-
-		if parseErr == nil {
-
-			acc := &account
-			PutExecAccountCache(accountId, acc)
-			MarkExecAccountTouched(accountId, acc)
-			return acc
-
-		}
-
+	if err := json.Unmarshal(data, &account); err != nil {
+		panic("Failed to unmarshal account " + accountId + ": " + err.Error())
 	}
 
-	return nil
+	acc := &account
+	PutExecAccountCache(accountId, acc)
+	MarkExecAccountTouched(accountId, acc)
+	return acc
 
 }
 
@@ -124,13 +120,18 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 	// Cache miss: fetch from DB without holding RWMutex to avoid lock-upgrade deadlocks
 	// when callers already hold RLock elsewhere.
 	data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorStorageKey), nil)
-	if err != nil {
+
+	if err != nil && err != leveldb.ErrNotFound {
+		panic("APPROVEMENT_THREAD_METADATA.Get failed for validator " + validatorPubkey + ": " + err.Error())
+	}
+
+	if err == leveldb.ErrNotFound {
 		return nil
 	}
 
 	var validatorStorage structures.ValidatorStorage
 	if err := json.Unmarshal(data, &validatorStorage); err != nil {
-		return nil
+		panic("Failed to unmarshal validator " + validatorPubkey + " from APPROVEMENT_THREAD_METADATA: " + err.Error())
 	}
 
 	// Store in cache under write lock (double-check to avoid overwriting on races).
@@ -169,16 +170,18 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 
 	data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorStorageKey), nil)
 
-	if err != nil {
+	if err != nil && err != leveldb.ErrNotFound {
+		panic("APPROVEMENT_THREAD_METADATA.Get failed for validator " + validatorPubkey + ": " + err.Error())
+	}
+
+	if err == leveldb.ErrNotFound {
 		return nil
 	}
 
 	var validatorStorage structures.ValidatorStorage
 
-	err = json.Unmarshal(data, &validatorStorage)
-
-	if err != nil {
-		return nil
+	if err := json.Unmarshal(data, &validatorStorage); err != nil {
+		panic("Failed to unmarshal validator " + validatorPubkey + " from APPROVEMENT_THREAD_METADATA: " + err.Error())
 	}
 
 	vs := &validatorStorage
@@ -206,16 +209,18 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 
 	data, err := databases.STATE.Get([]byte(validatorStorageKey), nil)
 
-	if err != nil {
+	if err != nil && err != leveldb.ErrNotFound {
+		panic("STATE.Get failed for validator " + validatorPubkey + ": " + err.Error())
+	}
+
+	if err == leveldb.ErrNotFound {
 		return nil
 	}
 
 	var validatorStorage structures.ValidatorStorage
 
-	err = json.Unmarshal(data, &validatorStorage)
-
-	if err != nil {
-		return nil
+	if err := json.Unmarshal(data, &validatorStorage); err != nil {
+		panic("Failed to unmarshal validator " + validatorPubkey + " from STATE: " + err.Error())
 	}
 
 	vs := &validatorStorage
