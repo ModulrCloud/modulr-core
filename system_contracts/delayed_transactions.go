@@ -317,8 +317,6 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 			stakerStake -= amount
 
 			validatorStorage.TotalStaked -= amount
-			handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.StakingDelta -= int64(amount)
-			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.StakingDelta -= int64(amount)
 
 			if stakerStake == 0 {
 
@@ -371,6 +369,8 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 			stakerStake -= amount
 
 			validatorStorage.TotalStaked -= amount
+			handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.StakingDelta -= int64(amount)
+			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.StakingDelta -= int64(amount)
 
 			if stakerStake == 0 {
 
