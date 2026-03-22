@@ -64,6 +64,7 @@ func evictIfNeeded[V any](cache map[string]V, touched map[string]V, cap int, sta
 	if cap <= 0 || state.lru == nil {
 		return
 	}
+	skipped := 0
 	for len(cache) > cap {
 		back := state.lru.Back()
 		if back == nil {
@@ -75,17 +76,16 @@ func evictIfNeeded[V any](cache map[string]V, touched map[string]V, cap int, sta
 			continue
 		}
 		if _, isTouched := touched[key]; isTouched {
-			// Don't evict touched keys; keep them hot to reduce churn and scan further.
 			state.lru.MoveToFront(back)
-			// If everything is touched, we can't evict anything safely.
-			if len(touched) >= len(cache) {
+			skipped++
+			if skipped >= state.lru.Len() {
 				break
 			}
 			continue
 		}
-		// Evict.
 		delete(cache, key)
 		remove(state, key)
+		skipped = 0
 	}
 }
 

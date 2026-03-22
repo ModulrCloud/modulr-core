@@ -3,6 +3,7 @@ package routes
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
@@ -77,8 +78,8 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	hashOfPayloads := utils.Blake3(string(payloadBytes))
-	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, hashOfPayloads)
+	dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
+	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned)
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, delayedTransactionsSignResponse{Signature: signature})
 }
