@@ -724,35 +724,19 @@ func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string
 
 	payloadType, ok := tx.Payload["type"]
 
-	if !ok {
+	if !ok || payloadType == "" {
 
 		return nil, "", false
 
 	}
 
-	payloadTypeStr, ok := payloadType.(string)
-
-	if !ok {
+	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadType]; !exists {
 
 		return nil, "", false
 
 	}
 
-	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadTypeStr]; !exists {
-
-		return nil, "", false
-
-	}
-
-	payload := make(map[string]string)
-
-	for key, value := range tx.Payload {
-
-		payload[key] = fmt.Sprint(value)
-
-	}
-
-	return payload, payloadTypeStr, true
+	return tx.Payload, payloadType, true
 
 }
 

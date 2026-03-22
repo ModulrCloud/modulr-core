@@ -22,14 +22,14 @@ type TransactionReceipt struct {
 }
 
 type Transaction struct {
-	V       uint           `json:"v"`
-	From    string         `json:"from"`
-	To      string         `json:"to"`
-	Amount  uint64         `json:"amount"`
-	Fee     uint64         `json:"fee"`
-	Sig     string         `json:"sig"`
-	Nonce   uint64         `json:"nonce"`
-	Payload map[string]any `json:"payload"`
+	V       uint              `json:"v"`
+	From    string            `json:"from"`
+	To      string            `json:"to"`
+	Amount  uint64            `json:"amount"`
+	Fee     uint64            `json:"fee"`
+	Sig     string            `json:"sig"`
+	Nonce   uint64            `json:"nonce"`
+	Payload map[string]string `json:"payload"`
 }
 
 func (t *Transaction) Hash() string {
@@ -37,7 +37,7 @@ func (t *Transaction) Hash() string {
 	payload := t.Payload
 
 	if payload == nil {
-		payload = make(map[string]any)
+		payload = make(map[string]string)
 	}
 
 	payloadJSON, err := json.Marshal(payload)
@@ -63,7 +63,7 @@ func (t *Transaction) Hash() string {
 func (t Transaction) MarshalJSON() ([]byte, error) {
 	type alias Transaction
 	if t.Payload == nil {
-		t.Payload = make(map[string]any)
+		t.Payload = make(map[string]string)
 	}
 	return json.Marshal((alias)(t))
 }
@@ -75,7 +75,7 @@ func (t *Transaction) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if aux.Payload == nil {
-		aux.Payload = make(map[string]any)
+		aux.Payload = make(map[string]string)
 	}
 	*t = Transaction(aux)
 	return nil
