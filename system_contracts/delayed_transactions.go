@@ -9,6 +9,8 @@ import (
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/utils"
+
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 type DelayedTxExecutorFunction = func(map[string]string, string) bool
@@ -41,9 +43,7 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 			_, existErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorStorageKey), nil)
 
-			// Activate this branch only in case we still don't have this validator in db
-
-			if existErr != nil {
+			if existErr == leveldb.ErrNotFound {
 
 				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,
@@ -77,7 +77,7 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 
 			_, existErr := databases.STATE.Get([]byte(validatorStorageKey), nil)
 
-			if existErr != nil {
+			if existErr == leveldb.ErrNotFound {
 
 				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,

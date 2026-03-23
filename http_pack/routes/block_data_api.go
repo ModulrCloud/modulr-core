@@ -6,6 +6,7 @@ import (
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
+	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -226,9 +227,23 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 
 	}
 
-	if transaction.From == "" || transaction.Nonce == 0 || transaction.Sig == "" {
+	if transaction.From == "" || transaction.To == "" || transaction.Nonce == 0 || transaction.Sig == "" {
 
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Event structure is wrong")
+		return
+
+	}
+
+	if !cryptography.IsValidPubKey(transaction.From) || !cryptography.IsValidPubKey(transaction.To) {
+
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid pubkey")
+		return
+
+	}
+
+	if !cryptography.VerifySignature(transaction.Hash(), transaction.From, transaction.Sig) {
+
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid signature")
 		return
 
 	}
