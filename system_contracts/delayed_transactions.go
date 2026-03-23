@@ -372,9 +372,12 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 			handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.StakingDelta -= int64(amount)
 			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.StakingDelta -= int64(amount)
 
+			unstakerAccount := utils.GetAccountFromExecThreadState(unstaker)
+			unstakerAccount.Balance += amount
+
 			if stakerStake == 0 {
 
-				delete(validatorStorage.Stakers, unstaker) // no sense to store staker with 0 balance in stakers list
+				delete(validatorStorage.Stakers, unstaker)
 
 			} else {
 

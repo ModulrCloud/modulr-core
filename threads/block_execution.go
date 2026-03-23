@@ -671,6 +671,11 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 
 			accountFrom.Balance -= tx.Fee
 
+			if delayedTxType == "stake" {
+				stakeAmount, _ := strconv.ParseUint(delayedTxPayload["amount"], 10, 64)
+				accountFrom.Balance -= stakeAmount
+			}
+
 			accountFrom.Nonce++
 
 			accountFrom.SuccessfulInitiatedTransactions++
