@@ -973,14 +973,13 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		}
 
+	} else {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
+			5*time.Second,
+			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
+			utils.YELLOW_COLOR,
+		)
 	}
-	// If we can't start the next epoch, execution can look "stuck" even if other threads progress.
-	// Log it (throttled) to surface missing/late epoch data.
-	utils.LogWithTimeThrottled(
-		fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
-		5*time.Second,
-		fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
-		utils.YELLOW_COLOR,
-	)
 
 }
