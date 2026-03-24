@@ -251,7 +251,7 @@ func cleanupLeaderFinalizationState(epochId int) {
 func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
 
 	for _, quorumMember := range epochHandler.Quorum {
-		if strings.EqualFold(quorumMember, globals.CONFIGURATION.PublicKey) {
+		if quorumMember == globals.CONFIGURATION.PublicKey {
 			return true
 		}
 	}
