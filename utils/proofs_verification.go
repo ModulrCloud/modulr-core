@@ -29,7 +29,7 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 
 	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
 	for _, pk := range epochHandler.Quorum {
-		quorumMap[strings.ToLower(pk)] = true
+		quorumMap[pk] = true
 	}
 
 	okSignatures := 0
@@ -39,10 +39,8 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
 
-			loweredPubKey := strings.ToLower(pubKey)
-
-			if quorumMap[loweredPubKey] && !seen[loweredPubKey] {
-				seen[loweredPubKey] = true
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
 				okSignatures++
 			}
 		}
@@ -61,7 +59,7 @@ func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.Aggregate
 
 	quorumMap := make(map[string]bool, len(globals.ANCHORS_PUBKEYS))
 	for _, pk := range globals.ANCHORS_PUBKEYS {
-		quorumMap[strings.ToLower(pk)] = true
+		quorumMap[pk] = true
 	}
 
 	okSignatures := 0
@@ -71,10 +69,8 @@ func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.Aggregate
 
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
 
-			loweredPubKey := strings.ToLower(pubKey)
-
-			if quorumMap[loweredPubKey] && !seen[loweredPubKey] {
-				seen[loweredPubKey] = true
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
 				okSignatures++
 			}
 		}
@@ -95,7 +91,7 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 
 	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
 	for _, pk := range epochHandler.Quorum {
-		quorumMap[strings.ToLower(pk)] = true
+		quorumMap[pk] = true
 	}
 
 	if proof.VotingStat.Index >= 0 {
@@ -121,9 +117,8 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 
 	for pubKey, signature := range proof.Signatures {
 		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			lowered := strings.ToLower(pubKey)
-			if quorumMap[lowered] && !seen[lowered] {
-				seen[lowered] = true
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
 				okSignatures++
 			}
 		}

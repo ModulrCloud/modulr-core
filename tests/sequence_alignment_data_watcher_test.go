@@ -496,7 +496,7 @@ func processSequenceAlignmentDataResponseForTest(alignmentData *threads.Sequence
 
 	anchorIndexMap := make(map[string]int, len(globals.ANCHORS))
 	for idx, anchor := range globals.ANCHORS {
-		anchorIndexMap[strings.ToLower(anchor.Pubkey)] = idx
+		anchorIndexMap[anchor.Pubkey] = idx
 	}
 
 	for _, anchorData := range alignmentData.Anchors {
@@ -567,7 +567,7 @@ func findEarliestAnchorRotationProofForTest(currentAnchor, foundInAnchorIndex, b
 			}
 
 			for _, proof := range block.ExtraData.AggregatedAnchorRotationProofs {
-				targetIdx, exists := anchorIndexMap[strings.ToLower(proof.Anchor)]
+				targetIdx, exists := anchorIndexMap[proof.Anchor]
 
 				if !exists || targetIdx < currentAnchor || targetIdx >= anchorIdx {
 					continue

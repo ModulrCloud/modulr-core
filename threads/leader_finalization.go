@@ -433,9 +433,9 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 			// Verify voter is in quorum
 			quorumMap := make(map[string]bool)
 			for _, pk := range epochHandler.Quorum {
-				quorumMap[strings.ToLower(pk)] = true
+				quorumMap[pk] = true
 			}
-			if !quorumMap[strings.ToLower(response.Voter)] {
+			if !quorumMap[response.Voter] {
 				return false
 			}
 
@@ -561,13 +561,12 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 
 	quorumMap := make(map[string]bool)
 	for _, pk := range epochHandler.Quorum {
-		quorumMap[strings.ToLower(pk)] = true
+		quorumMap[pk] = true
 	}
 
 	if cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig) {
-		lowered := strings.ToLower(response.Voter)
 		ALFP_GRABBING_MUTEX.Lock()
-		if quorumMap[lowered] {
+		if quorumMap[response.Voter] {
 			cache.Proofs[response.Voter] = response.Sig
 		}
 		ALFP_GRABBING_MUTEX.Unlock()
