@@ -156,9 +156,9 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 
 	var wg sync.WaitGroup
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 
-	defer cancel() // ensure cancellation if function exits early
+	defer cancel()
 
 	for _, node := range quorum {
 

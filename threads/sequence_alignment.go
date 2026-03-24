@@ -64,6 +64,7 @@ func SequenceAlignmentThread() {
 				fmt.Sprintf("Sequence alignment: can't fetch anchor block %s (Anchors-PoD/HTTP)", blockId),
 				utils.YELLOW_COLOR,
 			)
+			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 

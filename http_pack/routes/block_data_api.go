@@ -268,7 +268,9 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 			return
 		}
 
-		helpers.WriteJSON(ctx, fasthttp.StatusOK, map[string]string{"status": "Ok, tx redirected to current leader"})
+		ctx.SetStatusCode(resp.StatusCode())
+		ctx.Response.Header.SetContentTypeBytes(resp.Header.ContentType())
+		ctx.SetBody(resp.Body())
 		return
 
 	}
