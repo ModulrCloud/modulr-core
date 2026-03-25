@@ -3,32 +3,27 @@
     {
         "pubkey": "9GQ46rqY238rk2neSwgidap9ww5zbAN4dyqyC7j5ZnBK",
         "anchorURL": "http://localhost:7332",
-        "wssAnchorURL": "ws://localhost:9999",
-        "wssCoreNodeURL": ""
+        "wssAnchorURL": "ws://localhost:9999"
     },
     {
         "pubkey": "6XvZpuCDjdvSuot3eLr24C1wqzcf2w4QqeDh9BnDKsNE",
         "anchorURL": "http://localhost:7333",
-        "wssAnchorURL": "ws://localhost:9998",
-        "wssCoreNodeURL": ""
+        "wssAnchorURL": "ws://localhost:9998"
     },
     {
         "pubkey": "GUbYLN5NqmRocMBHqS183r2FQRoUjhx1p5nKyyUBpntQ",
         "anchorURL": "http://localhost:7334",
-        "wssAnchorURL": "ws://localhost:9997",
-        "wssCoreNodeURL": ""
+        "wssAnchorURL": "ws://localhost:9997"
     },
     {
         "pubkey": "3JAeBnsMedzxjCMNWQYcAXtwGVE9A5DBQyXgWBujtL9R",
         "anchorURL": "http://localhost:7335",
-        "wssAnchorURL": "ws://localhost:9996",
-        "wssCoreNodeURL": ""
+        "wssAnchorURL": "ws://localhost:9996"
     },
     {
         "pubkey": "EGU4u3Anwahbtbx8F1ZZgFQSg2u49EkrkqMERT9r3q1o",
         "anchorURL": "http://localhost:7336",
-        "wssAnchorURL": "ws://localhost:9995",
-        "wssCoreNodeURL": ""
+        "wssAnchorURL": "ws://localhost:9995"
     }
 
 ]

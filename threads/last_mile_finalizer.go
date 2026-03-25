@@ -98,7 +98,7 @@ func weAreLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
 	return false
 }
 
-func openCoreNodeConnections() {
+func openAnchorConnections() {
 
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
@@ -112,11 +112,11 @@ func openCoreNodeConnections() {
 	LAST_MILE_WS_CONNS = make(map[string]*websocket.Conn)
 
 	for _, anchor := range globals.ANCHORS {
-		if anchor.WssCoreNodeUrl == "" {
+		if anchor.WssAnchorUrl == "" {
 			continue
 		}
 
-		conn, _, err := websocket.DefaultDialer.Dial(anchor.WssCoreNodeUrl, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(anchor.WssAnchorUrl, nil)
 		if err != nil {
 			continue
 		}
@@ -257,7 +257,7 @@ func LastMileFinalizerThread() {
 		}
 
 		if !connectionsReady {
-			openCoreNodeConnections()
+			openAnchorConnections()
 			connectionsReady = true
 		}
 
