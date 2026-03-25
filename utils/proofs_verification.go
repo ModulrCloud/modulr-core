@@ -127,6 +127,41 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	return okSignatures >= majority
 }
 
+func VerifyLastMileFinalizationProof(proof *structures.LastMileFinalizationProof) bool {
+
+	if proof == nil || len(globals.ANCHORS) == 0 {
+		return false
+	}
+
+	majority := GetAnchorsQuorumMajority()
+
+	anchorPubkeys := make(map[string]bool, len(globals.ANCHORS))
+	for _, anchor := range globals.ANCHORS {
+		anchorPubkeys[anchor.Pubkey] = true
+	}
+
+	dataToVerify := strings.Join([]string{
+		"LAST_MILE_FINALIZATION_PROOF",
+		strconv.Itoa(proof.AbsoluteHeight),
+		proof.BlockId,
+		proof.BlockHash,
+	}, ":")
+
+	okSignatures := 0
+	seen := make(map[string]bool)
+
+	for pubKey, signature := range proof.Proofs {
+		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
+			if anchorPubkeys[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
+			}
+		}
+	}
+
+	return okSignatures >= majority
+}
+
 func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
 
 	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte("AFP:"+blockID), nil)

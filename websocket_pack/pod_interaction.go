@@ -54,3 +54,27 @@ func GetAggregatedLeaderFinalizationProofFromPoD(epochIndex int, leader string) 
 	}
 	return nil
 }
+
+func SendLastMileFinalizationProofToPoD(proof structures.LastMileFinalizationProof) {
+	req := WsLastMileFinalizationProofStoreRequest{Route: constants.WsRouteAcceptLastMileFinalizationProof, Proof: proof}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForLastMile(proof.AbsoluteHeight), reqBytes)
+	}
+}
+
+func GetLastMileFinalizationProofFromPoD(absoluteHeight int) *structures.LastMileFinalizationProof {
+	req := WsLastMileFinalizationProofGetRequest{Route: constants.WsRouteGetLastMileFinalizationProofFromPoD, AbsoluteHeight: absoluteHeight}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsLastMileFinalizationProofGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Proof
+			}
+		}
+	}
+	return nil
+}

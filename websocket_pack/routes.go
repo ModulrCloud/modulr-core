@@ -348,6 +348,72 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 }
 
+func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofRequest, connection *gws.Conn) {
+
+	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		return
+	}
+
+	if globals.CONFIGURATION.AnchorPrivateKey == "" || globals.CONFIGURATION.AnchorPubKey == "" {
+		return
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	localStats := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	if localStats == nil || int64(parsedRequest.AbsoluteHeight) > localStats.LastHeight {
+		return
+	}
+
+	storedBlockId, err := databases.STATE.Get([]byte("BLOCK_INDEX:"+strconv.Itoa(parsedRequest.AbsoluteHeight)), nil)
+
+	if err != nil || string(storedBlockId) != parsedRequest.BlockId {
+		return
+	}
+
+	storedBlockHash := getBlockHashFromState(string(storedBlockId))
+
+	if storedBlockHash == "" || storedBlockHash != parsedRequest.BlockHash {
+		return
+	}
+
+	dataToSign := strings.Join([]string{
+		"LAST_MILE_FINALIZATION_PROOF",
+		strconv.Itoa(parsedRequest.AbsoluteHeight),
+		parsedRequest.BlockId,
+		parsedRequest.BlockHash,
+	}, ":")
+
+	response := WsLastMileFinalizationProofResponse{
+		Voter: globals.CONFIGURATION.AnchorPubKey,
+		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.AnchorPrivateKey, dataToSign),
+	}
+
+	jsonResponse, err := json.Marshal(response)
+
+	if err == nil {
+		connection.WriteMessage(gws.OpcodeText, jsonResponse)
+	}
+}
+
+func getBlockHashFromState(blockId string) string {
+
+	blockRaw, err := databases.BLOCKS.Get([]byte(blockId), nil)
+
+	if err != nil {
+		return ""
+	}
+
+	var block block_pack.Block
+
+	if err := json.Unmarshal(blockRaw, &block); err != nil {
+		return ""
+	}
+
+	return block.GetHash()
+}
+
 func GetBlockWithProof(parsedRequest WsBlockWithAfpRequest, connection *gws.Conn) {
 
 	if blockBytes, err := databases.BLOCKS.Get([]byte(parsedRequest.BlockId), nil); err == nil {

@@ -189,6 +189,24 @@ func BlockExecutionThread() {
 				break
 			}
 
+			// Check last mile finalization proof for this absolute height.
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+			var nextAbsoluteHeight int64
+			if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
+				nextAbsoluteHeight = handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.LastHeight + 1
+			}
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+			if !hasVerifiedLastMileProof(int(nextAbsoluteHeight), blockId, response.Block.GetHash()) {
+				utils.LogWithTimeThrottled(
+					"exec:last_mile_missing:"+blockId,
+					5*time.Second,
+					fmt.Sprintf("EXECUTION: waiting for last mile proof for height %d (%s)", nextAbsoluteHeight, blockId),
+					utils.YELLOW_COLOR,
+				)
+				break
+			}
+
 			// Apply block (executes with internal lock; DB write happens outside lock).
 			executeBlock(response.Block)
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
@@ -983,4 +1001,22 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		)
 	}
 
+}
+
+func hasVerifiedLastMileProof(absoluteHeight int, blockId, blockHash string) bool {
+
+	proof := LoadLastMileProof(absoluteHeight)
+
+	if proof != nil && proof.BlockId == blockId && proof.BlockHash == blockHash {
+		return utils.VerifyLastMileFinalizationProof(proof)
+	}
+
+	podProof := websocket_pack.GetLastMileFinalizationProofFromPoD(absoluteHeight)
+
+	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash && utils.VerifyLastMileFinalizationProof(podProof) {
+		storeLastMileProof(podProof)
+		return true
+	}
+
+	return false
 }

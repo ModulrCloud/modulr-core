@@ -28,6 +28,9 @@ const (
 	WsRouteAcceptBlockWithAfp                   = "accept_block_with_afp"
 	WsRouteAcceptAggregatedLeaderFinalization   = "accept_aggregated_leader_finalization_proof"
 	WsRouteGetAggregatedLeaderFinalizationProof = "get_aggregated_leader_finalization_proof"
+	WsRouteGetLastMileFinalizationProof         = "get_last_mile_finalization_proof"
+	WsRouteAcceptLastMileFinalizationProof      = "accept_last_mile_finalization_proof"
+	WsRouteGetLastMileFinalizationProofFromPoD  = "get_last_mile_finalization_proof_from_pod"
 )
 
 // Common DB key fragments/prefixes.

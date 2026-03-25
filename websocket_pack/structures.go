@@ -79,3 +79,29 @@ type WsAggregatedLeaderFinalizationProofRequest struct {
 type WsAggregatedLeaderFinalizationProofResponse struct {
 	Proof *structures.AggregatedLeaderFinalizationProof `json:"proof"`
 }
+
+type WsLastMileFinalizationProofRequest struct {
+	Route          string `json:"route"`
+	AbsoluteHeight int    `json:"absoluteHeight"`
+	BlockId        string `json:"blockId"`
+	BlockHash      string `json:"blockHash"`
+}
+
+type WsLastMileFinalizationProofResponse struct {
+	Voter string `json:"voter"`
+	Sig   string `json:"sig"`
+}
+
+type WsLastMileFinalizationProofStoreRequest struct {
+	Route string                                `json:"route"`
+	Proof structures.LastMileFinalizationProof `json:"proof"`
+}
+
+type WsLastMileFinalizationProofGetRequest struct {
+	Route          string `json:"route"`
+	AbsoluteHeight int    `json:"absoluteHeight"`
+}
+
+type WsLastMileFinalizationProofGetResponse struct {
+	Proof *structures.LastMileFinalizationProof `json:"proof"`
+}

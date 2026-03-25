@@ -76,6 +76,17 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		GetBlockWithProof(req, connection)
 
+	case constants.WsRouteGetLastMileFinalizationProof:
+
+		var req WsLastMileFinalizationProofRequest
+
+		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_last_mile_finalization_proof_request"}`))
+			return
+		}
+
+		GetLastMileFinalizationProof(req, connection)
+
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))
 
