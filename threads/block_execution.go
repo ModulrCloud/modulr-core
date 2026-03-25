@@ -189,7 +189,7 @@ func BlockExecutionThread() {
 				break
 			}
 
-			// Check last mile finalization proof for this absolute height.
+			// All nodes must wait for a verified last mile proof before executing.
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 			var nextAbsoluteHeight int64
 			if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {

@@ -348,6 +348,10 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 }
 
+var lastMileVoterMutex sync.Mutex
+
+const LAST_MILE_VOTER_KEY = "LAST_MILE_VOTER_STATE"
+
 func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofRequest, connection *gws.Conn) {
 
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
@@ -358,21 +362,65 @@ func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofReque
 		return
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	localStats := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	lastMileVoterMutex.Lock()
+	defer lastMileVoterMutex.Unlock()
 
-	if localStats == nil || int64(parsedRequest.AbsoluteHeight) > localStats.LastHeight {
+	state := utils.LoadLastMileSequenceState(LAST_MILE_VOTER_KEY)
+	requestedHeight := int64(parsedRequest.AbsoluteHeight)
+
+	expectedBlockId := ""
+
+	if requestedHeight < state.NextHeight {
+
+		expectedBlockId = utils.LoadHeightBlockIdMapping(requestedHeight)
+
+	} else {
+
+		maxIterations := 1000
+
+		for i := 0; i < maxIterations && state.NextHeight <= requestedHeight; i++ {
+
+			epochHandler := getEpochHandlerForLeaderFinalization(state.EpochId)
+
+			if epochHandler == nil {
+				break
+			}
+
+			lastBlocksByLeaders := snapshotAlignmentDataForVoter()
+
+			if lastBlocksByLeaders == nil {
+				break
+			}
+
+			blockId := state.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
+
+			if blockId == "" {
+
+				if state.AllLeadersDone(epochHandler.LeadersSequence) {
+					state.AdvanceToNextEpoch()
+					continue
+				}
+
+				break
+			}
+
+			utils.StoreHeightBlockIdMapping(state.NextHeight, blockId)
+
+			if state.NextHeight == requestedHeight {
+				expectedBlockId = blockId
+			}
+
+			state.Advance()
+		}
+
+		utils.PersistLastMileSequenceState(LAST_MILE_VOTER_KEY, state)
+	}
+
+	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
 		return
 	}
 
-	storedBlockId, err := databases.STATE.Get([]byte("BLOCK_INDEX:"+strconv.Itoa(parsedRequest.AbsoluteHeight)), nil)
-
-	if err != nil || string(storedBlockId) != parsedRequest.BlockId {
-		return
-	}
-
-	storedBlockHash := getBlockHashFromState(string(storedBlockId))
+	storedBlockHash := getBlockHashFromState(parsedRequest.BlockId)
 
 	if storedBlockHash == "" || storedBlockHash != parsedRequest.BlockHash {
 		return
@@ -395,6 +443,26 @@ func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofReque
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
 	}
+}
+
+func snapshotAlignmentDataForVoter() map[string]structures.ExecutionStats {
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
+
+	if data == nil {
+		return nil
+	}
+
+	snapshot := make(map[string]structures.ExecutionStats, len(data))
+
+	for k, v := range data {
+		snapshot[k] = v
+	}
+
+	return snapshot
 }
 
 func getBlockHashFromState(blockId string) string {

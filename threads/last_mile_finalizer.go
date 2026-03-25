@@ -27,6 +27,8 @@ import (
 
 const LAST_MILE_FINALIZERS_COUNT = 5
 
+const LAST_MILE_FINALIZER_TRACKER_KEY = "LAST_MILE_FINALIZER_TRACKER"
+
 var (
 	LAST_MILE_MUTEX    sync.Mutex
 	LAST_MILE_WS_CONNS = make(map[string]*websocket.Conn)
@@ -126,26 +128,6 @@ func openCoreNodeConnections() {
 	LAST_MILE_WAITER = utils.NewQuorumWaiter(len(globals.ANCHORS), LAST_MILE_GUARDS)
 }
 
-func loadLastMileProgress() int64 {
-
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte("LAST_MILE_PROGRESS"), nil); err == nil {
-		if v, convErr := strconv.ParseInt(string(raw), 10, 64); convErr == nil {
-			return v
-		}
-	}
-
-	return -1
-}
-
-func persistLastMileProgress(height int64) {
-
-	_ = databases.FINALIZATION_VOTING_STATS.Put(
-		[]byte("LAST_MILE_PROGRESS"),
-		[]byte(strconv.FormatInt(height, 10)),
-		nil,
-	)
-}
-
 func storeLastMileProof(proof *structures.LastMileFinalizationProof) {
 
 	key := []byte(fmt.Sprintf("LAST_MILE_PROOF:%d", proof.AbsoluteHeight))
@@ -174,11 +156,71 @@ func LoadLastMileProof(absoluteHeight int) *structures.LastMileFinalizationProof
 	return &proof
 }
 
+func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
+
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+	if handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.Id == epochId {
+		copy := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+		return &copy
+	}
+	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+
+	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochId))
+
+	if raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil); err == nil {
+		var snapshot structures.EpochDataSnapshot
+		if json.Unmarshal(raw, &snapshot) == nil {
+			return &snapshot.EpochDataHandler
+		}
+	}
+
+	return nil
+}
+
+func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
+
+	if data == nil {
+		return nil, false
+	}
+
+	copy := make(map[string]structures.ExecutionStats, len(data))
+	for k, v := range data {
+		copy[k] = v
+	}
+
+	return copy, true
+}
+
+func fetchBlockForLastMile(blockId string) *block_pack.Block {
+
+	if raw, err := databases.BLOCKS.Get([]byte(blockId), nil); err == nil {
+		var block block_pack.Block
+		if json.Unmarshal(raw, &block) == nil {
+			return &block
+		}
+	}
+
+	response := getBlockAndAfpFromPoD(blockId)
+
+	if response != nil && response.Block != nil {
+		return response.Block
+	}
+
+	return nil
+}
+
 func LastMileFinalizerThread() {
 
 	lastProcessedEpoch := -1
 	connectionsReady := false
-	confirmedHeight := loadLastMileProgress()
+
+	tracker := utils.LoadLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY)
 
 	for {
 
@@ -219,48 +261,67 @@ func LastMileFinalizerThread() {
 			connectionsReady = true
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-		localStats := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
-		var localLastHeight int64 = -1
-		if localStats != nil {
-			localLastHeight = localStats.LastHeight
-		}
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		epochHandler := getEpochHandlerForTracker(tracker.EpochId)
 
-		nextHeight := confirmedHeight + 1
-
-		if nextHeight > localLastHeight {
+		if epochHandler == nil {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		blockIdBytes, err := databases.STATE.Get([]byte(fmt.Sprintf("BLOCK_INDEX:%d", nextHeight)), nil)
+		lastBlocksByLeaders, ok := snapshotAlignmentData()
 
-		if err != nil {
+		if !ok {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		blockId := string(blockIdBytes)
-		blockHash := getBlockHashForLastMile(blockId)
+		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
 
-		if blockHash == "" {
+		if blockId == "" {
+
+			if tracker.AllLeadersDone(epochHandler.LeadersSequence) {
+
+				nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
+
+				if nextEpochHandler != nil {
+					tracker.AdvanceToNextEpoch()
+					utils.PersistLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY, tracker)
+					continue
+				}
+
+			}
+
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		proof := tryCollectLastMileProof(int(nextHeight), blockId, blockHash)
+		block := fetchBlockForLastMile(blockId)
+
+		if block == nil {
+			utils.LogWithTimeThrottled(
+				"last_mile:block_not_found:"+blockId,
+				5*time.Second,
+				fmt.Sprintf("Last mile finalizer: can't fetch block %s", blockId),
+				utils.YELLOW_COLOR,
+			)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		blockHash := block.GetHash()
+
+		proof := tryCollectLastMileProof(int(tracker.NextHeight), blockId, blockHash)
 
 		if proof != nil {
 
 			storeLastMileProof(proof)
-			confirmedHeight = nextHeight
-			persistLastMileProgress(confirmedHeight)
+			tracker.Advance()
+			utils.PersistLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY, tracker)
 
 			websocket_pack.SendLastMileFinalizationProofToPoD(*proof)
 
 			utils.LogWithTime(
-				fmt.Sprintf("Last mile proof collected for height %d => %s (hash: %s...)", nextHeight, blockId, blockHash[:8]),
+				fmt.Sprintf("Last mile proof collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, blockHash[:8]),
 				utils.DEEP_GREEN_COLOR,
 			)
 
@@ -270,23 +331,6 @@ func LastMileFinalizerThread() {
 		time.Sleep(200 * time.Millisecond)
 
 	}
-}
-
-func getBlockHashForLastMile(blockId string) string {
-
-	blockRaw, err := databases.BLOCKS.Get([]byte(blockId), nil)
-
-	if err != nil {
-		return ""
-	}
-
-	var block block_pack.Block
-
-	if json.Unmarshal(blockRaw, &block) != nil {
-		return ""
-	}
-
-	return block.GetHash()
 }
 
 func tryCollectLastMileProof(absoluteHeight int, blockId, blockHash string) *structures.LastMileFinalizationProof {
