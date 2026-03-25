@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
@@ -106,7 +105,7 @@ func EpochRotationThread() {
 
 						jsonedDelayedTxs, _ := json.Marshal(firstBlock.ExtraData.DelayedTransactionsBatch.DelayedTransactions)
 
-						dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(epochHandlerRef.Id) + ":" + string(jsonedDelayedTxs)
+						dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
 
 						okSignatures := 0
 
@@ -115,20 +114,18 @@ func EpochRotationThread() {
 						quorumMap := make(map[string]bool)
 
 						for _, pk := range epochHandlerRef.Quorum {
-							quorumMap[strings.ToLower(pk)] = true
+							quorumMap[pk] = true
 						}
 
 						for signerPubKey, signa := range firstBlock.ExtraData.DelayedTransactionsBatch.Proofs {
 
 							isOK := cryptography.VerifySignature(dataThatShouldBeSigned, signerPubKey, signa)
 
-							loweredPubKey := strings.ToLower(signerPubKey)
+							quorumMember := quorumMap[signerPubKey]
 
-							quorumMember := quorumMap[loweredPubKey]
+							if isOK && quorumMember && !unique[signerPubKey] {
 
-							if isOK && quorumMember && !unique[loweredPubKey] {
-
-								unique[loweredPubKey] = true
+								unique[signerPubKey] = true
 
 								okSignatures++
 

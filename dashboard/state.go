@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -167,9 +166,8 @@ func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
 	if epochHandler == nil {
 		return false
 	}
-	me := strings.ToLower(globals.CONFIGURATION.PublicKey)
 	for _, q := range epochHandler.Quorum {
-		if strings.ToLower(q) == me {
+		if q == globals.CONFIGURATION.PublicKey {
 			return true
 		}
 	}

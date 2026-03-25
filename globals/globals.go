@@ -13,13 +13,24 @@ import (
 
 var CORE_MAJOR_VERSION = func() int {
 
-	data, err := os.ReadFile("version.txt")
+	exePath, err := os.Executable()
 
 	if err != nil {
-		panic("Failed to read version.txt: " + err.Error())
+		panic("Failed to determine executable path: " + err.Error())
 	}
 
-	version, err := strconv.Atoi(string(data))
+	versionPath := filepath.Join(filepath.Dir(exePath), "version.txt")
+
+	data, err := os.ReadFile(versionPath)
+
+	if err != nil {
+		data, err = os.ReadFile("version.txt")
+		if err != nil {
+			panic("Failed to read version.txt: " + err.Error())
+		}
+	}
+
+	version, err := strconv.Atoi(strings.TrimSpace(string(data)))
 
 	if err != nil {
 		panic("Invalid version format: " + err.Error())

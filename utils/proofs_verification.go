@@ -15,73 +15,11 @@ import (
 	"github.com/modulrcloud/modulr-core/structures"
 )
 
-var (
-	epochQuorumLowerCache = struct {
-		mu sync.RWMutex
-		m  map[string]map[string]struct{}
-	}{
-		m: make(map[string]map[string]struct{}),
-	}
-
-	anchorsQuorumLowerOnce sync.Once
-	anchorsQuorumLower     map[string]struct{}
-
-	seenSetPool = sync.Pool{
-		New: func() any {
-			return make(map[string]struct{})
-		},
-	}
-)
-
-func getEpochQuorumLower(epochHandler *structures.EpochDataHandler) map[string]struct{} {
-	if epochHandler == nil {
-		return nil
-	}
-
-	cacheKey := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
-
-	epochQuorumLowerCache.mu.RLock()
-	if cached, ok := epochQuorumLowerCache.m[cacheKey]; ok {
-		epochQuorumLowerCache.mu.RUnlock()
-		return cached
-	}
-	epochQuorumLowerCache.mu.RUnlock()
-
-	quorumMap := make(map[string]struct{}, len(epochHandler.Quorum))
-	for _, pk := range epochHandler.Quorum {
-		quorumMap[strings.ToLower(pk)] = struct{}{}
-	}
-
-	epochQuorumLowerCache.mu.Lock()
-	epochQuorumLowerCache.m[cacheKey] = quorumMap
-	epochQuorumLowerCache.mu.Unlock()
-
-	return quorumMap
-}
-
-func getAnchorsQuorumLower() map[string]struct{} {
-	anchorsQuorumLowerOnce.Do(func() {
-		anchorsQuorumLower = make(map[string]struct{}, len(globals.ANCHORS_PUBKEYS))
-		for _, pk := range globals.ANCHORS_PUBKEYS {
-			anchorsQuorumLower[strings.ToLower(pk)] = struct{}{}
-		}
-	})
-
-	return anchorsQuorumLower
-}
-
-func getSeenSet() map[string]struct{} {
-	return seenSetPool.Get().(map[string]struct{})
-}
-
-func putSeenSet(seen map[string]struct{}) {
-	for k := range seen {
-		delete(seen, k)
-	}
-	seenSetPool.Put(seen)
-}
-
 func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
+
+	if epochHandler == nil {
+		return false
+	}
 
 	epochFullID := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
 
@@ -89,27 +27,21 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 
 	majority := GetQuorumMajority(epochHandler)
 
-	okSignatures := 0
-
-	seen := getSeenSet()
-	defer putSeenSet(seen)
-
-	quorumMap := getEpochQuorumLower(epochHandler)
-	if quorumMap == nil {
-		return false
+	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
+	for _, pk := range epochHandler.Quorum {
+		quorumMap[pk] = true
 	}
+
+	okSignatures := 0
+	seen := make(map[string]bool)
 
 	for pubKey, signature := range proof.Proofs {
 
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
 
-			loweredPubKey := strings.ToLower(pubKey)
-
-			if _, isMember := quorumMap[loweredPubKey]; isMember {
-				if _, alreadySeen := seen[loweredPubKey]; !alreadySeen {
-					seen[loweredPubKey] = struct{}{}
-					okSignatures++
-				}
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
 			}
 		}
 	}
@@ -125,24 +57,21 @@ func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.Aggregate
 
 	majority := GetAnchorsQuorumMajority()
 
+	quorumMap := make(map[string]bool, len(globals.ANCHORS_PUBKEYS))
+	for _, pk := range globals.ANCHORS_PUBKEYS {
+		quorumMap[pk] = true
+	}
+
 	okSignatures := 0
-
-	seen := getSeenSet()
-	defer putSeenSet(seen)
-
-	quorumMap := getAnchorsQuorumLower()
+	seen := make(map[string]bool)
 
 	for pubKey, signature := range proof.Proofs {
 
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
 
-			loweredPubKey := strings.ToLower(pubKey)
-
-			if _, isMember := quorumMap[loweredPubKey]; isMember {
-				if _, alreadySeen := seen[loweredPubKey]; !alreadySeen {
-					seen[loweredPubKey] = struct{}{}
-					okSignatures++
-				}
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
 			}
 		}
 	}
@@ -160,9 +89,9 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 
 	majority := GetQuorumMajority(epochHandler)
 
-	quorumMap := getEpochQuorumLower(epochHandler)
-	if quorumMap == nil {
-		return false
+	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
+	for _, pk := range epochHandler.Quorum {
+		quorumMap[pk] = true
 	}
 
 	if proof.VotingStat.Index >= 0 {
@@ -184,17 +113,13 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", proof.Leader, strconv.Itoa(proof.VotingStat.Index), proof.VotingStat.Hash, epochFullID}, ":")
 
 	okSignatures := 0
-	seen := getSeenSet()
-	defer putSeenSet(seen)
+	seen := make(map[string]bool)
 
 	for pubKey, signature := range proof.Signatures {
 		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			lowered := strings.ToLower(pubKey)
-			if _, isMember := quorumMap[lowered]; isMember {
-				if _, alreadySeen := seen[lowered]; !alreadySeen {
-					seen[lowered] = struct{}{}
-					okSignatures++
-				}
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
 			}
 		}
 	}
@@ -226,9 +151,9 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 
 	var wg sync.WaitGroup
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 
-	defer cancel() // ensure cancellation if function exits early
+	defer cancel()
 
 	for _, node := range quorum {
 

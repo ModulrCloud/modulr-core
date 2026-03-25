@@ -672,6 +672,11 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 
 			accountFrom.Balance -= tx.Fee
 
+			if delayedTxType == "stake" {
+				stakeAmount, _ := strconv.ParseUint(delayedTxPayload["amount"], 10, 64)
+				accountFrom.Balance -= stakeAmount
+			}
+
 			accountFrom.Nonce++
 
 			accountFrom.SuccessfulInitiatedTransactions++
@@ -725,35 +730,19 @@ func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string
 
 	payloadType, ok := tx.Payload["type"]
 
-	if !ok {
+	if !ok || payloadType == "" {
 
 		return nil, "", false
 
 	}
 
-	payloadTypeStr, ok := payloadType.(string)
-
-	if !ok {
+	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadType]; !exists {
 
 		return nil, "", false
 
 	}
 
-	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadTypeStr]; !exists {
-
-		return nil, "", false
-
-	}
-
-	payload := make(map[string]string)
-
-	for key, value := range tx.Payload {
-
-		payload[key] = fmt.Sprint(value)
-
-	}
-
-	return payload, payloadTypeStr, true
+	return tx.Payload, payloadType, true
 
 }
 
@@ -985,14 +974,13 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		}
 
+	} else {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
+			5*time.Second,
+			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
+			utils.YELLOW_COLOR,
+		)
 	}
-	// If we can't start the next epoch, execution can look "stuck" even if other threads progress.
-	// Log it (throttled) to surface missing/late epoch data.
-	utils.LogWithTimeThrottled(
-		fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
-		5*time.Second,
-		fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
-		utils.YELLOW_COLOR,
-	)
 
 }
