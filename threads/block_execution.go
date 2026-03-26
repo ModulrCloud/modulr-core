@@ -196,7 +196,7 @@ func BlockExecutionThread() {
 			}
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-			if !hasVerifiedHeightAttestation(int(nextAbsoluteHeight), blockId, response.Block.GetHash(), &epochSnapshot) {
+			if !hasVerifiedHeightAttestation(int(nextAbsoluteHeight), blockId, response.Block.GetHash()) {
 				utils.LogWithTimeThrottled(
 					"exec:height_attestation_missing:"+blockId,
 					5*time.Second,
@@ -1002,19 +1002,23 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 }
 
-func hasVerifiedHeightAttestation(absoluteHeight int, blockId, blockHash string, epochHandler *structures.EpochDataHandler) bool {
+func hasVerifiedHeightAttestation(absoluteHeight int, blockId, blockHash string) bool {
 
 	proof := LoadHeightAttestation(absoluteHeight)
 
 	if proof != nil && proof.BlockId == blockId && proof.BlockHash == blockHash {
-		return utils.VerifyHeightAttestation(proof, epochHandler)
+		epochHandler := getEpochHandlerForTracker(proof.EpochId)
+		return epochHandler != nil && utils.VerifyHeightAttestation(proof, epochHandler)
 	}
 
 	podProof := websocket_pack.GetHeightAttestationFromPoD(absoluteHeight)
 
-	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash && utils.VerifyHeightAttestation(podProof, epochHandler) {
-		storeHeightAttestation(podProof)
-		return true
+	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash {
+		epochHandler := getEpochHandlerForTracker(podProof.EpochId)
+		if epochHandler != nil && utils.VerifyHeightAttestation(podProof, epochHandler) {
+			storeHeightAttestation(podProof)
+			return true
+		}
 	}
 
 	return false

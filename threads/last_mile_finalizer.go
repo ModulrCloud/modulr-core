@@ -97,7 +97,7 @@ func weAreLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
 	return slices.Contains(selected, globals.CONFIGURATION.PublicKey)
 }
 
-func openQuorumConnectionsForLastMile(quorum []string) {
+func openQuorumConnectionsForLastMile(epochHandler *structures.EpochDataHandler) {
 
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
@@ -110,7 +110,7 @@ func openQuorumConnectionsForLastMile(quorum []string) {
 
 	LAST_MILE_QUORUM_WS_CONNS = make(map[string]*websocket.Conn)
 
-	quorumUrls := utils.GetQuorumUrlsAndPubkeys(&structures.EpochDataHandler{Quorum: quorum})
+	quorumUrls := utils.GetQuorumUrlsAndPubkeys(epochHandler)
 
 	for _, node := range quorumUrls {
 		if node.Url == "" || node.PubKey == globals.CONFIGURATION.PublicKey {
@@ -129,7 +129,43 @@ func openQuorumConnectionsForLastMile(quorum []string) {
 	}
 
 	LAST_MILE_QUORUM_GUARDS = utils.NewWebsocketGuards()
-	LAST_MILE_QUORUM_WAITER = utils.NewQuorumWaiter(len(quorum), LAST_MILE_QUORUM_GUARDS)
+	LAST_MILE_QUORUM_WAITER = utils.NewQuorumWaiter(len(epochHandler.Quorum), LAST_MILE_QUORUM_GUARDS)
+}
+
+func openTemporaryQuorumConnections(epochHandler *structures.EpochDataHandler) (map[string]*websocket.Conn, *utils.QuorumWaiter) {
+
+	conns := make(map[string]*websocket.Conn)
+
+	quorumUrls := utils.GetQuorumUrlsAndPubkeys(epochHandler)
+
+	for _, node := range quorumUrls {
+		if node.Url == "" || node.PubKey == globals.CONFIGURATION.PublicKey {
+			continue
+		}
+
+		wsUrl := strings.Replace(node.Url, "http://", "ws://", 1)
+		wsUrl = strings.Replace(wsUrl, "https://", "wss://", 1)
+
+		conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
+		if err != nil {
+			continue
+		}
+
+		conns[node.PubKey] = conn
+	}
+
+	guards := utils.NewWebsocketGuards()
+	waiter := utils.NewQuorumWaiter(len(epochHandler.Quorum), guards)
+
+	return conns, waiter
+}
+
+func closeTemporaryQuorumConnections(conns map[string]*websocket.Conn) {
+	for _, conn := range conns {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}
 }
 
 func openAnchorConnectionsForLastMile() {
@@ -264,28 +300,41 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		if !quorumConnectionsReady {
-			openQuorumConnectionsForLastMile(epochSnapshot.Quorum)
-			quorumConnectionsReady = true
-		}
-
-		// On epoch change, send QuorumRotationAttestation to anchors
+		// On epoch change, collect QuorumRotationAttestation from *previous* epoch's quorum
+		// and deliver to anchors. Must happen before opening connections to the new quorum.
 		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
 			prevEpochId := epochSnapshot.Id - 1
-			rotationAttestation := tryCollectQuorumRotation(prevEpochId, epochSnapshot.Id, epochSnapshot.Hash, epochSnapshot.Quorum)
-			if rotationAttestation != nil {
-				if !anchorConnectionsSent {
-					openAnchorConnectionsForLastMile()
-					anchorConnectionsSent = true
-				}
-				deliverQuorumRotationToAnchors(rotationAttestation)
-				websocket_pack.SendQuorumRotationAttestationToPoD(*rotationAttestation)
-				lastRotationEpoch = prevEpochId
-				utils.LogWithTime(
-					fmt.Sprintf("Quorum rotation attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
-					utils.DEEP_GREEN_COLOR,
+			prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
+
+			if prevEpochHandler != nil {
+				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
+
+				rotationAttestation := tryCollectQuorumRotationWithConns(
+					prevEpochId, epochSnapshot.Id, epochSnapshot.Hash, epochSnapshot.Quorum,
+					prevEpochHandler, tmpConns, tmpWaiter,
 				)
+
+				closeTemporaryQuorumConnections(tmpConns)
+
+				if rotationAttestation != nil {
+					if !anchorConnectionsSent {
+						openAnchorConnectionsForLastMile()
+						anchorConnectionsSent = true
+					}
+					deliverQuorumRotationToAnchors(rotationAttestation)
+					websocket_pack.SendQuorumRotationAttestationToPoD(*rotationAttestation)
+					lastRotationEpoch = prevEpochId
+					utils.LogWithTime(
+						fmt.Sprintf("Quorum rotation attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+						utils.DEEP_GREEN_COLOR,
+					)
+				}
 			}
+		}
+
+		if !quorumConnectionsReady {
+			openQuorumConnectionsForLastMile(&epochSnapshot)
+			quorumConnectionsReady = true
 		}
 
 		epochHandler := getEpochHandlerForTracker(tracker.EpochId)
@@ -345,8 +394,13 @@ func LastMileFinalizerThread() {
 
 			websocket_pack.SendHeightAttestationToPoD(*proof)
 
+			hashPreview := blockHash
+			if len(hashPreview) > 8 {
+				hashPreview = hashPreview[:8]
+			}
+
 			utils.LogWithTime(
-				fmt.Sprintf("Height attestation collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, blockHash[:8]),
+				fmt.Sprintf("Height attestation collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, hashPreview),
 				utils.DEEP_GREEN_COLOR,
 			)
 
@@ -460,10 +514,13 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	}
 }
 
-func tryCollectQuorumRotation(epochId, nextEpochId int, nextEpochHash string, nextQuorum []string) *structures.QuorumRotationAttestation {
+func tryCollectQuorumRotationWithConns(
+	epochId, nextEpochId int, nextEpochHash string, nextQuorum []string,
+	prevEpochHandler *structures.EpochDataHandler,
+	wsConns map[string]*websocket.Conn, waiter *utils.QuorumWaiter,
+) *structures.QuorumRotationAttestation {
 
-	prevEpochHandler := getEpochHandlerForTracker(epochId)
-	if prevEpochHandler == nil {
+	if prevEpochHandler == nil || waiter == nil {
 		return nil
 	}
 
@@ -483,15 +540,6 @@ func tryCollectQuorumRotation(epochId, nextEpochId int, nextEpochHash string, ne
 
 	message, err := json.Marshal(request)
 	if err != nil {
-		return nil
-	}
-
-	LAST_MILE_MUTEX.Lock()
-	waiter := LAST_MILE_QUORUM_WAITER
-	wsConns := LAST_MILE_QUORUM_WS_CONNS
-	LAST_MILE_MUTEX.Unlock()
-
-	if waiter == nil {
 		return nil
 	}
 
