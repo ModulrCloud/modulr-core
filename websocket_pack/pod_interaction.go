@@ -55,24 +55,48 @@ func GetAggregatedLeaderFinalizationProofFromPoD(epochIndex int, leader string) 
 	return nil
 }
 
-func SendLastMileFinalizationProofToPoD(proof structures.LastMileFinalizationProof) {
-	req := WsLastMileFinalizationProofStoreRequest{Route: constants.WsRouteAcceptLastMileFinalizationProof, Proof: proof}
+func SendHeightAttestationToPoD(proof structures.HeightAttestation) {
+	req := WsHeightAttestationStoreRequest{Route: constants.WsRouteAcceptHeightAttestation, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if globals.CONFIGURATION.DisablePoDOutbox {
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
 			return
 		}
-		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForLastMile(proof.AbsoluteHeight), reqBytes)
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForHeightAttestation(proof.AbsoluteHeight), reqBytes)
 	}
 }
 
-func GetLastMileFinalizationProofFromPoD(absoluteHeight int) *structures.LastMileFinalizationProof {
-	req := WsLastMileFinalizationProofGetRequest{Route: constants.WsRouteGetLastMileFinalizationProofFromPoD, AbsoluteHeight: absoluteHeight}
+func GetHeightAttestationFromPoD(absoluteHeight int) *structures.HeightAttestation {
+	req := WsHeightAttestationGetRequest{Route: constants.WsRouteGetHeightAttestationFromPoD, AbsoluteHeight: absoluteHeight}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
-			var resp WsLastMileFinalizationProofGetResponse
+			var resp WsHeightAttestationGetResponse
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
 				return resp.Proof
+			}
+		}
+	}
+	return nil
+}
+
+func SendQuorumRotationAttestationToPoD(attestation structures.QuorumRotationAttestation) {
+	req := WsQuorumRotationAttestationStoreRequest{Route: constants.WsRouteAcceptQuorumRotationAttestation, Attestation: attestation}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForQuorumRotation(attestation.EpochId), reqBytes)
+	}
+}
+
+func GetQuorumRotationAttestationFromPoD(epochId int) *structures.QuorumRotationAttestation {
+	req := WsQuorumRotationAttestationGetRequest{Route: constants.WsRouteGetQuorumRotationAttestationFromPoD, EpochId: epochId}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsQuorumRotationAttestationGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Attestation
 			}
 		}
 	}

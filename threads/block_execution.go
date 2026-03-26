@@ -189,7 +189,6 @@ func BlockExecutionThread() {
 				break
 			}
 
-			// All nodes must wait for a verified last mile proof before executing.
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 			var nextAbsoluteHeight int64
 			if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
@@ -197,11 +196,11 @@ func BlockExecutionThread() {
 			}
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-			if !hasVerifiedLastMileProof(int(nextAbsoluteHeight), blockId, response.Block.GetHash()) {
+			if !hasVerifiedHeightAttestation(int(nextAbsoluteHeight), blockId, response.Block.GetHash(), &epochSnapshot) {
 				utils.LogWithTimeThrottled(
-					"exec:last_mile_missing:"+blockId,
+					"exec:height_attestation_missing:"+blockId,
 					5*time.Second,
-					fmt.Sprintf("EXECUTION: waiting for last mile proof for height %d (%s)", nextAbsoluteHeight, blockId),
+					fmt.Sprintf("EXECUTION: waiting for height attestation for height %d (%s)", nextAbsoluteHeight, blockId),
 					utils.YELLOW_COLOR,
 				)
 				break
@@ -1003,18 +1002,18 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 }
 
-func hasVerifiedLastMileProof(absoluteHeight int, blockId, blockHash string) bool {
+func hasVerifiedHeightAttestation(absoluteHeight int, blockId, blockHash string, epochHandler *structures.EpochDataHandler) bool {
 
-	proof := LoadLastMileProof(absoluteHeight)
+	proof := LoadHeightAttestation(absoluteHeight)
 
 	if proof != nil && proof.BlockId == blockId && proof.BlockHash == blockHash {
-		return utils.VerifyLastMileFinalizationProof(proof)
+		return utils.VerifyHeightAttestation(proof, epochHandler)
 	}
 
-	podProof := websocket_pack.GetLastMileFinalizationProofFromPoD(absoluteHeight)
+	podProof := websocket_pack.GetHeightAttestationFromPoD(absoluteHeight)
 
-	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash && utils.VerifyLastMileFinalizationProof(podProof) {
-		storeLastMileProof(podProof)
+	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash && utils.VerifyHeightAttestation(podProof, epochHandler) {
+		storeHeightAttestation(podProof)
 		return true
 	}
 

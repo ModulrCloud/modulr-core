@@ -1,4 +1,4 @@
-// Thread for the final stage of block finalization (last mile)
+// Thread for collecting height attestations from quorum and delivering quorum rotation attestations to anchors
 package threads
 
 import (
@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,40 +32,47 @@ const LAST_MILE_FINALIZERS_COUNT = 5
 const LAST_MILE_FINALIZER_TRACKER_KEY = "LAST_MILE_FINALIZER_TRACKER"
 
 var (
-	LAST_MILE_MUTEX    sync.Mutex
-	LAST_MILE_WS_CONNS = make(map[string]*websocket.Conn)
-	LAST_MILE_GUARDS   = utils.NewWebsocketGuards()
-	LAST_MILE_WAITER   *utils.QuorumWaiter
+	LAST_MILE_MUTEX           sync.Mutex
+	LAST_MILE_QUORUM_WS_CONNS = make(map[string]*websocket.Conn)
+	LAST_MILE_QUORUM_GUARDS   = utils.NewWebsocketGuards()
+	LAST_MILE_QUORUM_WAITER   *utils.QuorumWaiter
+
+	LAST_MILE_ANCHOR_WS_CONNS = make(map[string]*websocket.Conn)
 )
 
-func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler) []int {
+func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler) []string {
 
-	anchorsCount := len(globals.ANCHORS)
+	quorum := epochHandler.Quorum
 
-	if anchorsCount == 0 {
+	if len(quorum) == 0 {
 		return nil
 	}
 
 	count := LAST_MILE_FINALIZERS_COUNT
-	if count > anchorsCount {
-		count = anchorsCount
+	if count > len(quorum) {
+		count = len(quorum)
 	}
 
 	seed := utils.Blake3(fmt.Sprintf("LAST_MILE_FINALIZERS_SELECTION:%d:%s", epochHandler.Id, epochHandler.Hash))
 
-	indices := make([]int, anchorsCount)
+	indices := make([]int, len(quorum))
 	for i := range indices {
 		indices[i] = i
 	}
 
 	for i := 0; i < count; i++ {
 		hashHex := utils.Blake3(seed + "_" + strconv.Itoa(i))
-		r := hashHexToUint64ForLastMile(hashHex) % uint64(anchorsCount-i)
+		r := hashHexToUint64ForLastMile(hashHex) % uint64(len(quorum)-i)
 		j := i + int(r)
 		indices[i], indices[j] = indices[j], indices[i]
 	}
 
-	return indices[:count]
+	result := make([]string, count)
+	for i := 0; i < count; i++ {
+		result[i] = quorum[indices[i]]
+	}
+
+	return result
 }
 
 func hashHexToUint64ForLastMile(hashHex string) uint64 {
@@ -83,33 +92,58 @@ func hashHexToUint64ForLastMile(hashHex string) uint64 {
 
 func weAreLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
 
-	if globals.CONFIGURATION.AnchorPubKey == "" {
-		return false
-	}
+	selected := selectLastMileFinalizersForEpoch(epochHandler)
 
-	selectedIndices := selectLastMileFinalizersForEpoch(epochHandler)
-
-	for _, idx := range selectedIndices {
-		if globals.ANCHORS[idx].Pubkey == globals.CONFIGURATION.AnchorPubKey {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(selected, globals.CONFIGURATION.PublicKey)
 }
 
-func openAnchorConnections() {
+func openQuorumConnectionsForLastMile(quorum []string) {
 
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
 
-	for _, conn := range LAST_MILE_WS_CONNS {
+	for _, conn := range LAST_MILE_QUORUM_WS_CONNS {
 		if conn != nil {
 			_ = conn.Close()
 		}
 	}
 
-	LAST_MILE_WS_CONNS = make(map[string]*websocket.Conn)
+	LAST_MILE_QUORUM_WS_CONNS = make(map[string]*websocket.Conn)
+
+	quorumUrls := utils.GetQuorumUrlsAndPubkeys(&structures.EpochDataHandler{Quorum: quorum})
+
+	for _, node := range quorumUrls {
+		if node.Url == "" || node.PubKey == globals.CONFIGURATION.PublicKey {
+			continue
+		}
+
+		wsUrl := strings.Replace(node.Url, "http://", "ws://", 1)
+		wsUrl = strings.Replace(wsUrl, "https://", "wss://", 1)
+
+		conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
+		if err != nil {
+			continue
+		}
+
+		LAST_MILE_QUORUM_WS_CONNS[node.PubKey] = conn
+	}
+
+	LAST_MILE_QUORUM_GUARDS = utils.NewWebsocketGuards()
+	LAST_MILE_QUORUM_WAITER = utils.NewQuorumWaiter(len(quorum), LAST_MILE_QUORUM_GUARDS)
+}
+
+func openAnchorConnectionsForLastMile() {
+
+	LAST_MILE_MUTEX.Lock()
+	defer LAST_MILE_MUTEX.Unlock()
+
+	for _, conn := range LAST_MILE_ANCHOR_WS_CONNS {
+		if conn != nil {
+			_ = conn.Close()
+		}
+	}
+
+	LAST_MILE_ANCHOR_WS_CONNS = make(map[string]*websocket.Conn)
 
 	for _, anchor := range globals.ANCHORS {
 		if anchor.WssAnchorUrl == "" {
@@ -121,25 +155,22 @@ func openAnchorConnections() {
 			continue
 		}
 
-		LAST_MILE_WS_CONNS[anchor.Pubkey] = conn
+		LAST_MILE_ANCHOR_WS_CONNS[anchor.Pubkey] = conn
 	}
-
-	LAST_MILE_GUARDS = utils.NewWebsocketGuards()
-	LAST_MILE_WAITER = utils.NewQuorumWaiter(len(globals.ANCHORS), LAST_MILE_GUARDS)
 }
 
-func storeLastMileProof(proof *structures.LastMileFinalizationProof) {
+func storeHeightAttestation(proof *structures.HeightAttestation) {
 
-	key := []byte(fmt.Sprintf("LAST_MILE_PROOF:%d", proof.AbsoluteHeight))
+	key := []byte(fmt.Sprintf("HEIGHT_ATTESTATION:%d", proof.AbsoluteHeight))
 
 	if value, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
 	}
 }
 
-func LoadLastMileProof(absoluteHeight int) *structures.LastMileFinalizationProof {
+func LoadHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
 
-	key := []byte(fmt.Sprintf("LAST_MILE_PROOF:%d", absoluteHeight))
+	key := []byte(fmt.Sprintf("HEIGHT_ATTESTATION:%d", absoluteHeight))
 
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 
@@ -147,7 +178,7 @@ func LoadLastMileProof(absoluteHeight int) *structures.LastMileFinalizationProof
 		return nil
 	}
 
-	var proof structures.LastMileFinalizationProof
+	var proof structures.HeightAttestation
 
 	if json.Unmarshal(raw, &proof) != nil {
 		return nil
@@ -189,36 +220,20 @@ func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
 		return nil, false
 	}
 
-	copy := make(map[string]structures.ExecutionStats, len(data))
+	cp := make(map[string]structures.ExecutionStats, len(data))
 	for k, v := range data {
-		copy[k] = v
+		cp[k] = v
 	}
 
-	return copy, true
-}
-
-func fetchBlockForLastMile(blockId string) *block_pack.Block {
-
-	if raw, err := databases.BLOCKS.Get([]byte(blockId), nil); err == nil {
-		var block block_pack.Block
-		if json.Unmarshal(raw, &block) == nil {
-			return &block
-		}
-	}
-
-	response := getBlockAndAfpFromPoD(blockId)
-
-	if response != nil && response.Block != nil {
-		return response.Block
-	}
-
-	return nil
+	return cp, true
 }
 
 func LastMileFinalizerThread() {
 
 	lastProcessedEpoch := -1
-	connectionsReady := false
+	quorumConnectionsReady := false
+	anchorConnectionsSent := false
+	lastRotationEpoch := -1
 
 	tracker := utils.LoadLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY)
 
@@ -231,24 +246,17 @@ func LastMileFinalizerThread() {
 		if epochSnapshot.Id != lastProcessedEpoch {
 
 			lastProcessedEpoch = epochSnapshot.Id
-			connectionsReady = false
+			quorumConnectionsReady = false
+			anchorConnectionsSent = false
 
-			selectedIndices := selectLastMileFinalizersForEpoch(&epochSnapshot)
+			selected := selectLastMileFinalizersForEpoch(&epochSnapshot)
 
-			if len(selectedIndices) > 0 {
-
-				pubkeys := make([]string, len(selectedIndices))
-				for i, idx := range selectedIndices {
-					pubkeys[i] = globals.ANCHORS[idx].Pubkey
-				}
-
+			if len(selected) > 0 {
 				utils.LogWithTime(
-					fmt.Sprintf("Last mile finalizer: epoch %d => selected %d anchors %v", epochSnapshot.Id, len(selectedIndices), pubkeys),
+					fmt.Sprintf("Last mile finalizer: epoch %d => selected %d from quorum %v", epochSnapshot.Id, len(selected), selected),
 					utils.CYAN_COLOR,
 				)
-
 			}
-
 		}
 
 		if !weAreLastMileFinalizer(&epochSnapshot) {
@@ -256,9 +264,28 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		if !connectionsReady {
-			openAnchorConnections()
-			connectionsReady = true
+		if !quorumConnectionsReady {
+			openQuorumConnectionsForLastMile(epochSnapshot.Quorum)
+			quorumConnectionsReady = true
+		}
+
+		// On epoch change, send QuorumRotationAttestation to anchors
+		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
+			prevEpochId := epochSnapshot.Id - 1
+			rotationAttestation := tryCollectQuorumRotation(prevEpochId, epochSnapshot.Id, epochSnapshot.Quorum)
+			if rotationAttestation != nil {
+				if !anchorConnectionsSent {
+					openAnchorConnectionsForLastMile()
+					anchorConnectionsSent = true
+				}
+				deliverQuorumRotationToAnchors(rotationAttestation)
+				websocket_pack.SendQuorumRotationAttestationToPoD(*rotationAttestation)
+				lastRotationEpoch = prevEpochId
+				utils.LogWithTime(
+					fmt.Sprintf("Quorum rotation attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+					utils.DEEP_GREEN_COLOR,
+				)
+			}
 		}
 
 		epochHandler := getEpochHandlerForTracker(tracker.EpochId)
@@ -295,33 +322,31 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		block := fetchBlockForLastMile(blockId)
+		blockHash := getBlockHashById(blockId)
 
-		if block == nil {
+		if blockHash == "" {
 			utils.LogWithTimeThrottled(
-				"last_mile:block_not_found:"+blockId,
+				"last_mile:block_hash_not_found:"+blockId,
 				5*time.Second,
-				fmt.Sprintf("Last mile finalizer: can't fetch block %s", blockId),
+				fmt.Sprintf("Last mile finalizer: can't get hash for block %s", blockId),
 				utils.YELLOW_COLOR,
 			)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		blockHash := block.GetHash()
-
-		proof := tryCollectLastMileProof(int(tracker.NextHeight), blockId, blockHash)
+		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, epochHandler)
 
 		if proof != nil {
 
-			storeLastMileProof(proof)
+			storeHeightAttestation(proof)
 			tracker.Advance()
 			utils.PersistLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY, tracker)
 
-			websocket_pack.SendLastMileFinalizationProofToPoD(*proof)
+			websocket_pack.SendHeightAttestationToPoD(*proof)
 
 			utils.LogWithTime(
-				fmt.Sprintf("Last mile proof collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, blockHash[:8]),
+				fmt.Sprintf("Height attestation collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, blockHash[:8]),
 				utils.DEEP_GREEN_COLOR,
 			)
 
@@ -333,15 +358,31 @@ func LastMileFinalizerThread() {
 	}
 }
 
-func tryCollectLastMileProof(absoluteHeight int, blockId, blockHash string) *structures.LastMileFinalizationProof {
+func getBlockHashById(blockId string) string {
 
-	majority := utils.GetAnchorsQuorumMajority()
+	raw, err := databases.BLOCKS.Get([]byte(blockId), nil)
+	if err != nil {
+		return ""
+	}
 
-	request := websocket_pack.WsLastMileFinalizationProofRequest{
-		Route:          constants.WsRouteGetLastMileFinalizationProof,
+	var block block_pack.Block
+	if json.Unmarshal(raw, &block) == nil {
+		return block.GetHash()
+	}
+
+	return ""
+}
+
+func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+
+	majority := utils.GetQuorumMajority(epochHandler)
+
+	request := websocket_pack.WsHeightAttestationRequest{
+		Route:          constants.WsRouteSignHeightAttestation,
 		AbsoluteHeight: absoluteHeight,
 		BlockId:        blockId,
 		BlockHash:      blockHash,
+		EpochId:        epochId,
 	}
 
 	message, err := json.Marshal(request)
@@ -351,55 +392,46 @@ func tryCollectLastMileProof(absoluteHeight int, blockId, blockHash string) *str
 	}
 
 	LAST_MILE_MUTEX.Lock()
-	waiter := LAST_MILE_WAITER
-	wsConns := LAST_MILE_WS_CONNS
+	waiter := LAST_MILE_QUORUM_WAITER
+	wsConns := LAST_MILE_QUORUM_WS_CONNS
 	LAST_MILE_MUTEX.Unlock()
 
 	if waiter == nil {
 		return nil
 	}
 
-	anchorPubkeys := make([]string, 0, len(globals.ANCHORS))
-	for _, anchor := range globals.ANCHORS {
-		anchorPubkeys = append(anchorPubkeys, anchor.Pubkey)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	validateLastMileProof := func(id string, raw []byte) bool {
-		var response websocket_pack.WsLastMileFinalizationProofResponse
+	validateProof := func(id string, raw []byte) bool {
+		var response websocket_pack.WsHeightAttestationResponse
 
 		if json.Unmarshal(raw, &response) != nil {
 			return false
 		}
 
-		anchorPubkeySet := make(map[string]bool, len(globals.ANCHORS))
-		for _, anchor := range globals.ANCHORS {
-			anchorPubkeySet[anchor.Pubkey] = true
-		}
-
-		if !anchorPubkeySet[response.Voter] {
+		if !slices.Contains(epochHandler.Quorum, response.Voter) {
 			return false
 		}
 
 		dataToVerify := strings.Join([]string{
-			"LAST_MILE_FINALIZATION_PROOF",
+			"HEIGHT_ATTESTATION",
 			strconv.Itoa(absoluteHeight),
 			blockId,
 			blockHash,
+			strconv.Itoa(epochId),
 		}, ":")
 
 		return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
 	}
 
-	responses, ok := waiter.SendAndWaitValidated(ctx, message, anchorPubkeys, wsConns, majority, validateLastMileProof)
+	responses, ok := waiter.SendAndWaitValidated(ctx, message, epochHandler.Quorum, wsConns, majority, validateProof)
 
 	if !ok {
 		utils.LogWithTimeThrottled(
-			fmt.Sprintf("last_mile:majority_failed:%d", absoluteHeight),
+			fmt.Sprintf("last_mile:ha_majority_failed:%d", absoluteHeight),
 			5*time.Second,
-			fmt.Sprintf("Last mile: failed to collect majority for height %d (anchors=%d majority=%d)", absoluteHeight, len(globals.ANCHORS), majority),
+			fmt.Sprintf("Last mile: failed to collect height attestation majority for height %d (quorum=%d majority=%d)", absoluteHeight, len(epochHandler.Quorum), majority),
 			utils.YELLOW_COLOR,
 		)
 		return nil
@@ -408,7 +440,7 @@ func tryCollectLastMileProof(absoluteHeight int, blockId, blockHash string) *str
 	proofs := make(map[string]string)
 
 	for _, raw := range responses {
-		var response websocket_pack.WsLastMileFinalizationProofResponse
+		var response websocket_pack.WsHeightAttestationResponse
 
 		if json.Unmarshal(raw, &response) == nil {
 			proofs[response.Voter] = response.Sig
@@ -419,10 +451,116 @@ func tryCollectLastMileProof(absoluteHeight int, blockId, blockHash string) *str
 		return nil
 	}
 
-	return &structures.LastMileFinalizationProof{
+	return &structures.HeightAttestation{
 		AbsoluteHeight: absoluteHeight,
 		BlockId:        blockId,
 		BlockHash:      blockHash,
+		EpochId:        epochId,
 		Proofs:         proofs,
+	}
+}
+
+func tryCollectQuorumRotation(epochId, nextEpochId int, nextQuorum []string) *structures.QuorumRotationAttestation {
+
+	prevEpochHandler := getEpochHandlerForTracker(epochId)
+	if prevEpochHandler == nil {
+		return nil
+	}
+
+	majority := utils.GetQuorumMajority(prevEpochHandler)
+
+	sortedQuorum := make([]string, len(nextQuorum))
+	copy(sortedQuorum, nextQuorum)
+	sort.Strings(sortedQuorum)
+
+	request := websocket_pack.WsQuorumRotationRequest{
+		Route:       constants.WsRouteSignQuorumRotation,
+		EpochId:     epochId,
+		NextEpochId: nextEpochId,
+		NextQuorum:  nextQuorum,
+	}
+
+	message, err := json.Marshal(request)
+	if err != nil {
+		return nil
+	}
+
+	LAST_MILE_MUTEX.Lock()
+	waiter := LAST_MILE_QUORUM_WAITER
+	wsConns := LAST_MILE_QUORUM_WS_CONNS
+	LAST_MILE_MUTEX.Unlock()
+
+	if waiter == nil {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	dataToVerify := "QUORUM_ROTATION:" + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + strings.Join(sortedQuorum, ",")
+
+	validateProof := func(id string, raw []byte) bool {
+		var response websocket_pack.WsQuorumRotationResponse
+
+		if json.Unmarshal(raw, &response) != nil {
+			return false
+		}
+
+		if !slices.Contains(prevEpochHandler.Quorum, response.Voter) {
+			return false
+		}
+
+		return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
+	}
+
+	responses, ok := waiter.SendAndWaitValidated(ctx, message, prevEpochHandler.Quorum, wsConns, majority, validateProof)
+
+	if !ok {
+		return nil
+	}
+
+	proofs := make(map[string]string)
+
+	for _, raw := range responses {
+		var response websocket_pack.WsQuorumRotationResponse
+		if json.Unmarshal(raw, &response) == nil {
+			proofs[response.Voter] = response.Sig
+		}
+	}
+
+	if len(proofs) < majority {
+		return nil
+	}
+
+	return &structures.QuorumRotationAttestation{
+		EpochId:     epochId,
+		NextEpochId: nextEpochId,
+		NextQuorum:  nextQuorum,
+		Proofs:      proofs,
+	}
+}
+
+func deliverQuorumRotationToAnchors(attestation *structures.QuorumRotationAttestation) {
+
+	LAST_MILE_MUTEX.Lock()
+	conns := LAST_MILE_ANCHOR_WS_CONNS
+	LAST_MILE_MUTEX.Unlock()
+
+	message, err := json.Marshal(struct {
+		Route       string                                `json:"route"`
+		Attestation structures.QuorumRotationAttestation `json:"attestation"`
+	}{
+		Route:       "accept_quorum_rotation",
+		Attestation: *attestation,
+	})
+
+	if err != nil {
+		return
+	}
+
+	for _, conn := range conns {
+		if conn != nil {
+			_ = conn.WriteMessage(websocket.TextMessage, message)
+		}
 	}
 }

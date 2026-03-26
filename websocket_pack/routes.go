@@ -2,6 +2,7 @@ package websocket_pack
 
 import (
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -348,24 +349,20 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 }
 
-var lastMileVoterMutex sync.Mutex
+var heightAttestationVoterMutex sync.Mutex
 
-const LAST_MILE_VOTER_KEY = "LAST_MILE_VOTER_STATE"
+const HEIGHT_ATTESTATION_VOTER_KEY = "HEIGHT_ATTESTATION_VOTER_STATE"
 
-func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofRequest, connection *gws.Conn) {
+func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection *gws.Conn) {
 
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		return
 	}
 
-	if globals.CONFIGURATION.AnchorPrivateKey == "" || globals.CONFIGURATION.AnchorPubKey == "" {
-		return
-	}
+	heightAttestationVoterMutex.Lock()
+	defer heightAttestationVoterMutex.Unlock()
 
-	lastMileVoterMutex.Lock()
-	defer lastMileVoterMutex.Unlock()
-
-	state := utils.LoadLastMileSequenceState(LAST_MILE_VOTER_KEY)
+	state := utils.LoadLastMileSequenceState(HEIGHT_ATTESTATION_VOTER_KEY)
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
 	expectedBlockId := ""
@@ -386,7 +383,7 @@ func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofReque
 				break
 			}
 
-			lastBlocksByLeaders := snapshotAlignmentDataForVoter()
+			lastBlocksByLeaders := snapshotAlignmentDataForHeightVoter()
 
 			if lastBlocksByLeaders == nil {
 				break
@@ -413,29 +410,30 @@ func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofReque
 			state.Advance()
 		}
 
-		utils.PersistLastMileSequenceState(LAST_MILE_VOTER_KEY, state)
+		utils.PersistLastMileSequenceState(HEIGHT_ATTESTATION_VOTER_KEY, state)
 	}
 
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
 		return
 	}
 
-	storedBlockHash := getBlockHashFromState(parsedRequest.BlockId)
+	storedBlockHash := getBlockHashForHeightVoter(parsedRequest.BlockId)
 
 	if storedBlockHash == "" || storedBlockHash != parsedRequest.BlockHash {
 		return
 	}
 
 	dataToSign := strings.Join([]string{
-		"LAST_MILE_FINALIZATION_PROOF",
+		"HEIGHT_ATTESTATION",
 		strconv.Itoa(parsedRequest.AbsoluteHeight),
 		parsedRequest.BlockId,
 		parsedRequest.BlockHash,
+		strconv.Itoa(parsedRequest.EpochId),
 	}, ":")
 
-	response := WsLastMileFinalizationProofResponse{
-		Voter: globals.CONFIGURATION.AnchorPubKey,
-		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.AnchorPrivateKey, dataToSign),
+	response := WsHeightAttestationResponse{
+		Voter: globals.CONFIGURATION.PublicKey,
+		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataToSign),
 	}
 
 	jsonResponse, err := json.Marshal(response)
@@ -445,7 +443,56 @@ func GetLastMileFinalizationProof(parsedRequest WsLastMileFinalizationProofReque
 	}
 }
 
-func snapshotAlignmentDataForVoter() map[string]structures.ExecutionStats {
+func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.Conn) {
+
+	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		return
+	}
+
+	epochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.EpochId)
+
+	if epochHandler == nil {
+		return
+	}
+
+	nextEpochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.NextEpochId)
+
+	if nextEpochHandler == nil {
+		return
+	}
+
+	sortedQuorum := make([]string, len(nextEpochHandler.Quorum))
+	copy(sortedQuorum, nextEpochHandler.Quorum)
+	sort.Strings(sortedQuorum)
+
+	expectedSorted := make([]string, len(parsedRequest.NextQuorum))
+	copy(expectedSorted, parsedRequest.NextQuorum)
+	sort.Strings(expectedSorted)
+
+	if len(sortedQuorum) != len(expectedSorted) {
+		return
+	}
+	for i := range sortedQuorum {
+		if sortedQuorum[i] != expectedSorted[i] {
+			return
+		}
+	}
+
+	dataToSign := "QUORUM_ROTATION:" + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + strings.Join(sortedQuorum, ",")
+
+	response := WsQuorumRotationResponse{
+		Voter: globals.CONFIGURATION.PublicKey,
+		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataToSign),
+	}
+
+	jsonResponse, err := json.Marshal(response)
+
+	if err == nil {
+		connection.WriteMessage(gws.OpcodeText, jsonResponse)
+	}
+}
+
+func snapshotAlignmentDataForHeightVoter() map[string]structures.ExecutionStats {
 
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -465,7 +512,7 @@ func snapshotAlignmentDataForVoter() map[string]structures.ExecutionStats {
 	return snapshot
 }
 
-func getBlockHashFromState(blockId string) string {
+func getBlockHashForHeightVoter(blockId string) string {
 
 	blockRaw, err := databases.BLOCKS.Get([]byte(blockId), nil)
 

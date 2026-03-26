@@ -127,24 +127,25 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	return okSignatures >= majority
 }
 
-func VerifyLastMileFinalizationProof(proof *structures.LastMileFinalizationProof) bool {
+func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *structures.EpochDataHandler) bool {
 
-	if proof == nil || len(globals.ANCHORS) == 0 {
+	if proof == nil || epochHandler == nil {
 		return false
 	}
 
-	majority := GetAnchorsQuorumMajority()
+	majority := GetQuorumMajority(epochHandler)
 
-	anchorPubkeys := make(map[string]bool, len(globals.ANCHORS))
-	for _, anchor := range globals.ANCHORS {
-		anchorPubkeys[anchor.Pubkey] = true
+	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
+	for _, pk := range epochHandler.Quorum {
+		quorumMap[pk] = true
 	}
 
 	dataToVerify := strings.Join([]string{
-		"LAST_MILE_FINALIZATION_PROOF",
+		"HEIGHT_ATTESTATION",
 		strconv.Itoa(proof.AbsoluteHeight),
 		proof.BlockId,
 		proof.BlockHash,
+		strconv.Itoa(proof.EpochId),
 	}, ":")
 
 	okSignatures := 0
@@ -152,7 +153,7 @@ func VerifyLastMileFinalizationProof(proof *structures.LastMileFinalizationProof
 
 	for pubKey, signature := range proof.Proofs {
 		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			if anchorPubkeys[pubKey] && !seen[pubKey] {
+			if quorumMap[pubKey] && !seen[pubKey] {
 				seen[pubKey] = true
 				okSignatures++
 			}

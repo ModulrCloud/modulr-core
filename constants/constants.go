@@ -28,9 +28,12 @@ const (
 	WsRouteAcceptBlockWithAfp                   = "accept_block_with_afp"
 	WsRouteAcceptAggregatedLeaderFinalization   = "accept_aggregated_leader_finalization_proof"
 	WsRouteGetAggregatedLeaderFinalizationProof = "get_aggregated_leader_finalization_proof"
-	WsRouteGetLastMileFinalizationProof         = "get_last_mile_finalization_proof"
-	WsRouteAcceptLastMileFinalizationProof      = "accept_last_mile_finalization_proof"
-	WsRouteGetLastMileFinalizationProofFromPoD  = "get_last_mile_finalization_proof_from_pod"
+	WsRouteSignHeightAttestation                = "sign_height_attestation"
+	WsRouteSignQuorumRotation                   = "sign_quorum_rotation"
+	WsRouteAcceptHeightAttestation              = "accept_height_attestation"
+	WsRouteGetHeightAttestationFromPoD          = "get_height_attestation_from_pod"
+	WsRouteAcceptQuorumRotationAttestation      = "accept_quorum_rotation_attestation"
+	WsRouteGetQuorumRotationAttestationFromPoD  = "get_quorum_rotation_attestation_from_pod"
 )
 
 // Common DB key fragments/prefixes.

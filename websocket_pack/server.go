@@ -76,16 +76,27 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		GetBlockWithProof(req, connection)
 
-	case constants.WsRouteGetLastMileFinalizationProof:
+	case constants.WsRouteSignHeightAttestation:
 
-		var req WsLastMileFinalizationProofRequest
+		var req WsHeightAttestationRequest
 
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
-			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_last_mile_finalization_proof_request"}`))
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_height_attestation_request"}`))
 			return
 		}
 
-		GetLastMileFinalizationProof(req, connection)
+		SignHeightAttestation(req, connection)
+
+	case constants.WsRouteSignQuorumRotation:
+
+		var req WsQuorumRotationRequest
+
+		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_quorum_rotation_request"}`))
+			return
+		}
+
+		SignQuorumRotation(req, connection)
 
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))

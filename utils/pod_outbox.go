@@ -88,6 +88,10 @@ func PoDOutboxIdForALFP(epochIndex int, leader string) string {
 	return fmt.Sprintf("ALFP:%d:%s", epochIndex, leader)
 }
 
-func PoDOutboxIdForLastMile(absoluteHeight int) string {
-	return fmt.Sprintf("LAST_MILE:%d", absoluteHeight)
+func PoDOutboxIdForHeightAttestation(absoluteHeight int) string {
+	return fmt.Sprintf("HEIGHT_ATTESTATION:%d", absoluteHeight)
+}
+
+func PoDOutboxIdForQuorumRotation(epochId int) string {
+	return fmt.Sprintf("QUORUM_ROTATION:%d", epochId)
 }

@@ -80,28 +80,63 @@ type WsAggregatedLeaderFinalizationProofResponse struct {
 	Proof *structures.AggregatedLeaderFinalizationProof `json:"proof"`
 }
 
-type WsLastMileFinalizationProofRequest struct {
+// Height attestation (quorum member signs height->block mapping)
+
+type WsHeightAttestationRequest struct {
 	Route          string `json:"route"`
 	AbsoluteHeight int    `json:"absoluteHeight"`
 	BlockId        string `json:"blockId"`
 	BlockHash      string `json:"blockHash"`
+	EpochId        int    `json:"epochId"`
 }
 
-type WsLastMileFinalizationProofResponse struct {
+type WsHeightAttestationResponse struct {
 	Voter string `json:"voter"`
 	Sig   string `json:"sig"`
 }
 
-type WsLastMileFinalizationProofStoreRequest struct {
-	Route string                                `json:"route"`
-	Proof structures.LastMileFinalizationProof `json:"proof"`
+// PoD storage/retrieval for height attestations
+
+type WsHeightAttestationStoreRequest struct {
+	Route string                      `json:"route"`
+	Proof structures.HeightAttestation `json:"proof"`
 }
 
-type WsLastMileFinalizationProofGetRequest struct {
+type WsHeightAttestationGetRequest struct {
 	Route          string `json:"route"`
 	AbsoluteHeight int    `json:"absoluteHeight"`
 }
 
-type WsLastMileFinalizationProofGetResponse struct {
-	Proof *structures.LastMileFinalizationProof `json:"proof"`
+type WsHeightAttestationGetResponse struct {
+	Proof *structures.HeightAttestation `json:"proof"`
+}
+
+// Quorum rotation (quorum member signs next-epoch quorum)
+
+type WsQuorumRotationRequest struct {
+	Route       string   `json:"route"`
+	EpochId     int      `json:"epochId"`
+	NextEpochId int      `json:"nextEpochId"`
+	NextQuorum  []string `json:"nextQuorum"`
+}
+
+type WsQuorumRotationResponse struct {
+	Voter string `json:"voter"`
+	Sig   string `json:"sig"`
+}
+
+// PoD storage/retrieval for quorum rotation attestations
+
+type WsQuorumRotationAttestationStoreRequest struct {
+	Route       string                                `json:"route"`
+	Attestation structures.QuorumRotationAttestation `json:"attestation"`
+}
+
+type WsQuorumRotationAttestationGetRequest struct {
+	Route   string `json:"route"`
+	EpochId int    `json:"epochId"`
+}
+
+type WsQuorumRotationAttestationGetResponse struct {
+	Attestation *structures.QuorumRotationAttestation `json:"attestation"`
 }
