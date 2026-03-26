@@ -98,7 +98,7 @@ type WsHeightAttestationResponse struct {
 // PoD storage/retrieval for height attestations
 
 type WsHeightAttestationStoreRequest struct {
-	Route string                      `json:"route"`
+	Route string                       `json:"route"`
 	Proof structures.HeightAttestation `json:"proof"`
 }
 
@@ -114,10 +114,11 @@ type WsHeightAttestationGetResponse struct {
 // Quorum rotation (quorum member signs next-epoch quorum)
 
 type WsQuorumRotationRequest struct {
-	Route       string   `json:"route"`
-	EpochId     int      `json:"epochId"`
-	NextEpochId int      `json:"nextEpochId"`
-	NextQuorum  []string `json:"nextQuorum"`
+	Route         string   `json:"route"`
+	EpochId       int      `json:"epochId"`
+	NextEpochId   int      `json:"nextEpochId"`
+	NextEpochHash string   `json:"nextEpochHash"`
+	NextQuorum    []string `json:"nextQuorum"`
 }
 
 type WsQuorumRotationResponse struct {
@@ -128,7 +129,7 @@ type WsQuorumRotationResponse struct {
 // PoD storage/retrieval for quorum rotation attestations
 
 type WsQuorumRotationAttestationStoreRequest struct {
-	Route       string                                `json:"route"`
+	Route       string                               `json:"route"`
 	Attestation structures.QuorumRotationAttestation `json:"attestation"`
 }
 

@@ -272,7 +272,7 @@ func LastMileFinalizerThread() {
 		// On epoch change, send QuorumRotationAttestation to anchors
 		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
 			prevEpochId := epochSnapshot.Id - 1
-			rotationAttestation := tryCollectQuorumRotation(prevEpochId, epochSnapshot.Id, epochSnapshot.Quorum)
+			rotationAttestation := tryCollectQuorumRotation(prevEpochId, epochSnapshot.Id, epochSnapshot.Hash, epochSnapshot.Quorum)
 			if rotationAttestation != nil {
 				if !anchorConnectionsSent {
 					openAnchorConnectionsForLastMile()
@@ -460,7 +460,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	}
 }
 
-func tryCollectQuorumRotation(epochId, nextEpochId int, nextQuorum []string) *structures.QuorumRotationAttestation {
+func tryCollectQuorumRotation(epochId, nextEpochId int, nextEpochHash string, nextQuorum []string) *structures.QuorumRotationAttestation {
 
 	prevEpochHandler := getEpochHandlerForTracker(epochId)
 	if prevEpochHandler == nil {
@@ -474,10 +474,11 @@ func tryCollectQuorumRotation(epochId, nextEpochId int, nextQuorum []string) *st
 	sort.Strings(sortedQuorum)
 
 	request := websocket_pack.WsQuorumRotationRequest{
-		Route:       constants.WsRouteSignQuorumRotation,
-		EpochId:     epochId,
-		NextEpochId: nextEpochId,
-		NextQuorum:  nextQuorum,
+		Route:         constants.WsRouteSignQuorumRotation,
+		EpochId:       epochId,
+		NextEpochId:   nextEpochId,
+		NextEpochHash: nextEpochHash,
+		NextQuorum:    nextQuorum,
 	}
 
 	message, err := json.Marshal(request)
@@ -497,7 +498,7 @@ func tryCollectQuorumRotation(epochId, nextEpochId int, nextQuorum []string) *st
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	dataToVerify := "QUORUM_ROTATION:" + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + strings.Join(sortedQuorum, ",")
+	dataToVerify := "QUORUM_ROTATION:" + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + nextEpochHash + ":" + strings.Join(sortedQuorum, ",")
 
 	validateProof := func(id string, raw []byte) bool {
 		var response websocket_pack.WsQuorumRotationResponse
@@ -533,10 +534,11 @@ func tryCollectQuorumRotation(epochId, nextEpochId int, nextQuorum []string) *st
 	}
 
 	return &structures.QuorumRotationAttestation{
-		EpochId:     epochId,
-		NextEpochId: nextEpochId,
-		NextQuorum:  nextQuorum,
-		Proofs:      proofs,
+		EpochId:       epochId,
+		NextEpochId:   nextEpochId,
+		NextEpochHash: nextEpochHash,
+		NextQuorum:    nextQuorum,
+		Proofs:        proofs,
 	}
 }
 
@@ -547,7 +549,7 @@ func deliverQuorumRotationToAnchors(attestation *structures.QuorumRotationAttest
 	LAST_MILE_MUTEX.Unlock()
 
 	message, err := json.Marshal(struct {
-		Route       string                                `json:"route"`
+		Route       string                               `json:"route"`
 		Attestation structures.QuorumRotationAttestation `json:"attestation"`
 	}{
 		Route:       "accept_quorum_rotation",

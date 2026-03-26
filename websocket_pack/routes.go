@@ -461,6 +461,10 @@ func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.C
 		return
 	}
 
+	if nextEpochHandler.Hash != parsedRequest.NextEpochHash {
+		return
+	}
+
 	sortedQuorum := make([]string, len(nextEpochHandler.Quorum))
 	copy(sortedQuorum, nextEpochHandler.Quorum)
 	sort.Strings(sortedQuorum)
@@ -478,7 +482,7 @@ func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.C
 		}
 	}
 
-	dataToSign := "QUORUM_ROTATION:" + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + strings.Join(sortedQuorum, ",")
+	dataToSign := "QUORUM_ROTATION:" + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + parsedRequest.NextEpochHash + ":" + strings.Join(sortedQuorum, ",")
 
 	response := WsQuorumRotationResponse{
 		Voter: globals.CONFIGURATION.PublicKey,
