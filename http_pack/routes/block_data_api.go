@@ -150,7 +150,7 @@ func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	afp, err := databases.EPOCH_DATA.Get([]byte("AFP:"+blockId), nil)
+	afp, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockId), nil)
 
 	if err == nil && afp != nil {
 		helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, afp)

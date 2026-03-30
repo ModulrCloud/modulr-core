@@ -211,7 +211,7 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 
 func loadFinalizationProgress() int {
 
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte("ALFP_PROGRESS"), nil); err == nil {
+	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
 		}
@@ -222,7 +222,7 @@ func loadFinalizationProgress() int {
 
 func persistFinalizationProgress(epochId int) {
 
-	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte("ALFP_PROGRESS"), []byte(strconv.Itoa(epochId)), nil)
+	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(constants.DBKeyAlfpProgress), []byte(strconv.Itoa(epochId)), nil)
 }
 
 func cleanupLeaderFinalizationState(epochId int) {
@@ -282,14 +282,14 @@ func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParam
 
 func leaderHasAlfp(epochId int, leader string) bool {
 
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
 	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	return err == nil
 }
 
 func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structures.AggregatedLeaderFinalizationProof {
 
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		return nil
@@ -686,7 +686,7 @@ func persistAggregatedLeaderFinalizationProofDirect(aggregated *structures.Aggre
 		return
 	}
 
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", aggregated.EpochIndex, aggregated.Leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, aggregated.EpochIndex, aggregated.Leader))
 	if value, err := json.Marshal(aggregated); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
 	}

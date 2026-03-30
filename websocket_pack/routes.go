@@ -142,7 +142,7 @@ func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *
 								afpBytes, err := json.Marshal(parsedRequest.PreviousBlockAfp)
 								if err == nil {
 									// 2. Store the AFP for previous block
-									errStore = databases.EPOCH_DATA.Put([]byte("AFP:"+parsedRequest.PreviousBlockAfp.BlockId), afpBytes, nil)
+									errStore = databases.EPOCH_DATA.Put([]byte(constants.DBKeyPrefixAfp+parsedRequest.PreviousBlockAfp.BlockId), afpBytes, nil)
 								} else {
 									errStore = err
 								}
@@ -554,7 +554,7 @@ func GetBlockWithProof(parsedRequest WsBlockWithAfpRequest, connection *gws.Conn
 
 					// Remark: To make sure block with index X is 100% approved we need to get the AFP for next block
 
-					if afpBytes, err := databases.EPOCH_DATA.Get([]byte("AFP:"+nextBlockId), nil); err == nil {
+					if afpBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+nextBlockId), nil); err == nil {
 
 						var afp structures.AggregatedFinalizationProof
 

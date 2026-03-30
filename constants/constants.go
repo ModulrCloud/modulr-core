@@ -58,6 +58,9 @@ const (
 	DBKeyPrefixAfp                 = "AFP:"
 	DBKeyPrefixQuorumRotation      = "QUORUM_ROTATION:"
 
+	DBKeyPrefixAlfp = "ALFP:"
+
+	DBKeyAlfpProgress                = "ALFP_PROGRESS"
 	DBKeyHeightAttestationVoterState = "HEIGHT_ATTESTATION_VOTER_STATE"
 	DBKeyLastMileFinalizerTracker    = "LAST_MILE_FINALIZER_TRACKER"
 )

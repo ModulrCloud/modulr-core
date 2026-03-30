@@ -85,7 +85,7 @@ func PoDOutboxIdForCoreBlock(epochIndex int, creator string, index int) string {
 }
 
 func PoDOutboxIdForALFP(epochIndex int, leader string) string {
-	return fmt.Sprintf("ALFP:%d:%s", epochIndex, leader)
+	return fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochIndex, leader)
 }
 
 func PoDOutboxIdForHeightAttestation(absoluteHeight int) string {

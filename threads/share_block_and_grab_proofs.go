@@ -269,7 +269,7 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 			Proofs: FINALIZATION_PROOFS_CACHE,
 		}
 
-		keyBytes := []byte("AFP:" + blockIdForHunting)
+		keyBytes := []byte(constants.DBKeyPrefixAfp + blockIdForHunting)
 
 		valueBytes, _ := json.Marshal(aggregatedFinalizationProof)
 

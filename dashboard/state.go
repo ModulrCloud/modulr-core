@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -141,7 +142,7 @@ func GetLeaderFinalizationState() LeaderFinalizationState {
 }
 
 func loadFinalizationProgress() int {
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte("ALFP_PROGRESS"), nil); err == nil {
+	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
 		}
@@ -166,13 +167,13 @@ func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
 }
 
 func leaderHasAlfp(epochId int, leader string) bool {
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
 	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	return err == nil
 }
 
 func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structures.AggregatedLeaderFinalizationProof {
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		return nil
