@@ -64,9 +64,9 @@ const (
 
 // Signing prefixes (used as salts for cryptographic signatures).
 const (
-	SigningPrefixQuorumRotation      = "QUORUM_ROTATION:"
-	SigningPrefixDelayedOperations   = "SIG_DELAYED_OPERATIONS:"
-	SigningPrefixHeightAttestation   = "HEIGHT_ATTESTATION"
+	SigningPrefixQuorumRotation     = "QUORUM_ROTATION:"
+	SigningPrefixDelayedOperations  = "SIG_DELAYED_OPERATIONS:"
+	SigningPrefixHeightAttestation  = "HEIGHT_ATTESTATION"
 	SigningPrefixLeaderFinalization = "LEADER_FINALIZATION_PROOF"
 )
 
