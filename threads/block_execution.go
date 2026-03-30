@@ -563,12 +563,26 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	// To change the state atomically - prepare the atomic batch
 	stateBatch := new(leveldb.Batch)
 
-	blockFees := uint64(0)
+	// 1. Process all transactions in the block
+	blockFees := applyTransactions(block, currentBlockId, stateBatch, epochHandlerRef)
 
+	// 2. Distribute fees
+	sendFeesToValidatorAccount(block.Creator, blockFees)
+
+	// 3. Persist touched state (accounts and validators)
+	persistTouchedState(stateBatch)
+
+	// 4. Update execution statistics and save ET metadata
+	logMsg := updateExecutionStatistics(block, currentBlockId, blockFees, stateBatch, epochHandlerRef)
+
+	return stateBatch, logMsg, true
+}
+
+func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) uint64 {
+	blockFees := uint64(0)
 	delayedTxPayloadsForBatch := make([]map[string]string, 0)
 
 	for index, transaction := range block.Transactions {
-
 		success, reason, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
 
 		if isDelayed {
@@ -589,23 +603,24 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 		if !success {
 			receiptReason = reason
 		}
+
 		if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success, Reason: receiptReason}); err == nil {
 			stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 		} else {
 			panic("Impossible to add transaction location data to atomic batch")
 		}
-
 	}
 
 	if len(delayedTxPayloadsForBatch) > 0 {
-		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, currentEpochIndex, stateBatch); err != nil {
+		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, epochHandlerRef.EpochDataHandler.Id, stateBatch); err != nil {
 			panic("Impossible to add delayed transactions to atomic batch")
 		}
 	}
 
-	// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
-	sendFeesToValidatorAccount(block.Creator, blockFees)
+	return blockFees
+}
 
+func persistTouchedState(stateBatch *leveldb.Batch) {
 	for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
 		if accountDataBytes, err := json.Marshal(accountData); err == nil {
 			stateBatch.Put([]byte(accountID), accountDataBytes)
@@ -622,8 +637,9 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 			panic("Impossible to add validator storage to atomic batch")
 		}
 	}
+}
 
-	// Update the execution data for progress
+func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) string {
 	blockHash := block.GetHash()
 
 	blockCreatorData := epochHandlerRef.ExecutionData[block.Creator]
@@ -631,7 +647,6 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	blockCreatorData.Hash = blockHash
 	epochHandlerRef.ExecutionData[block.Creator] = blockCreatorData
 
-	// Finally set the updated execution thread handler to atomic batch
 	epochHandlerRef.Statistics.LastHeight++
 	epochHandlerRef.Statistics.LastBlockHash = blockHash
 	epochHandlerRef.Statistics.TotalFees += blockFees
@@ -639,8 +654,7 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 
 	epochHandlerRef.EpochStatistics.TotalFees += blockFees
 	epochHandlerRef.EpochStatistics.BlocksGenerated++
-	// For per-epoch stats we still expose the absolute last height / last block hash (useful to know
-	// which exact block finished the epoch).
+
 	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
 	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
@@ -652,8 +666,7 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 		panic("Impossible to store updated execution thread version to atomic batch")
 	}
 
-	logMsg := fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight)
-	return stateBatch, logMsg, true
+	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight)
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {
@@ -995,7 +1008,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
 			5*time.Second,
-			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
+			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing %s%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, constants.DBKeyPrefixEpochData, nextEpochIndex),
 			utils.YELLOW_COLOR,
 		)
 	}

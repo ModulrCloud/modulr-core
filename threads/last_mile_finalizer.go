@@ -231,13 +231,8 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 	}
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
-	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
-
-	if raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil); err == nil {
-		var snapshot structures.EpochDataSnapshot
-		if json.Unmarshal(raw, &snapshot) == nil {
-			return &snapshot.EpochDataHandler
-		}
+	if snapshot := utils.GetEpochSnapshot(epochId); snapshot != nil {
+		return &snapshot.EpochDataHandler
 	}
 
 	return nil

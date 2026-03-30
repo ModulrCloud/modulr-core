@@ -190,29 +190,23 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 	}
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
 	// to be committed atomically with AT updates.
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
-	if err != nil {
-		return nil
-	}
-
-	var loaded structures.EpochDataSnapshot
-	if json.Unmarshal(raw, &loaded) != nil {
+	loaded := utils.GetEpochSnapshot(epochId)
+	if loaded == nil {
 		return nil
 	}
 
 	// Keep snapshot in the current epoch state (single-epoch processing).
 	ALFP_GRABBING_MUTEX.Lock()
 	if ALFP_PROCESS_METADATA != nil && ALFP_PROCESS_METADATA.EpochId == epochId {
-		ALFP_PROCESS_METADATA.Snapshot = &loaded
+		ALFP_PROCESS_METADATA.Snapshot = loaded
 		ALFP_GRABBING_MUTEX.Unlock()
 		return ALFP_PROCESS_METADATA.Snapshot
 	}
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	return &loaded
+	return loaded
 }
 
 func loadFinalizationProgress() int {

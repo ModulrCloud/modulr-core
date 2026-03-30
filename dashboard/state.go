@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/handlers"
@@ -151,16 +150,7 @@ func loadFinalizationProgress() int {
 }
 
 func loadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
-	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
-	if err != nil {
-		return nil
-	}
-	var snap structures.EpochDataSnapshot
-	if json.Unmarshal(raw, &snap) != nil {
-		return nil
-	}
-	return &snap
+	return utils.GetEpochSnapshot(epochId)
 }
 
 func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
