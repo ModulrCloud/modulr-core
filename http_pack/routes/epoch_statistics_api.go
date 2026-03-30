@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/http_pack/helpers"
@@ -60,7 +61,7 @@ func GetEpochStatsByEpochIndex(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	key := []byte(fmt.Sprintf("EPOCH_STATS:%d", epochIndex))
+	key := []byte(fmt.Sprintf(constants.DBKeyPrefixEpochStats+"%d", epochIndex))
 	value, derr := databases.STATE.Get(key, nil)
 	if derr != nil {
 		if derr == leveldb.ErrNotFound {

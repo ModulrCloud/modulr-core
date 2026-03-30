@@ -165,7 +165,7 @@ func prepareBlockchain() error {
 	databases.FINALIZATION_VOTING_STATS = utils.OpenDb("FINALIZATION_VOTING_STATS")
 
 	// Load GT - Generation Thread handler
-	if data, err := databases.BLOCKS.Get([]byte("GT"), nil); err == nil {
+	if data, err := databases.BLOCKS.Get([]byte(constants.DBKeyGenerationThreadMetadata), nil); err == nil {
 
 		var gtHandler structures.GenerationThreadMetadataHandler
 
@@ -185,7 +185,7 @@ func prepareBlockchain() error {
 
 	}
 
-	if data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("AT"), nil); err == nil {
+	if data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyApprovementThreadMetadata), nil); err == nil {
 
 		var atHandler structures.ApprovementThreadMetadataHandler
 
@@ -201,7 +201,7 @@ func prepareBlockchain() error {
 
 	}
 
-	if data, err := databases.STATE.Get([]byte("ET"), nil); err == nil {
+	if data, err := databases.STATE.Get([]byte(constants.DBKeyExecutionThreadMetadata), nil); err == nil {
 
 		var etHandler structures.ExecutionThreadMetadataHandler
 
@@ -252,11 +252,11 @@ func prepareBlockchain() error {
 			return fmt.Errorf("marshal EXECUTION_THREAD metadata: %w", err)
 		}
 
-		if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte("AT"), serializedApprovementThread, nil); err != nil {
+		if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyApprovementThreadMetadata), serializedApprovementThread, nil); err != nil {
 			return fmt.Errorf("save APPROVEMENT_THREAD metadata: %w", err)
 		}
 
-		if err := databases.STATE.Put([]byte("ET"), serializedExecutionThread, nil); err != nil {
+		if err := databases.STATE.Put([]byte(constants.DBKeyExecutionThreadMetadata), serializedExecutionThread, nil); err != nil {
 			return fmt.Errorf("save EXECUTION_THREAD metadata: %w", err)
 		}
 	}
@@ -429,7 +429,7 @@ func setGenesisToState() error {
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB.
 	// For genesis init we also store it via the same batch as validator metadata,
 	// so it becomes visible atomically with the rest of the genesis bootstrap data.
-	approvementThreadBatch.Put([]byte("EPOCH_HANDLER:"+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
+	approvementThreadBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
 
 	// Commit changes
 	if err := databases.APPROVEMENT_THREAD_METADATA.Write(approvementThreadBatch, nil); err != nil {

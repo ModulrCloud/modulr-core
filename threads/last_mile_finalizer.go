@@ -29,8 +29,6 @@ import (
 
 const LAST_MILE_FINALIZERS_COUNT = 5
 
-const LAST_MILE_FINALIZER_TRACKER_KEY = "LAST_MILE_FINALIZER_TRACKER"
-
 var (
 	LAST_MILE_MUTEX           sync.Mutex
 	LAST_MILE_QUORUM_WS_CONNS = make(map[string]*websocket.Conn)
@@ -197,7 +195,7 @@ func openAnchorConnectionsForLastMile() {
 
 func storeHeightAttestation(proof *structures.HeightAttestation) {
 
-	key := []byte(fmt.Sprintf("HEIGHT_ATTESTATION:%d", proof.AbsoluteHeight))
+	key := []byte(fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", proof.AbsoluteHeight))
 
 	if value, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
@@ -206,7 +204,7 @@ func storeHeightAttestation(proof *structures.HeightAttestation) {
 
 func LoadHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
 
-	key := []byte(fmt.Sprintf("HEIGHT_ATTESTATION:%d", absoluteHeight))
+	key := []byte(fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", absoluteHeight))
 
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 
@@ -233,7 +231,7 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 	}
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
-	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochId))
+	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
 
 	if raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil); err == nil {
 		var snapshot structures.EpochDataSnapshot
@@ -271,7 +269,7 @@ func LastMileFinalizerThread() {
 	anchorConnectionsSent := false
 	lastRotationEpoch := -1
 
-	tracker := utils.LoadLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY)
+	tracker := utils.LoadLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker)
 
 	for {
 
@@ -361,7 +359,7 @@ func LastMileFinalizerThread() {
 
 				if nextEpochHandler != nil {
 					tracker.AdvanceToNextEpoch()
-					utils.PersistLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY, tracker)
+					utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 					continue
 				}
 
@@ -390,7 +388,7 @@ func LastMileFinalizerThread() {
 
 			storeHeightAttestation(proof)
 			tracker.Advance()
-			utils.PersistLastMileSequenceState(LAST_MILE_FINALIZER_TRACKER_KEY, tracker)
+			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 
 			websocket_pack.SendHeightAttestationToPoD(*proof)
 
@@ -469,7 +467,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 		}
 
 		dataToVerify := strings.Join([]string{
-			"HEIGHT_ATTESTATION",
+			constants.SigningPrefixHeightAttestation,
 			strconv.Itoa(absoluteHeight),
 			blockId,
 			blockHash,
@@ -546,7 +544,7 @@ func tryCollectQuorumRotationWithConns(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	dataToVerify := "QUORUM_ROTATION:" + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + nextEpochHash + ":" + strings.Join(sortedQuorum, ",")
+	dataToVerify := constants.SigningPrefixQuorumRotation + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + nextEpochHash + ":" + strings.Join(sortedQuorum, ",")
 
 	validateProof := func(id string, raw []byte) bool {
 		var response websocket_pack.WsQuorumRotationResponse

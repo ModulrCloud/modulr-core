@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -108,7 +109,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 		return batch
 	}
 
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", prevEpochIndex)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", prevEpochIndex)
 	rawDelayedTxs, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 	if err != nil {
 		return batch
@@ -123,7 +124,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 		return batch
 	}
 
-	dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
 
 	proofs := map[string]string{
 		globals.CONFIGURATION.PublicKey: cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned),

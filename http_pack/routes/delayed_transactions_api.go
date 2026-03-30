@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -54,7 +55,7 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", request.EpochIndex)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", request.EpochIndex)
 	payloadBytes, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 
 	if err != nil {
@@ -78,7 +79,7 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
 	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned)
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, delayedTransactionsSignResponse{Signature: signature})

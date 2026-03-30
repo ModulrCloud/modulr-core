@@ -644,10 +644,10 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
 	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
-	stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
+	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
 
 	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
-		stateBatch.Put([]byte("ET"), execThreadRawBytes)
+		stateBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
 	} else {
 		panic("Impossible to store updated execution thread version to atomic batch")
 	}
@@ -864,7 +864,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 	// Take from DB
 
-	rawHandler, dbErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("EPOCH_DATA:"+strconv.Itoa(nextEpochIndex)), nil)
+	rawHandler, dbErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochIndex)), nil)
 
 	if dbErr == nil {
 
@@ -967,7 +967,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 
 		if execThreadRawBytes, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.Handler); err == nil {
 
-			dbBatch.Put([]byte("ET"), execThreadRawBytes)
+			dbBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
 
 		} else {
 

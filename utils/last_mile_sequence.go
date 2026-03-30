@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/structures"
 )
@@ -84,12 +85,12 @@ func PersistLastMileSequenceState(dbKey string, state *LastMileSequenceState) {
 }
 
 func StoreHeightBlockIdMapping(height int64, blockId string) {
-	key := fmt.Sprintf("LAST_MILE_HEIGHT_MAP:%d", height)
+	key := fmt.Sprintf(constants.DBKeyPrefixLastMileHeightMap+"%d", height)
 	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(key), []byte(blockId), nil)
 }
 
 func LoadHeightBlockIdMapping(height int64) string {
-	key := fmt.Sprintf("LAST_MILE_HEIGHT_MAP:%d", height)
+	key := fmt.Sprintf(constants.DBKeyPrefixLastMileHeightMap+"%d", height)
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
 	if err != nil {
 		return ""

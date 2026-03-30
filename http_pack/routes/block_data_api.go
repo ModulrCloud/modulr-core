@@ -102,7 +102,7 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	blockIndexKey := "BLOCK_INDEX:" + absoluteHeight
+	blockIndexKey := constants.DBKeyPrefixBlockIndex + absoluteHeight
 	blockID, err := databases.STATE.Get([]byte(blockIndexKey), nil)
 
 	if err != nil {

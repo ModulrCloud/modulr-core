@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/http_pack/helpers"
 
@@ -19,7 +20,7 @@ func GetEpochData(ctx *fasthttp.RequestCtx) {
 
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
 	// to be committed atomically with AT updates.
-	value, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("EPOCH_HANDLER:"+epochIndex), nil)
+	value, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixEpochHandler+epochIndex), nil)
 
 	if err == nil && value != nil {
 		helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, value)

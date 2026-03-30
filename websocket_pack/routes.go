@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -35,7 +36,7 @@ func getEpochHandlerForLeaderFinalization(epochIndex int) *structures.EpochDataH
 	}
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
-	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochIndex))
+	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochIndex))
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
 	if raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil); err == nil {
 		var snapshot structures.EpochDataSnapshot
@@ -351,8 +352,6 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 var heightAttestationVoterMutex sync.Mutex
 
-const HEIGHT_ATTESTATION_VOTER_KEY = "HEIGHT_ATTESTATION_VOTER_STATE"
-
 func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection *gws.Conn) {
 
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
@@ -362,7 +361,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	heightAttestationVoterMutex.Lock()
 	defer heightAttestationVoterMutex.Unlock()
 
-	state := utils.LoadLastMileSequenceState(HEIGHT_ATTESTATION_VOTER_KEY)
+	state := utils.LoadLastMileSequenceState(constants.DBKeyHeightAttestationVoterState)
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
 	expectedBlockId := ""
@@ -410,7 +409,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 			state.Advance()
 		}
 
-		utils.PersistLastMileSequenceState(HEIGHT_ATTESTATION_VOTER_KEY, state)
+		utils.PersistLastMileSequenceState(constants.DBKeyHeightAttestationVoterState, state)
 	}
 
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
@@ -424,7 +423,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 
 	dataToSign := strings.Join([]string{
-		"HEIGHT_ATTESTATION",
+		constants.SigningPrefixHeightAttestation,
 		strconv.Itoa(parsedRequest.AbsoluteHeight),
 		parsedRequest.BlockId,
 		parsedRequest.BlockHash,
@@ -482,7 +481,7 @@ func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.C
 		}
 	}
 
-	dataToSign := "QUORUM_ROTATION:" + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + parsedRequest.NextEpochHash + ":" + strings.Join(sortedQuorum, ",")
+	dataToSign := constants.SigningPrefixQuorumRotation + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + parsedRequest.NextEpochHash + ":" + strings.Join(sortedQuorum, ",")
 
 	response := WsQuorumRotationResponse{
 		Voter: globals.CONFIGURATION.PublicKey,

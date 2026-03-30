@@ -105,7 +105,7 @@ func EpochRotationThread() {
 
 						jsonedDelayedTxs, _ := json.Marshal(firstBlock.ExtraData.DelayedTransactionsBatch.DelayedTransactions)
 
-						dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
+						dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
 
 						okSignatures := 0
 
@@ -176,7 +176,7 @@ func EpochRotationThread() {
 						atomicBatch := new(leveldb.Batch)
 
 						// Store snapshot of the finishing epoch in the same DB/batch as AT update for atomicity.
-						atomicBatch.Put([]byte("EPOCH_HANDLER:"+strconv.Itoa(epochHandlerRef.Id)), valBytes)
+						atomicBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(epochHandlerRef.Id)), valBytes)
 
 						for _, delayedTransaction := range delayedTransactionsToExecute {
 
@@ -252,7 +252,7 @@ func EpochRotationThread() {
 
 						jsonedNextEpochDataHandler, _ := json.Marshal(nextEpochDataHandler)
 
-						atomicBatch.Put([]byte("EPOCH_DATA:"+strconv.Itoa(nextEpochId)), jsonedNextEpochDataHandler)
+						atomicBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), jsonedNextEpochDataHandler)
 
 						writeLatestBatchIndexBatch(atomicBatch, latestBatchIndex)
 
@@ -267,14 +267,14 @@ func EpochRotationThread() {
 							NetworkParameters: networkParamsCopy,
 						}
 						if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
-							atomicBatch.Put([]byte("EPOCH_HANDLER:"+strconv.Itoa(nextEpochId)), nextValBytes)
+							atomicBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(nextEpochId)), nextValBytes)
 						}
 
 						// And commit all the changes on AT as a single atomic batch
 
 						jsonedHandler, _ := json.Marshal(handlers.APPROVEMENT_THREAD_METADATA.Handler)
 
-						atomicBatch.Put([]byte("AT"), jsonedHandler)
+						atomicBatch.Put([]byte(constants.DBKeyApprovementThreadMetadata), jsonedHandler)
 
 						// Clear write-back set (cache itself stays bounded via LRU).
 						utils.ResetApprovementTouchedSets()
@@ -340,7 +340,7 @@ func EpochRotationThread() {
 
 func firstBlockDataKey(epochIndex int) []byte {
 
-	return []byte(fmt.Sprintf("FIRST_BLOCK_DATA:%d", epochIndex))
+	return []byte(fmt.Sprintf(constants.DBKeyPrefixFirstBlockData+"%d", epochIndex))
 
 }
 
@@ -364,7 +364,7 @@ func executeDelayedTransaction(delayedTransaction map[string]string, contextTag 
 // Supports legacy decimal-string format and migrates it to 8-byte BigEndian.
 func readLatestBatchIndex() int64 {
 
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("LATEST_BATCH_INDEX"), nil)
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyLatestBatchIndex), nil)
 
 	if err != nil || len(raw) == 0 {
 		return 0
@@ -378,7 +378,7 @@ func readLatestBatchIndex() int64 {
 	if v, perr := strconv.ParseInt(string(raw), 10, 64); perr == nil && v >= 0 {
 		var buf [8]byte
 		binary.BigEndian.PutUint64(buf[:], uint64(v))
-		_ = databases.APPROVEMENT_THREAD_METADATA.Put([]byte("LATEST_BATCH_INDEX"), buf[:], nil)
+		_ = databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyLatestBatchIndex), buf[:], nil)
 		return v
 	}
 
@@ -393,7 +393,7 @@ func writeLatestBatchIndexBatch(batch *leveldb.Batch, v int64) {
 
 	binary.BigEndian.PutUint64(buf[:], uint64(v))
 
-	batch.Put([]byte("LATEST_BATCH_INDEX"), buf[:])
+	batch.Put([]byte(constants.DBKeyLatestBatchIndex), buf[:])
 
 }
 

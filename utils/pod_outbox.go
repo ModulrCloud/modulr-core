@@ -89,9 +89,9 @@ func PoDOutboxIdForALFP(epochIndex int, leader string) string {
 }
 
 func PoDOutboxIdForHeightAttestation(absoluteHeight int) string {
-	return fmt.Sprintf("HEIGHT_ATTESTATION:%d", absoluteHeight)
+	return fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", absoluteHeight)
 }
 
 func PoDOutboxIdForQuorumRotation(epochId int) string {
-	return fmt.Sprintf("QUORUM_ROTATION:%d", epochId)
+	return fmt.Sprintf(constants.DBKeyPrefixQuorumRotation+"%d", epochId)
 }

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -110,7 +111,7 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 		}
 	}
 
-	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", proof.Leader, strconv.Itoa(proof.VotingStat.Index), proof.VotingStat.Hash, epochFullID}, ":")
+	dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, proof.Leader, strconv.Itoa(proof.VotingStat.Index), proof.VotingStat.Hash, epochFullID}, ":")
 
 	okSignatures := 0
 	seen := make(map[string]bool)
@@ -141,7 +142,7 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 	}
 
 	dataToVerify := strings.Join([]string{
-		"HEIGHT_ATTESTATION",
+		constants.SigningPrefixHeightAttestation,
 		strconv.Itoa(proof.AbsoluteHeight),
 		proof.BlockId,
 		proof.BlockHash,
@@ -165,7 +166,7 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 
 func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
 
-	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte("AFP:"+blockID), nil)
+	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockID), nil)
 
 	if err == nil {
 

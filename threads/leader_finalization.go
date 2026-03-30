@@ -190,7 +190,7 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 	}
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochId))
+	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
 	// to be committed atomically with AT updates.
 	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)

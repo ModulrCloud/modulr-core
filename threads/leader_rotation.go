@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
 	"github.com/modulrcloud/modulr-core/structures"
@@ -57,7 +58,7 @@ func LeaderRotationThread() {
 
 				}
 
-				if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte("AT"), jsonedHandler, nil); err != nil {
+				if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyApprovementThreadMetadata), jsonedHandler, nil); err != nil {
 
 					fmt.Printf("Failed to store AT state: %v", err)
 

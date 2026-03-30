@@ -38,10 +38,36 @@ const (
 
 // Common DB key fragments/prefixes.
 const (
-	DBKeyPrefixEpochFinish      = "EPOCH_FINISH:"
-	DBKeyPrefixTxReceipt        = "TX:"
-	DBKeyPrefixValidatorStorage = "VALIDATOR_STORAGE:"
-	DBKeyPrefixPodOutbox        = "POD_OUTBOX:"
+	DBKeyExecutionThreadMetadata   = "ET"
+	DBKeyApprovementThreadMetadata = "AT"
+	DBKeyGenerationThreadMetadata  = "GT"
+	DBKeyLatestBatchIndex          = "LATEST_BATCH_INDEX"
+
+	DBKeyPrefixBlockIndex          = "BLOCK_INDEX:"
+	DBKeyPrefixEpochData           = "EPOCH_DATA:"
+	DBKeyPrefixEpochHandler        = "EPOCH_HANDLER:"
+	DBKeyPrefixEpochFinish         = "EPOCH_FINISH:"
+	DBKeyPrefixEpochStats          = "EPOCH_STATS:"
+	DBKeyPrefixTxReceipt           = "TX:"
+	DBKeyPrefixValidatorStorage    = "VALIDATOR_STORAGE:"
+	DBKeyPrefixPodOutbox           = "POD_OUTBOX:"
+	DBKeyPrefixDelayedTransactions = "DELAYED_TRANSACTIONS:"
+	DBKeyPrefixFirstBlockData      = "FIRST_BLOCK_DATA:"
+	DBKeyPrefixHeightAttestation   = "HEIGHT_ATTESTATION:"
+	DBKeyPrefixLastMileHeightMap   = "LAST_MILE_HEIGHT_MAP:"
+	DBKeyPrefixAfp                 = "AFP:"
+	DBKeyPrefixQuorumRotation      = "QUORUM_ROTATION:"
+
+	DBKeyHeightAttestationVoterState = "HEIGHT_ATTESTATION_VOTER_STATE"
+	DBKeyLastMileFinalizerTracker    = "LAST_MILE_FINALIZER_TRACKER"
+)
+
+// Signing prefixes (used as salts for cryptographic signatures).
+const (
+	SigningPrefixQuorumRotation      = "QUORUM_ROTATION:"
+	SigningPrefixDelayedOperations   = "SIG_DELAYED_OPERATIONS:"
+	SigningPrefixHeightAttestation   = "HEIGHT_ATTESTATION"
+	SigningPrefixLeaderFinalization = "LEADER_FINALIZATION_PROOF"
 )
 
 // Default in-memory cache limits (bounded caches to avoid unbounded growth).
