@@ -39,24 +39,99 @@ const (
 	READ_WRITE_DEADLINE = 2 * time.Second // timeout for read/write operations for POD (point of distribution)
 )
 
-var (
-	POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of PoD conn
-	POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for PoD
-	POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with PoD itself
-)
+// PodClient manages a single persistent websocket connection to a PoD endpoint
+// with automatic reconnection, retries, and serialized request/response access.
+type PodClient struct {
+	name     string
+	dialFunc func() (*websocket.Conn, error)
+	accessMu sync.Mutex
+	rwMu     sync.Mutex
+	conn     *websocket.Conn
+}
 
-// Dedicated "bulk" PoD connection used for high-frequency requests (e.g. block execution fetching blocks).
-// This avoids head-of-line blocking with other PoD requests that share the default connection.
-var (
-	POD_BULK_ACCESS_MUTEX         sync.Mutex
-	POD_BULK_READ_WRITE_MUTEX     sync.Mutex
-	POD_WEBSOCKET_CONNECTION_BULK *websocket.Conn
-)
+func NewPodClient(name string, dialFunc func() (*websocket.Conn, error)) *PodClient {
+	return &PodClient{name: name, dialFunc: dialFunc}
+}
+
+func (pc *PodClient) Send(msg []byte) ([]byte, error) {
+	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
+		pc.accessMu.Lock()
+		if pc.conn == nil {
+			conn, err := pc.dialFunc()
+			if err != nil {
+				LogWithTimeThrottled(
+					pc.name+":WS:DIAL",
+					2*time.Second,
+					fmt.Sprintf("%s websocket dial failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+					YELLOW_COLOR,
+				)
+				pc.accessMu.Unlock()
+				time.Sleep(RETRY_INTERVAL)
+				continue
+			}
+			pc.conn = conn
+		}
+		c := pc.conn
+		pc.accessMu.Unlock()
+
+		pc.rwMu.Lock()
+		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
+		err := c.WriteMessage(websocket.TextMessage, msg)
+		if err != nil {
+			LogWithTimeThrottled(
+				pc.name+":WS:WRITE",
+				2*time.Second,
+				fmt.Sprintf("%s websocket write failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
+			pc.rwMu.Unlock()
+			pc.accessMu.Lock()
+			if pc.conn == c {
+				_ = c.Close()
+				pc.conn = nil
+			}
+			pc.accessMu.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
+		_, resp, err := c.ReadMessage()
+		pc.rwMu.Unlock()
+
+		if err != nil {
+			LogWithTimeThrottled(
+				pc.name+":WS:READ",
+				2*time.Second,
+				fmt.Sprintf("%s websocket read failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
+			pc.accessMu.Lock()
+			if pc.conn == c {
+				_ = c.Close()
+				pc.conn = nil
+			}
+			pc.accessMu.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		return resp, nil
+	}
+
+	LogWithTimeThrottled(
+		pc.name+":WS:FAILED",
+		2*time.Second,
+		fmt.Sprintf("%s websocket request failed after %d attempts", pc.name, MAX_RETRIES),
+		RED_COLOR,
+	)
+	return nil, fmt.Errorf("failed to send %s message after %d attempts", pc.name, MAX_RETRIES)
+}
 
 var (
-	ANCHORS_POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of Anchors PoD conn
-	ANCHORS_POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
-	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
+	POD_CLIENT         = NewPodClient("PoD", openWebsocketConnectionWithPoD)
+	POD_BULK_CLIENT    = NewPodClient("PoD-Bulk", openWebsocketConnectionWithPoD)
+	ANCHORS_POD_CLIENT = NewPodClient("Anchors-PoD", openWebsocketConnectionWithAnchorsPoD)
 )
 
 type WebsocketGuards struct {
@@ -80,263 +155,17 @@ func NewWebsocketGuards() *WebsocketGuards {
 }
 
 func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-		POD_ACCESS_MUTEX.Lock()
-
-		if POD_WEBSOCKET_CONNECTION == nil {
-			conn, err := openWebsocketConnectionWithPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"POD:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				POD_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			POD_WEBSOCKET_CONNECTION = conn
-		}
-
-		c := POD_WEBSOCKET_CONNECTION
-
-		POD_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		POD_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_READ_WRITE_MUTEX.Unlock()
-			POD_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION = nil
-			}
-			POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		POD_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION = nil
-			}
-			POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
-	}
-
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
+	return POD_CLIENT.Send(msg)
 }
 
-// SendWebsocketMessageToPoDForBlocks is the same as SendWebsocketMessageToPoD but uses a dedicated PoD connection.
-// Use it for high-frequency block fetching so it doesn't block other PoD calls (proofs, stores, etc).
+// SendWebsocketMessageToPoDForBlocks uses a dedicated PoD connection for high-frequency block fetching
+// so it doesn't block other PoD calls (proofs, stores, etc).
 func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-		POD_BULK_ACCESS_MUTEX.Lock()
-
-		if POD_WEBSOCKET_CONNECTION_BULK == nil {
-			conn, err := openWebsocketConnectionWithPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"POD:BULK:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("PoD bulk websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				POD_BULK_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			POD_WEBSOCKET_CONNECTION_BULK = conn
-		}
-
-		c := POD_WEBSOCKET_CONNECTION_BULK
-
-		POD_BULK_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		POD_BULK_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:BULK:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("PoD bulk websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_BULK_READ_WRITE_MUTEX.Unlock()
-			POD_BULK_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION_BULK == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION_BULK = nil
-			}
-			POD_BULK_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		POD_BULK_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:BULK:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("PoD bulk websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_BULK_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION_BULK == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION_BULK = nil
-			}
-			POD_BULK_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
-	}
-
-	LogWithTimeThrottled(
-		"POD:BULK:WS:FAILED",
-		2*time.Second,
-		fmt.Sprintf("PoD bulk websocket request failed after %d attempts", MAX_RETRIES),
-		RED_COLOR,
-	)
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
+	return POD_BULK_CLIENT.Send(msg)
 }
 
 func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-		ANCHORS_POD_ACCESS_MUTEX.Lock()
-
-		if ANCHORS_POD_WEBSOCKET_CONNECTION == nil {
-			conn, err := openWebsocketConnectionWithAnchorsPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"ANCHORS_POD:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("Anchors-PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				ANCHORS_POD_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			ANCHORS_POD_WEBSOCKET_CONNECTION = conn
-		}
-
-		c := ANCHORS_POD_WEBSOCKET_CONNECTION
-
-		ANCHORS_POD_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		ANCHORS_POD_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"ANCHORS_POD:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("Anchors-PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
-			ANCHORS_POD_ACCESS_MUTEX.Lock()
-			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
-			}
-			ANCHORS_POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"ANCHORS_POD:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("Anchors-PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			ANCHORS_POD_ACCESS_MUTEX.Lock()
-			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
-			}
-			ANCHORS_POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
-	}
-
-	LogWithTimeThrottled(
-		"ANCHORS_POD:WS:FAILED",
-		2*time.Second,
-		fmt.Sprintf("Anchors-PoD websocket request failed after %d attempts", MAX_RETRIES),
-		RED_COLOR,
-	)
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
+	return ANCHORS_POD_CLIENT.Send(msg)
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
@@ -722,32 +551,24 @@ func (qw *QuorumWaiter) reconnectFailed(wsConnMap map[string]*websocket.Conn) {
 	}
 }
 
-func openWebsocketConnectionWithPoD() (*websocket.Conn, error) {
-	u, err := url.Parse(globals.CONFIGURATION.PointOfDistributionWS)
+func dialWebsocket(rawURL string) (*websocket.Conn, error) {
+	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
 	}
-
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial error: %w", err)
 	}
-
 	return conn, nil
 }
 
+func openWebsocketConnectionWithPoD() (*websocket.Conn, error) {
+	return dialWebsocket(globals.CONFIGURATION.PointOfDistributionWS)
+}
+
 func openWebsocketConnectionWithAnchorsPoD() (*websocket.Conn, error) {
-	u, err := url.Parse(globals.CONFIGURATION.AnchorsPointOfDistributionWS)
-	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
-	}
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("dial error: %w", err)
-	}
-
-	return conn, nil
+	return dialWebsocket(globals.CONFIGURATION.AnchorsPointOfDistributionWS)
 }
 
 func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map[string]*websocket.Conn) {
