@@ -33,6 +33,9 @@ func createRouter() fasthttp.RequestHandler {
 	r.POST("/transaction", routes.AcceptTransaction)
 	r.POST("/delayed_transactions_signature", routes.SignDelayedTransactions)
 
+	// Recovery
+	r.GET("/recovery/last_finalized_height", routes.GetRecoveryLastFinalizedHeight)
+
 	// Dashboard
 	r.GET("/dashboard", routes.ServeDashboard)
 	r.GET("/dashboard/api/overview", routes.ServeDashboardOverview)
