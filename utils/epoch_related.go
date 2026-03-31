@@ -8,6 +8,11 @@ import (
 	"github.com/modulrcloud/modulr-core/structures"
 )
 
+// ValidatorGetter abstracts how a validator is fetched from the approvement thread state.
+// Use GetValidatorFromApprovementThreadState when no AT lock is held,
+// or GetValidatorFromApprovementThreadStateUnderLock when the caller already holds the write lock.
+type ValidatorGetter func(validatorPubkey string) *structures.ValidatorStorage
+
 type CurrentLeaderData struct {
 	IsMeLeader bool
 	Url        string
@@ -80,14 +85,12 @@ func GetQuorumUrlsAndPubkeys(epochHandler *structures.EpochDataHandler) []struct
 	return toReturn
 }
 
-func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize int, newEpochSeed string) []string {
+func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize int, newEpochSeed string, getValidator ValidatorGetter) []string {
 	totalNumberOfValidators := len(epochHandler.ValidatorsRegistry)
 
 	if totalNumberOfValidators <= quorumSize {
 		futureQuorum := make([]string, len(epochHandler.ValidatorsRegistry))
-
 		copy(futureQuorum, epochHandler.ValidatorsRegistry)
-
 		return futureQuorum
 	}
 
@@ -98,7 +101,7 @@ func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize
 	var totalStakeSum uint64
 
 	for _, validatorPubKey := range epochHandler.ValidatorsRegistry {
-		validatorData := GetValidatorFromApprovementThreadState(validatorPubKey)
+		validatorData := getValidator(validatorPubKey)
 		if validatorData == nil {
 			continue
 		}
@@ -127,57 +130,7 @@ func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize
 	return quorum
 }
 
-// GetCurrentEpochQuorumUnderLock is the same as GetCurrentEpochQuorum, but must be called when
-// handlers.APPROVEMENT_THREAD_METADATA.RWMutex is already held in write mode (Lock).
-// It avoids self-deadlocks by using GetValidatorFromApprovementThreadStateUnderLock.
-func GetCurrentEpochQuorumUnderLock(epochHandler *structures.EpochDataHandler, quorumSize int, newEpochSeed string) []string {
-	totalNumberOfValidators := len(epochHandler.ValidatorsRegistry)
-
-	if totalNumberOfValidators <= quorumSize {
-		futureQuorum := make([]string, len(epochHandler.ValidatorsRegistry))
-
-		copy(futureQuorum, epochHandler.ValidatorsRegistry)
-
-		return futureQuorum
-	}
-
-	hashOfMetadataFromEpoch := Blake3(newEpochSeed)
-
-	pubkeys := make([]string, 0, len(epochHandler.ValidatorsRegistry))
-	stakes := make([]uint64, 0, len(epochHandler.ValidatorsRegistry))
-	var totalStakeSum uint64
-
-	for _, validatorPubKey := range epochHandler.ValidatorsRegistry {
-		validatorData := GetValidatorFromApprovementThreadStateUnderLock(validatorPubKey)
-		if validatorData == nil {
-			continue
-		}
-		pubkeys = append(pubkeys, validatorPubKey)
-		stakes = append(stakes, validatorData.TotalStaked)
-		totalStakeSum += validatorData.TotalStaked
-	}
-
-	if totalStakeSum == 0 {
-		return []string{}
-	}
-
-	tree := NewStakeFenwickTree(stakes)
-	quorum := make([]string, 0, quorumSize)
-
-	for i := 0; i < quorumSize && totalStakeSum > 0; i++ {
-		hashHex := Blake3(hashOfMetadataFromEpoch + "_" + strconv.Itoa(i))
-		r := hashHexToUint64(hashHex) % totalStakeSum
-
-		idx := tree.FindByWeight(r)
-		quorum = append(quorum, pubkeys[idx])
-		totalStakeSum -= stakes[idx]
-		tree.Remove(idx, stakes[idx])
-	}
-
-	return quorum
-}
-
-func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed string) {
+func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed string, getValidator ValidatorGetter) {
 	hashOfMetadataFromOldEpoch := Blake3(epochSeed)
 
 	pubkeys := make([]string, 0, len(epochHandler.ValidatorsRegistry))
@@ -185,41 +138,7 @@ func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed str
 	var totalStakeSum uint64
 
 	for _, validatorPubKey := range epochHandler.ValidatorsRegistry {
-		validatorData := GetValidatorFromApprovementThreadState(validatorPubKey)
-		if validatorData == nil {
-			continue
-		}
-		pubkeys = append(pubkeys, validatorPubKey)
-		stakes = append(stakes, validatorData.TotalStaked)
-		totalStakeSum += validatorData.TotalStaked
-	}
-
-	tree := NewStakeFenwickTree(stakes)
-	epochHandler.LeadersSequence = make([]string, 0, len(pubkeys))
-
-	for i := 0; i < len(pubkeys) && totalStakeSum > 0; i++ {
-		hashHex := Blake3(hashOfMetadataFromOldEpoch + "_" + strconv.Itoa(i))
-		r := hashHexToUint64(hashHex) % totalStakeSum
-
-		idx := tree.FindByWeight(r)
-		epochHandler.LeadersSequence = append(epochHandler.LeadersSequence, pubkeys[idx])
-		totalStakeSum -= stakes[idx]
-		tree.Remove(idx, stakes[idx])
-	}
-}
-
-// SetLeadersSequenceUnderLock is the same as SetLeadersSequence, but must be called when
-// handlers.APPROVEMENT_THREAD_METADATA.RWMutex is already held in write mode (Lock).
-// It avoids self-deadlocks by using GetValidatorFromApprovementThreadStateUnderLock.
-func SetLeadersSequenceUnderLock(epochHandler *structures.EpochDataHandler, epochSeed string) {
-	hashOfMetadataFromOldEpoch := Blake3(epochSeed)
-
-	pubkeys := make([]string, 0, len(epochHandler.ValidatorsRegistry))
-	stakes := make([]uint64, 0, len(epochHandler.ValidatorsRegistry))
-	var totalStakeSum uint64
-
-	for _, validatorPubKey := range epochHandler.ValidatorsRegistry {
-		validatorData := GetValidatorFromApprovementThreadStateUnderLock(validatorPubKey)
+		validatorData := getValidator(validatorPubKey)
 		if validatorData == nil {
 			continue
 		}

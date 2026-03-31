@@ -370,15 +370,15 @@ func setGenesisToState() error {
 
 	// Assign quorum - pseudorandomly and in deterministic way
 
-	epochHandlerForApprovementThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForApprovementThread, handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash)
+	epochHandlerForApprovementThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForApprovementThread, handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
-	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash)
+	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
 	// Now set the block generators for epoch pseudorandomly and in deterministic way
 
-	utils.SetLeadersSequence(&epochHandlerForApprovementThread, initEpochHash)
+	utils.SetLeadersSequence(&epochHandlerForApprovementThread, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
-	utils.SetLeadersSequence(&epochHandlerForExecThread, initEpochHash)
+	utils.SetLeadersSequence(&epochHandlerForExecThread, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForApprovementThread
 
