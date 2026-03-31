@@ -11,7 +11,6 @@ var BLOCKS, STATE, EPOCH_DATA, APPROVEMENT_THREAD_METADATA, FINALIZATION_VOTING_
 
 // CloseAll safely closes all initialized LevelDB instances
 func CloseAll() error {
-
 	type namedDB struct {
 		name string
 		db   **leveldb.DB
@@ -34,7 +33,6 @@ func CloseAll() error {
 		if err := (*database.db).Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close %s: %w", database.name, err))
 		}
-
 	}
 
 	if len(errs) > 0 {

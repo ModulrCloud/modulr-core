@@ -39,7 +39,6 @@ var (
 )
 
 func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler) []string {
-
 	quorum := epochHandler.Quorum
 
 	if len(quorum) == 0 {
@@ -74,7 +73,6 @@ func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler)
 }
 
 func hashHexToUint64ForLastMile(hashHex string) uint64 {
-
 	if len(hashHex) < 16 {
 		return 0
 	}
@@ -89,14 +87,12 @@ func hashHexToUint64ForLastMile(hashHex string) uint64 {
 }
 
 func weAreLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
-
 	selected := selectLastMileFinalizersForEpoch(epochHandler)
 
 	return slices.Contains(selected, globals.CONFIGURATION.PublicKey)
 }
 
 func openQuorumConnectionsForLastMile(epochHandler *structures.EpochDataHandler) {
-
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
 
@@ -131,7 +127,6 @@ func openQuorumConnectionsForLastMile(epochHandler *structures.EpochDataHandler)
 }
 
 func openTemporaryQuorumConnections(epochHandler *structures.EpochDataHandler) (map[string]*websocket.Conn, *utils.QuorumWaiter) {
-
 	conns := make(map[string]*websocket.Conn)
 
 	quorumUrls := utils.GetQuorumUrlsAndPubkeys(epochHandler)
@@ -167,7 +162,6 @@ func closeTemporaryQuorumConnections(conns map[string]*websocket.Conn) {
 }
 
 func openAnchorConnectionsForLastMile() {
-
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
 
@@ -194,7 +188,6 @@ func openAnchorConnectionsForLastMile() {
 }
 
 func storeHeightAttestation(proof *structures.HeightAttestation) {
-
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", proof.AbsoluteHeight))
 
 	if value, err := json.Marshal(proof); err == nil {
@@ -203,7 +196,6 @@ func storeHeightAttestation(proof *structures.HeightAttestation) {
 }
 
 func LoadHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
-
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", absoluteHeight))
 
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
@@ -222,7 +214,6 @@ func LoadHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
 }
 
 func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
-
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 	if handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.Id == epochId {
 		copy := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
@@ -239,7 +230,6 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 }
 
 func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
-
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
@@ -258,7 +248,6 @@ func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
 }
 
 func LastMileFinalizerThread() {
-
 	lastProcessedEpoch := -1
 	quorumConnectionsReady := false
 	anchorConnectionsSent := false
@@ -267,13 +256,11 @@ func LastMileFinalizerThread() {
 	tracker := utils.LoadLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker)
 
 	for {
-
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 		epochSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 		if epochSnapshot.Id != lastProcessedEpoch {
-
 			lastProcessedEpoch = epochSnapshot.Id
 			quorumConnectionsReady = false
 			anchorConnectionsSent = false
@@ -347,9 +334,7 @@ func LastMileFinalizerThread() {
 		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
 
 		if blockId == "" {
-
 			if tracker.AllLeadersDone(epochHandler.LeadersSequence) {
-
 				nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
 
 				if nextEpochHandler != nil {
@@ -357,7 +342,6 @@ func LastMileFinalizerThread() {
 					utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 					continue
 				}
-
 			}
 
 			time.Sleep(200 * time.Millisecond)
@@ -380,7 +364,6 @@ func LastMileFinalizerThread() {
 		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, epochHandler)
 
 		if proof != nil {
-
 			storeHeightAttestation(proof)
 			tracker.Advance()
 			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
@@ -401,12 +384,10 @@ func LastMileFinalizerThread() {
 		}
 
 		time.Sleep(200 * time.Millisecond)
-
 	}
 }
 
 func getBlockHashById(blockId string) string {
-
 	raw, err := databases.BLOCKS.Get([]byte(blockId), nil)
 	if err != nil {
 		return ""
@@ -421,7 +402,6 @@ func getBlockHashById(blockId string) string {
 }
 
 func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
-
 	majority := utils.GetQuorumMajority(epochHandler)
 
 	request := websocket_pack.WsHeightAttestationRequest{
@@ -512,7 +492,6 @@ func tryCollectQuorumRotationWithConns(
 	prevEpochHandler *structures.EpochDataHandler,
 	wsConns map[string]*websocket.Conn, waiter *utils.QuorumWaiter,
 ) *structures.QuorumRotationAttestation {
-
 	if prevEpochHandler == nil || waiter == nil {
 		return nil
 	}
@@ -584,7 +563,6 @@ func tryCollectQuorumRotationWithConns(
 }
 
 func deliverQuorumRotationToAnchors(attestation *structures.QuorumRotationAttestation) {
-
 	LAST_MILE_MUTEX.Lock()
 	conns := LAST_MILE_ANCHOR_WS_CONNS
 	LAST_MILE_MUTEX.Unlock()

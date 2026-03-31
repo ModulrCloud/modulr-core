@@ -52,9 +52,7 @@ var BLOCK_TO_SHARE *block_pack.Block = &block_pack.Block{Index: -1}
 var QUORUM_WAITER_FOR_FINALIZATION_PROOFS *utils.QuorumWaiter
 
 func BlocksSharingAndProofsGrabingThread() {
-
 	for {
-
 		// Take a snapshot of AT state quickly, then do any heavy work without holding AT lock.
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 		atSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler
@@ -71,7 +69,6 @@ func BlocksSharingAndProofsGrabingThread() {
 		PROOFS_GRABBER_MUTEX.RLock()
 
 		if PROOFS_GRABBER.EpochId != epochSnapshot.Id {
-
 			PROOFS_GRABBER_MUTEX.RUnlock()
 
 			PROOFS_GRABBER_MUTEX.Lock()
@@ -81,11 +78,8 @@ func BlocksSharingAndProofsGrabingThread() {
 			dbKey := []byte(strconv.Itoa(epochSnapshot.Id) + ":PROOFS_GRABBER")
 
 			if rawGrabber, err := databases.FINALIZATION_VOTING_STATS.Get(dbKey, nil); err == nil {
-
 				json.Unmarshal(rawGrabber, &PROOFS_GRABBER)
-
 			} else {
-
 				// Assign initial value of proofs grabber for each new epoch
 
 				PROOFS_GRABBER = ProofsGrabber{
@@ -100,15 +94,12 @@ func BlocksSharingAndProofsGrabingThread() {
 				// Also - clean the mapping with the signatures for AFP
 
 				FINALIZATION_PROOFS_CACHE = make(map[string]string)
-
 			}
 
 			// And store new descriptor
 
 			if serialized, err := json.Marshal(PROOFS_GRABBER); err == nil {
-
 				databases.FINALIZATION_VOTING_STATS.Put(dbKey, serialized, nil)
-
 			}
 
 			PROOFS_GRABBER_MUTEX.Unlock()
@@ -117,21 +108,15 @@ func BlocksSharingAndProofsGrabingThread() {
 			// This is network I/O, so do it without holding AT lock.
 			utils.OpenWebsocketConnectionsWithQuorum(epochSnapshot.Quorum, WEBSOCKET_CONNECTIONS, WEBSOCKET_GUARDS_FOR_PROOFS)
 			QUORUM_WAITER_FOR_FINALIZATION_PROOFS = utils.NewQuorumWaiter(len(epochSnapshot.Quorum), WEBSOCKET_GUARDS_FOR_PROOFS)
-
 		} else {
-
 			PROOFS_GRABBER_MUTEX.RUnlock()
-
 		}
 
 		runFinalizationProofsGrabbing(&epochSnapshot)
-
 	}
-
 }
 
 func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
-
 	// Call SendAndWait here
 	// Once received 2/3 votes for block - continue
 
@@ -177,7 +162,6 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 
 	// If we already have enough proofs, we can skip network step.
 	if len(proofsCopy) < majority {
-
 		// Build message - then parse to JSON
 
 		message := websocket_pack.WsFinalizationProofRequest{
@@ -187,7 +171,6 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 		}
 
 		if messageJsoned, err := json.Marshal(message); err == nil {
-
 			// Create max delay
 
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -229,9 +212,7 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 					proofsCopy[parsedFinalizationProof.Voter] = parsedFinalizationProof.FinalizationProof
 				}
 			}
-
 		}
-
 	}
 
 	// Apply results under lock and, if reached majority, persist AFP/progress.
@@ -257,7 +238,6 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 	*BLOCK_TO_SHARE = blockToShare
 
 	if len(FINALIZATION_PROOFS_CACHE) >= majority {
-
 		aggregatedFinalizationProof := structures.AggregatedFinalizationProof{
 
 			PrevBlockHash: PROOFS_GRABBER.AcceptedHash,
@@ -284,11 +264,9 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 		proofGrabberValueBytes, marshalErr := json.Marshal(PROOFS_GRABBER)
 
 		if marshalErr == nil {
-
 			proofsGrabberStoreErr := databases.FINALIZATION_VOTING_STATS.Put(proofGrabberKeyBytes, proofGrabberValueBytes, nil)
 
 			if proofsGrabberStoreErr == nil {
-
 				PROOFS_GRABBER.AfpForPrevious = aggregatedFinalizationProof
 
 				PROOFS_GRABBER.AcceptedIndex++
@@ -296,7 +274,6 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 				PROOFS_GRABBER.AcceptedHash = PROOFS_GRABBER.HuntingForBlockHash
 
 				if PROOFS_GRABBER.AcceptedIndex > 0 {
-
 					msg := fmt.Sprintf(
 						"%sApproved height for epoch %s%d %sis %s%d %s(hash:%s...) %s(%.3f%% agreements)",
 						utils.RED_COLOR,
@@ -312,21 +289,16 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 					)
 
 					utils.LogWithTime(msg, utils.WHITE_COLOR)
-
 				}
 
 				// Delete finalization proofs that we don't need more
 
 				FINALIZATION_PROOFS_CACHE = make(map[string]string)
-
 			} else {
 				return
 			}
-
 		} else {
 			return
 		}
-
 	}
-
 }

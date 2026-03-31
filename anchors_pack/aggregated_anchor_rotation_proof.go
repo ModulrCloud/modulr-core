@@ -21,12 +21,10 @@ type AggregatedAnchorRotationProof struct {
 }
 
 func BuildAnchorRotationProofPayload(anchor string, blockIndex int, blockHash string, epochIndex int) string {
-
 	return fmt.Sprintf("ANCHOR_ROTATION_PROOF:%s:%d:%s:%d", anchor, blockIndex, blockHash, epochIndex)
 }
 
 func VerifyAggregatedAnchorRotationProof(proof *AggregatedAnchorRotationProof) bool {
-
 	if proof.VotingStat.Afp.BlockId == "" {
 		return false
 	}
@@ -72,11 +70,9 @@ func VerifyAggregatedAnchorRotationProof(proof *AggregatedAnchorRotationProof) b
 	}
 
 	return verified >= utils.GetAnchorsQuorumMajority()
-
 }
 
 func (aarp *AggregatedAnchorRotationProof) UnmarshalJSON(data []byte) error {
-
 	type alias AggregatedAnchorRotationProof
 
 	var aux alias
@@ -92,11 +88,9 @@ func (aarp *AggregatedAnchorRotationProof) UnmarshalJSON(data []byte) error {
 	*aarp = AggregatedAnchorRotationProof(aux)
 
 	return nil
-
 }
 
 func (aarp AggregatedAnchorRotationProof) MarshalJSON() ([]byte, error) {
-
 	type alias AggregatedAnchorRotationProof
 
 	aux := alias(aarp)

@@ -22,15 +22,12 @@ import (
 )
 
 func RunBlockchain() {
-
 	if err := prepareBlockchain(); err != nil {
-
 		utils.LogWithTime(fmt.Sprintf("Failed to prepare blockchain: %v", err), utils.RED_COLOR)
 
 		utils.GracefulShutdown()
 
 		return
-
 	}
 
 	waitUntilFirstEpochStart()
@@ -84,7 +81,6 @@ func RunBlockchain() {
 	go websocket_pack.CreateWebsocketServer()
 
 	http_pack.CreateHTTPServer()
-
 }
 
 func waitUntilFirstEpochStart() {
@@ -133,29 +129,18 @@ func waitUntilFirstEpochStart() {
 }
 
 func prepareBlockchain() error {
-
 	applyCacheConfig()
 
 	if info, err := os.Stat(globals.CHAINDATA_PATH); err != nil {
-
 		if os.IsNotExist(err) {
-
 			if err := os.MkdirAll(globals.CHAINDATA_PATH, 0755); err != nil {
-
 				return fmt.Errorf("create chaindata directory: %w", err)
-
 			}
-
 		} else {
-
 			return fmt.Errorf("check chaindata directory: %w", err)
-
 		}
-
 	} else if !info.IsDir() {
-
 		return fmt.Errorf("chaindata path %s exists and is not a directory", globals.CHAINDATA_PATH)
-
 	}
 
 	databases.BLOCKS = utils.OpenDb("BLOCKS")
@@ -166,7 +151,6 @@ func prepareBlockchain() error {
 
 	// Load GT - Generation Thread handler
 	if data, err := databases.BLOCKS.Get([]byte(constants.DBKeyGenerationThreadMetadata), nil); err == nil {
-
 		var gtHandler structures.GenerationThreadMetadataHandler
 
 		if err := json.Unmarshal(data, &gtHandler); err != nil {
@@ -174,19 +158,15 @@ func prepareBlockchain() error {
 		}
 
 		handlers.GENERATION_THREAD_METADATA = gtHandler
-
 	} else {
-
 		handlers.GENERATION_THREAD_METADATA = structures.GenerationThreadMetadataHandler{
 			EpochFullId: utils.Blake3(constants.ZeroBlockHash+globals.GENESIS.NetworkId) + "#-1",
 			PrevHash:    constants.ZeroBlockHash,
 			NextIndex:   0,
 		}
-
 	}
 
 	if data, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyApprovementThreadMetadata), nil); err == nil {
-
 		var atHandler structures.ApprovementThreadMetadataHandler
 
 		if err := json.Unmarshal(data, &atHandler); err != nil {
@@ -198,11 +178,9 @@ func prepareBlockchain() error {
 		}
 
 		handlers.APPROVEMENT_THREAD_METADATA.Handler = atHandler
-
 	}
 
 	if data, err := databases.STATE.Get([]byte(constants.DBKeyExecutionThreadMetadata), nil); err == nil {
-
 		var etHandler structures.ExecutionThreadMetadataHandler
 
 		if err := json.Unmarshal(data, &etHandler); err != nil {
@@ -231,11 +209,9 @@ func prepareBlockchain() error {
 		}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler = etHandler
-
 	}
 
 	if handlers.EXECUTION_THREAD_METADATA.Handler.CoreMajorVersion == -1 {
-
 		if err := setGenesisToState(); err != nil {
 			return fmt.Errorf("write genesis to state: %w", err)
 		}
@@ -262,13 +238,11 @@ func prepareBlockchain() error {
 	}
 
 	if utils.IsMyCoreVersionOld(&handlers.APPROVEMENT_THREAD_METADATA.Handler) {
-
 		utils.LogWithTime("New version detected on APPROVEMENT_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 		utils.GracefulShutdown()
 
 		return fmt.Errorf("core version is outdated")
-
 	}
 
 	return nil
@@ -290,7 +264,6 @@ func applyCacheConfig() {
 }
 
 func setGenesisToState() error {
-
 	approvementThreadBatch := new(leveldb.Batch)
 
 	execThreadBatch := new(leveldb.Batch)
@@ -315,7 +288,6 @@ func setGenesisToState() error {
 	var genesisTotalStaked uint64 = 0
 
 	for accountPubkey, accountData := range globals.GENESIS.State {
-
 		serialized, err := json.Marshal(accountData)
 
 		if err != nil {
@@ -323,7 +295,6 @@ func setGenesisToState() error {
 		}
 
 		execThreadBatch.Put([]byte(accountPubkey), serialized)
-
 	}
 
 	// __________________________________ Load info about validators __________________________________
@@ -355,7 +326,6 @@ func setGenesisToState() error {
 		validatorsRegistryForEpochHandler2 = append(validatorsRegistryForEpochHandler2, validatorPubkey)
 
 		handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[validatorPubkey] = structures.NewExecutionStatsTemplate()
-
 	}
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
@@ -441,5 +411,4 @@ func setGenesisToState() error {
 	}
 
 	return nil
-
 }

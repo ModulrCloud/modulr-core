@@ -11,7 +11,6 @@ import (
 )
 
 func GetEpochData(ctx *fasthttp.RequestCtx) {
-
 	epochIndexVal := ctx.UserValue("epochIndex")
 	epochIndex, ok := epochIndexVal.(string)
 

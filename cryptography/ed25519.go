@@ -39,7 +39,7 @@ func GenerateKeyPair(mnemonic, mnemonicPassword string, bip44DerivePath []uint32
 	}
 
 	// Start derivation from master private key
-	var childKey *bip32.Key = masterPrivateKey
+	var childKey = masterPrivateKey
 	for _, pathPart := range bip44DerivePath {
 		childKey, _ = childKey.NewChildKey(bip32.FirstHardenedChild + pathPart)
 	}
@@ -108,11 +108,9 @@ func IsValidPubKey(base58PubKey string) bool {
 
 // Private inner function
 func generateKeyPairFromSeed(seed []byte) (ed25519.PublicKey, ed25519.PrivateKey) {
-
 	privateKey := ed25519.NewKeyFromSeed(seed)
 
 	pubKey, _ := privateKey.Public().(ed25519.PublicKey)
 
 	return pubKey, privateKey
-
 }

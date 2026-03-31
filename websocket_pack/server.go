@@ -28,21 +28,17 @@ func (h *Handler) OnPing(conn *gws.Conn, payload []byte) {}
 func (h *Handler) OnPong(conn *gws.Conn, payload []byte) {}
 
 func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
-
 	defer message.Close()
 
 	var incoming IncomingMsg
 
 	if err := json.Unmarshal(message.Bytes(), &incoming); err != nil {
-
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_json"}`))
 
 		return
-
 	}
 
 	switch incoming.Route {
-
 	case constants.WsRouteGetFinalizationProof:
 
 		var req WsFinalizationProofRequest
@@ -100,12 +96,10 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))
-
 	}
 }
 
 func CreateWebsocketServer() {
-
 	upgrader := gws.NewUpgrader(&Handler{}, &gws.ServerOption{
 		ParallelEnabled:   true,
 		Recovery:          gws.Recovery,
@@ -113,21 +107,15 @@ func CreateWebsocketServer() {
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-
 		conn, err := upgrader.Upgrade(w, r)
 
 		if err != nil {
-
 			return
-
 		}
 
 		go func() {
-
 			conn.ReadLoop()
-
 		}()
-
 	})
 
 	wsInterface := globals.CONFIGURATION.WebSocketInterface
@@ -139,9 +127,6 @@ func CreateWebsocketServer() {
 	utils.LogWithTime(fmt.Sprintf("Websocket server is starting at ws://%s ...✅", address), utils.CYAN_COLOR)
 
 	if err := http.ListenAndServe(address, nil); err != nil {
-
 		utils.LogWithTime(fmt.Sprintf("Error in websocket server: %s", err), utils.RED_COLOR)
-
 	}
-
 }

@@ -42,9 +42,7 @@ func StrToUint8(s string) uint8 {
 }
 
 func GracefulShutdown() {
-
 	SHUTDOWN_ONCE.Do(func() {
-
 		LogWithTime("Stop signal has been initiated.Keep waiting...", CYAN_COLOR)
 
 		LogWithTime("Closing server connections...", CYAN_COLOR)
@@ -56,9 +54,7 @@ func GracefulShutdown() {
 		LogWithTime("Node was gracefully stopped", GREEN_COLOR)
 
 		os.Exit(0)
-
 	})
-
 }
 
 func LogWithTime(msg, msgColor string) {
@@ -82,41 +78,29 @@ func ShortHash(h string) string {
 }
 
 func Blake3(data string) string {
-
 	blake3Hash := blake3.Sum256([]byte(data))
 
 	return hex.EncodeToString(blake3Hash[:])
-
 }
 
 func GetUTCTimestampInMilliSeconds() int64 {
-
 	return time.Now().UTC().UnixMilli()
-
 }
 
 func IsMyCoreVersionOld(thread structures.LogicalThread) bool {
-
 	return thread.GetCoreMajorVersion() > globals.CORE_MAJOR_VERSION
-
 }
 
 func EpochStillFresh(thread structures.LogicalThread) bool {
-
 	return (thread.GetEpochHandler().StartTimestamp + uint64(thread.GetNetworkParams().EpochDuration)) > uint64(GetUTCTimestampInMilliSeconds())
-
 }
 
 func SignalAboutEpochRotationExists(epochIndex int) bool {
-
 	keyValue := []byte(constants.DBKeyPrefixEpochFinish + strconv.Itoa(epochIndex))
 
 	if readyToChangeEpochRaw, err := databases.EPOCH_DATA.Get(keyValue, nil); err == nil && string(readyToChangeEpochRaw) == "TRUE" {
-
 		return true
-
 	}
 
 	return false
-
 }

@@ -30,7 +30,6 @@ type liveStatsResponse struct {
 }
 
 func GetLastHeight(ctx *fasthttp.RequestCtx) {
-
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -44,7 +43,6 @@ func GetLastHeight(ctx *fasthttp.RequestCtx) {
 }
 
 func GetLiveStats(ctx *fasthttp.RequestCtx) {
-
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
 	epochStatistics := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
@@ -68,7 +66,6 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 }
 
 func GetBlockById(ctx *fasthttp.RequestCtx) {
-
 	blockIdRaw := ctx.UserValue("id")
 	blockId, ok := blockIdRaw.(string)
 
@@ -88,7 +85,6 @@ func GetBlockById(ctx *fasthttp.RequestCtx) {
 }
 
 func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
-
 	absoluteHeightRaw := ctx.UserValue("absoluteHeightIndex")
 	absoluteHeight, ok := absoluteHeightRaw.(string)
 
@@ -141,7 +137,6 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 }
 
 func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
-
 	blockIdRaw := ctx.UserValue("blockId")
 	blockId, ok := blockIdRaw.(string)
 
@@ -161,7 +156,6 @@ func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
 }
 
 func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
-
 	hashRaw := ctx.UserValue("hash")
 	hash, ok := hashRaw.(string)
 
@@ -217,41 +211,31 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 }
 
 func AcceptTransaction(ctx *fasthttp.RequestCtx) {
-
 	var transaction structures.Transaction
 
 	if err := json.Unmarshal(ctx.PostBody(), &transaction); err != nil {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")
 		return
-
 	}
 
 	if transaction.From == "" || transaction.To == "" || transaction.Nonce == 0 || transaction.Sig == "" {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Event structure is wrong")
 		return
-
 	}
 
 	if !cryptography.IsValidPubKey(transaction.From) || !cryptography.IsValidPubKey(transaction.To) {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid pubkey")
 		return
-
 	}
 
 	if !cryptography.VerifySignature(transaction.Hash(), transaction.From, transaction.Sig) {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid signature")
 		return
-
 	}
 
 	currentLeader := utils.GetCurrentLeader()
 
 	if !currentLeader.IsMeLeader {
-
 		// Redirect tx to leader
 
 		req := fasthttp.AcquireRequest()
@@ -272,7 +256,6 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 		ctx.Response.Header.SetContentTypeBytes(resp.Header.ContentType())
 		ctx.SetBody(resp.Body())
 		return
-
 	}
 
 	// Check mempool size
@@ -289,5 +272,4 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 	globals.MEMPOOL.Slice = append(globals.MEMPOOL.Slice, transaction)
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, map[string]string{"status": "OK"})
-
 }

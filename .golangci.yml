@@ -6,6 +6,12 @@ linters:
     - staticcheck
     - ineffassign
     - govet
+    - whitespace
+
+  settings:
+    whitespace:
+      multi-func: false
+      multi-if: false
 
 run:
   tests: false

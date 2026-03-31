@@ -13,12 +13,10 @@ import (
 )
 
 func FirstBlockInEpochMonitorThread() {
-
 	epochUnderObservation := -1
 	var cachedFirstBlockData *FirstBlockData
 
 	for {
-
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 		currentEpoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -52,13 +50,10 @@ func FirstBlockInEpochMonitorThread() {
 }
 
 func storeDataAboutFirstBlockInEpoch(epochIndex int, data *FirstBlockData) error {
-
 	raw, err := json.Marshal(data)
 
 	if err != nil {
-
 		return err
-
 	}
 
 	return databases.APPROVEMENT_THREAD_METADATA.Put(firstBlockDataKey(epochIndex), raw, nil)

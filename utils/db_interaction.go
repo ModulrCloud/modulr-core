@@ -15,7 +15,6 @@ import (
 )
 
 func OpenDb(dbName string) *leveldb.DB {
-
 	db, err := leveldb.OpenFile(globals.CHAINDATA_PATH+"/DATABASES/"+dbName, nil)
 	if err != nil {
 		panic("Impossible to open db : " + dbName + " =>" + err.Error())
@@ -24,7 +23,6 @@ func OpenDb(dbName string) *leveldb.DB {
 }
 
 func GetAccountFromExecThreadState(accountId string) *structures.Account {
-
 	// If account was already touched/modified in this block, return the in-memory object.
 	if val, ok := handlers.EXECUTION_THREAD_METADATA.AccountsTouched[accountId]; ok && val != nil {
 		TouchExecAccountCache(accountId)
@@ -44,7 +42,6 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 	}
 
 	if err == leveldb.ErrNotFound {
-
 		acc := &structures.Account{}
 		PutExecAccountCache(accountId, acc)
 		MarkExecAccountTouched(accountId, acc)
@@ -55,7 +52,6 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.AccountsNumber++
 		}
 		return acc
-
 	}
 
 	var account structures.Account
@@ -68,7 +64,6 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 	PutExecAccountCache(accountId, acc)
 	MarkExecAccountTouched(accountId, acc)
 	return acc
-
 }
 
 func CountStateAccounts() uint64 {
@@ -153,7 +148,6 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 // GetValidatorFromApprovementThreadStateUnderLock reads/writes the AT validators cache.
 // Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex in write mode (Lock).
 func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *structures.ValidatorStorage {
-
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	// Prefer touched value if already accessed/modified in the current AT batch.
@@ -188,11 +182,9 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 	PutApprovementValidatorCache(validatorStorageKey, vs)
 	MarkApprovementValidatorTouched(validatorStorageKey, vs)
 	return vs
-
 }
 
 func GetValidatorFromExecThreadState(validatorPubkey string) *structures.ValidatorStorage {
-
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	// Prefer touched value if already accessed/modified in the current block/batch.
@@ -227,5 +219,4 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 	PutExecValidatorCache(validatorStorageKey, vs)
 	MarkExecValidatorTouched(validatorStorageKey, vs)
 	return vs
-
 }

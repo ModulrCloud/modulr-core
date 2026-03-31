@@ -13,7 +13,6 @@ import (
 )
 
 func createRouter() fasthttp.RequestHandler {
-
 	r := router.New()
 
 	r.GET("/block/{id}", routes.GetBlockById)
@@ -45,7 +44,6 @@ func createRouter() fasthttp.RequestHandler {
 }
 
 func CreateHTTPServer() {
-
 	serverAddr := globals.CONFIGURATION.Interface + ":" + strconv.Itoa(globals.CONFIGURATION.Port)
 
 	utils.LogWithTime(fmt.Sprintf("Server is starting at http://%s ...✅", serverAddr), utils.CYAN_COLOR)

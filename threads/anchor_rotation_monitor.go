@@ -42,11 +42,9 @@ func takeExecutionThreadMetadataSnapshot(anchorIndex int) executionThreadMetadat
 }
 
 func AnchorRotationMonitorThread() {
-
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for {
-
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 
 		anchorIndex := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption
@@ -59,11 +57,9 @@ func AnchorRotationMonitorThread() {
 
 		time.Sleep(5 * time.Second)
 	}
-
 }
 
 func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochDataHandler, client *http.Client) {
-
 	if anchorIndex < 0 || anchorIndex >= len(globals.ANCHORS) || client == nil {
 		return
 	}
@@ -117,11 +113,9 @@ func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochD
 	if _, exists := currentHandler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex]; !exists {
 		currentHandler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex] = earliestRotationStats
 	}
-
 }
 
 func processSequenceAlignmentDataResponse(alignmentData *SequenceAlignmentDataResponse, anchorIndex int, epochHandler *structures.EpochDataHandler) (structures.ExecutionStats, bool) {
-
 	if alignmentData == nil || alignmentData.Afp == nil || epochHandler == nil {
 		return structures.ExecutionStats{}, false
 	}
@@ -198,7 +192,6 @@ func processSequenceAlignmentDataResponse(alignmentData *SequenceAlignmentDataRe
 }
 
 func findEarliestAnchorRotationProof(currentAnchor, foundInAnchorIndex, blockLimit int, epochHandler *structures.EpochDataHandler, anchorIndexMap map[string]int) (structures.ExecutionStats, bool) {
-
 	if epochHandler == nil || anchorIndexMap == nil || currentAnchor < 0 || foundInAnchorIndex >= len(globals.ANCHORS) {
 		return structures.ExecutionStats{}, false
 	}

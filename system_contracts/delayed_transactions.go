@@ -23,28 +23,22 @@ var DELAYED_TRANSACTIONS_MAP = map[string]DelayedTxExecutorFunction{
 }
 
 func CreateValidator(delayedTransaction map[string]string, context string) bool {
-
 	validatorPubkey := delayedTransaction["creator"]
 	percentage := utils.StrToUint8(delayedTransaction["percentage"])
 	validatorURL := delayedTransaction["validatorURL"]
 	wssValidatorURL := delayedTransaction["wssValidatorURL"]
 
 	if validatorURL != "" && wssValidatorURL != "" && percentage <= 100 {
-
 		validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 		if context == constants.ContextApprovementThread {
-
 			if _, existsInCache := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; existsInCache {
-
 				return false
-
 			}
 
 			_, existErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(validatorStorageKey), nil)
 
 			if existErr == leveldb.ErrNotFound {
-
 				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,
 					Percentage:  percentage,
@@ -60,25 +54,19 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 				utils.MarkApprovementValidatorTouched(validatorStorageKey, vs)
 
 				return true
-
 			}
 
 			return false
-
 		}
 
 		if context == constants.ContextExecutionThread {
-
 			if _, existsInCache := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; existsInCache {
-
 				return false
-
 			}
 
 			_, existErr := databases.STATE.Get([]byte(validatorStorageKey), nil)
 
 			if existErr == leveldb.ErrNotFound {
-
 				vs := &structures.ValidatorStorage{
 					Pubkey:      validatorPubkey,
 					Percentage:  percentage,
@@ -94,38 +82,31 @@ func CreateValidator(delayedTransaction map[string]string, context string) bool 
 				utils.MarkExecValidatorTouched(validatorStorageKey, vs)
 
 				return true
-
 			}
 
 			return false
-
 		}
 
 		// Unknown context tag -> don't touch state.
 		return false
-
 	}
 
 	return false
 }
 
 func UpdateValidator(delayedTransaction map[string]string, context string) bool {
-
 	validatorPubkey := delayedTransaction["creator"]
 	percentage := utils.StrToUint8(delayedTransaction["percentage"])
 	validatorURL := delayedTransaction["validatorURL"]
 	wssValidatorURL := delayedTransaction["wssValidatorURL"]
 
 	if validatorURL != "" && wssValidatorURL != "" && percentage <= 100 {
-
 		validatorStorageId := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 		if context == constants.ContextApprovementThread {
-
 			validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 			if validatorStorage != nil {
-
 				validatorStorage.Percentage = percentage
 
 				validatorStorage.ValidatorUrl = validatorURL
@@ -136,19 +117,15 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 				utils.TouchApprovementValidatorCache(validatorStorageId)
 
 				return true
-
 			}
 
 			return false
-
 		}
 
 		if context == constants.ContextExecutionThread {
-
 			validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
 			if validatorStorage != nil {
-
 				validatorStorage.Percentage = percentage
 
 				validatorStorage.ValidatorUrl = validatorURL
@@ -159,46 +136,35 @@ func UpdateValidator(delayedTransaction map[string]string, context string) bool 
 				utils.TouchExecValidatorCache(validatorStorageId)
 
 				return true
-
 			}
 
 			return false
-
 		}
 
 		// Unknown context tag -> don't touch state.
 		return false
-
 	}
 
 	return false
-
 }
 
 func Stake(delayedTransaction map[string]string, context string) bool {
-
 	staker := delayedTransaction["staker"]
 	validatorPubkey := delayedTransaction["validatorPubKey"]
 	amount, err := strconv.ParseUint(delayedTransaction["amount"], 10, 64)
 
 	if err != nil {
-
 		return false
-
 	}
 
 	if context == constants.ContextApprovementThread {
-
 		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 		if validatorStorage != nil {
-
 			minStake := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.MinimalStakePerStaker
 
 			if amount < minStake {
-
 				return false
-
 			}
 
 			currentStake := validatorStorage.Stakers[staker]
@@ -212,37 +178,27 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 			requiredStake := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.ValidatorRequiredStake
 
 			if validatorStorage.TotalStaked >= requiredStake {
-
 				if !slices.Contains(handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry, validatorPubkey) {
-
 					handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = append(
 						handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry, validatorPubkey,
 					)
-
 				}
-
 			}
 
 			return true
-
 		}
 
 		return false
-
 	}
 
 	if context == constants.ContextExecutionThread {
-
 		validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
 		if validatorStorage != nil {
-
 			minStake := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.MinimalStakePerStaker
 
 			if amount < minStake {
-
 				return false
-
 			}
 
 			currentStake := validatorStorage.Stakers[staker]
@@ -258,60 +214,44 @@ func Stake(delayedTransaction map[string]string, context string) bool {
 			requiredStake := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.ValidatorRequiredStake
 
 			if validatorStorage.TotalStaked >= requiredStake {
-
 				if !slices.Contains(handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry, validatorPubkey) {
-
 					handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = append(
 						handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry, validatorPubkey,
 					)
-
 				}
-
 			}
 
 			return true
-
 		}
 
 		return false
-
 	}
 
 	// Unknown context tag -> don't touch state.
 	return false
-
 }
 
 func Unstake(delayedTransaction map[string]string, context string) bool {
-
 	unstaker := delayedTransaction["unstaker"]
 	validatorPubkey := delayedTransaction["validatorPubKey"]
 	amount, err := strconv.ParseUint(delayedTransaction["amount"], 10, 64)
 
 	if err != nil {
-
 		return false
-
 	}
 
 	if context == constants.ContextApprovementThread {
-
 		validatorStorage := utils.GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey)
 
 		if validatorStorage != nil {
-
 			stakerStake, exists := validatorStorage.Stakers[unstaker]
 
 			if !exists {
-
 				return false
-
 			}
 
 			if stakerStake < amount {
-
 				return false
-
 			}
 
 			stakerStake -= amount
@@ -319,51 +259,37 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 			validatorStorage.TotalStaked -= amount
 
 			if stakerStake == 0 {
-
 				delete(validatorStorage.Stakers, unstaker) // no sense to store staker with 0 balance in stakers list
-
 			} else {
-
 				validatorStorage.Stakers[unstaker] = stakerStake
-
 			}
 
 			requiredStake := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.ValidatorRequiredStake
 
 			if validatorStorage.TotalStaked < requiredStake {
-
 				reg := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry
 
 				handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = removeFromSlice(reg, validatorPubkey)
-
 			}
 
 			return true
-
 		}
 
 		return false
-
 	}
 
 	if context == constants.ContextExecutionThread {
-
 		validatorStorage := utils.GetValidatorFromExecThreadState(validatorPubkey)
 
 		if validatorStorage != nil {
-
 			stakerStake, exists := validatorStorage.Stakers[unstaker]
 
 			if !exists {
-
 				return false
-
 			}
 
 			if stakerStake < amount {
-
 				return false
-
 			}
 
 			stakerStake -= amount
@@ -376,36 +302,27 @@ func Unstake(delayedTransaction map[string]string, context string) bool {
 			unstakerAccount.Balance += amount
 
 			if stakerStake == 0 {
-
 				delete(validatorStorage.Stakers, unstaker)
-
 			} else {
-
 				validatorStorage.Stakers[unstaker] = stakerStake
-
 			}
 
 			requiredStake := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.ValidatorRequiredStake
 
 			if validatorStorage.TotalStaked < requiredStake {
-
 				reg := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry
 
 				handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = removeFromSlice(reg, validatorPubkey)
-
 			}
 
 			return true
-
 		}
 
 		return false
-
 	}
 
 	// Unknown context tag -> don't touch state.
 	return false
-
 }
 
 func removeFromSlice[T comparable](s []T, v T) []T {

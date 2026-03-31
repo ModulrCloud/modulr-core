@@ -17,7 +17,6 @@ import (
 )
 
 func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
-
 	if epochHandler == nil {
 		return false
 	}
@@ -37,9 +36,7 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 	seen := make(map[string]bool)
 
 	for pubKey, signature := range proof.Proofs {
-
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
-
 			if quorumMap[pubKey] && !seen[pubKey] {
 				seen[pubKey] = true
 				okSignatures++
@@ -51,7 +48,6 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 }
 
 func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.AggregatedFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
-
 	epochIndex := strconv.Itoa(epochHandler.Id)
 
 	dataThatShouldBeSigned := strings.Join([]string{proof.PrevBlockHash, proof.BlockId, proof.BlockHash, epochIndex}, ":")
@@ -67,9 +63,7 @@ func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.Aggregate
 	seen := make(map[string]bool)
 
 	for pubKey, signature := range proof.Proofs {
-
 		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
-
 			if quorumMap[pubKey] && !seen[pubKey] {
 				seen[pubKey] = true
 				okSignatures++
@@ -81,7 +75,6 @@ func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.Aggregate
 }
 
 func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
-
 	if proof == nil || epochHandler == nil || proof.EpochIndex != epochHandler.Id {
 		return false
 	}
@@ -129,7 +122,6 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 }
 
 func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *structures.EpochDataHandler) bool {
-
 	if proof == nil || epochHandler == nil {
 		return false
 	}
@@ -165,11 +157,9 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 }
 
 func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
-
 	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockID), nil)
 
 	if err == nil {
-
 		var localAfpParsed structures.AggregatedFinalizationProof
 
 		err = json.Unmarshal(localAfpAsBytes, &localAfpParsed)
@@ -179,7 +169,6 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 		}
 
 		return &localAfpParsed
-
 	}
 
 	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
@@ -193,11 +182,9 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 	defer cancel()
 
 	for _, node := range quorum {
-
 		wg.Add(1)
 
 		go func(endpoint string) {
-
 			defer wg.Done()
 
 			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/aggregated_finalization_proof/"+blockID, nil)
@@ -214,17 +201,13 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 			var afp structures.AggregatedFinalizationProof
 
 			if json.NewDecoder(resp.Body).Decode(&afp) == nil && VerifyAggregatedFinalizationProof(&afp, epochHandler) {
-
 				// send the first valid result and immediately cancel all other requests
 				select {
-
 				case resultChan <- &afp:
 					cancel() // stop all remaining goroutines and HTTP requests
 				default:
-
 				}
 			}
-
 		}(node.Url)
 	}
 

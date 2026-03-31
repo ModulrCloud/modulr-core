@@ -11,7 +11,6 @@ type HeightAttestation struct {
 }
 
 func (ha *HeightAttestation) UnmarshalJSON(data []byte) error {
-
 	type alias HeightAttestation
 
 	var aux alias
@@ -30,7 +29,6 @@ func (ha *HeightAttestation) UnmarshalJSON(data []byte) error {
 }
 
 func (ha HeightAttestation) MarshalJSON() ([]byte, error) {
-
 	type alias HeightAttestation
 
 	aux := alias(ha)
@@ -51,7 +49,6 @@ type QuorumRotationAttestation struct {
 }
 
 func (qra *QuorumRotationAttestation) UnmarshalJSON(data []byte) error {
-
 	type alias QuorumRotationAttestation
 
 	var aux alias
@@ -70,7 +67,6 @@ func (qra *QuorumRotationAttestation) UnmarshalJSON(data []byte) error {
 }
 
 func (qra QuorumRotationAttestation) MarshalJSON() ([]byte, error) {
-
 	type alias QuorumRotationAttestation
 
 	aux := alias(qra)

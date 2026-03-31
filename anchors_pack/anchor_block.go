@@ -21,7 +21,6 @@ type AnchorBlock struct {
 }
 
 func (block *AnchorBlock) GetHash() string {
-
 	jsonedExtraData, err := json.Marshal(block.ExtraData)
 
 	if err != nil {
@@ -42,7 +41,5 @@ func (block *AnchorBlock) GetHash() string {
 }
 
 func (block *AnchorBlock) VerifySignature() bool {
-
 	return cryptography.VerifySignature(block.GetHash(), block.Creator, block.Sig)
-
 }

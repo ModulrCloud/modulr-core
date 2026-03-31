@@ -48,13 +48,11 @@ var (
 )
 
 func BlockExecutionThread() {
-
 	// Track PoD misses per blockID so we only fall back to querying the network after several failures.
 	podMisses := make(map[string]int)
 	lastEpochId := -1
 
 	for {
-
 		// NOTE: Don't hold EXECUTION_THREAD_METADATA lock during network I/O to PoD.
 		// On high-latency links this blocks alignment/monitor threads and can cause huge execution lag.
 
@@ -219,59 +217,43 @@ func BlockExecutionThread() {
 		if !progressed {
 			time.Sleep(100 * time.Millisecond)
 		}
-
 	}
-
 }
 
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {
-
 	req := websocket_pack.WsBlockWithAfpRequest{
 		Route:   constants.WsRouteGetBlockWithAfp,
 		BlockId: blockID,
 	}
 
 	if reqBytes, err := json.Marshal(req); err == nil {
-
 		// Use dedicated PoD websocket connection to avoid blocking other PoD traffic.
 		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
-
 			var resp websocket_pack.WsBlockWithAfpResponse
 
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
-
 				if resp.Block == nil {
-
 					return nil
-
 				}
 
 				return &resp
-
 			}
-
 		}
-
 	}
 	return nil
-
 }
 
 func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures.EpochDataHandler) *websocket_pack.WsAnchorBlockWithAfpResponse {
-
 	req := websocket_pack.WsAnchorBlockWithAfpRequest{
 		Route:   constants.WsRouteGetAnchorBlockWithAfp,
 		BlockId: blockID,
 	}
 
 	if reqBytes, err := json.Marshal(req); err == nil {
-
 		if respBytes, err := utils.SendWebsocketMessageToAnchorsPoD(reqBytes); err == nil {
-
 			var resp websocket_pack.WsAnchorBlockWithAfpResponse
 
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
-
 				if resp.Block != nil {
 					// Reset miss state on success from PoD.
 					resetAnchorsPodMisses(blockID)
@@ -288,7 +270,6 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures
 
 					return &resp
 				}
-
 			}
 		}
 	}
@@ -328,7 +309,6 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures
 	}
 
 	return nil
-
 }
 
 func parseBlockId(blockId string) (epochIndex int, creator string, index int, ok bool) {
@@ -663,17 +643,14 @@ func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, b
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {
-
 	blockCreatorAccount := utils.GetAccountFromExecThreadState(blockCreatorPubkey)
 
 	// Transfer fees to account with pubkey associated with block creator
 
 	blockCreatorAccount.Balance += feeFromBlock
-
 }
 
 func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[string]string, bool) {
-
 	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
 	// Account IDs must be canonical pubkeys.
 	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
@@ -681,16 +658,12 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 	}
 
 	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
-
 		accountFrom := utils.GetAccountFromExecThreadState(tx.From)
 		accountFrom.InitiatedTransactions++
 
 		if delayedTxPayload, delayedTxType, isDelayed := getDelayedTransactionPayload(tx); isDelayed {
-
 			if ok, reason := validateDelayedTransaction(delayedTxType, tx, delayedTxPayload, accountFrom); !ok {
-
 				return false, reason, 0, nil, false
-
 			}
 
 			accountFrom.Balance -= tx.Fee
@@ -705,7 +678,6 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 			accountFrom.SuccessfulInitiatedTransactions++
 
 			return true, "", tx.Fee, delayedTxPayload, true
-
 		}
 
 		accountTo := utils.GetAccountFromExecThreadState(tx.To)
@@ -722,7 +694,6 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 		}
 
 		if accountFrom.Balance >= totalSpend {
-
 			accountFrom.Balance -= totalSpend
 
 			accountTo.Balance += tx.Amount
@@ -732,65 +703,46 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 			accountFrom.SuccessfulInitiatedTransactions++
 
 			return true, "", tx.Fee, nil, false
-
 		}
 
 		return false, "insufficient balance", 0, nil, false
-
 	}
 
 	return false, "invalid signature", 0, nil, false
-
 }
 
 func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string, string, bool) {
-
 	if tx.Payload == nil {
-
 		return nil, "", false
-
 	}
 
 	payloadType, ok := tx.Payload["type"]
 
 	if !ok || payloadType == "" {
-
 		return nil, "", false
-
 	}
 
 	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadType]; !exists {
-
 		return nil, "", false
-
 	}
 
 	return tx.Payload, payloadType, true
-
 }
 
 func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) (bool, string) {
-
 	if accountFrom == nil {
-
 		return false, "missing sender account"
-
 	}
 
 	if !constants.ShouldBypassNonceCheck(tx.From) && tx.Nonce != accountFrom.Nonce+1 {
-
 		return false, "wrong nonce"
-
 	}
 
 	if accountFrom.Balance < tx.Fee {
-
 		return false, "insufficient balance for fee"
-
 	}
 
 	switch delayedTxType {
-
 	case "createValidator", "updateValidator":
 
 		if tx.From != payload["creator"] {
@@ -803,9 +755,7 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 		amount, err := strconv.ParseUint(payload["amount"], 10, 64)
 
 		if err != nil {
-
 			return false, "invalid delayed transaction amount"
-
 		}
 
 		if accountFrom.Balance < amount+tx.Fee {
@@ -817,13 +767,10 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 	default:
 
 		return true, ""
-
 	}
-
 }
 
 func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochIndex int, batch *leveldb.Batch) error {
-
 	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", epochIndex+2)
 
 	cachedPayloads := make([]map[string]string, 0)
@@ -831,17 +778,11 @@ func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochI
 	rawCachedPayloads, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 
 	if err == nil {
-
 		if jsonErr := json.Unmarshal(rawCachedPayloads, &cachedPayloads); jsonErr != nil {
-
 			cachedPayloads = make([]map[string]string, 0)
-
 		}
-
 	} else if err != leveldb.ErrNotFound {
-
 		return err
-
 	}
 
 	cachedPayloads = append(cachedPayloads, delayedTxPayloads...)
@@ -849,19 +790,15 @@ func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochI
 	serializedPayloads, err := json.Marshal(cachedPayloads)
 
 	if err != nil {
-
 		return err
-
 	}
 
 	batch.Put([]byte(delayedTxKey), serializedPayloads)
 
 	return nil
-
 }
 
 func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
-
 	currentEpochIndex := epochHandler.Id
 
 	nextEpochIndex := currentEpochIndex + 1
@@ -873,13 +810,10 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 	rawHandler, dbErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochIndex)), nil)
 
 	if dbErr == nil {
-
 		json.Unmarshal(rawHandler, &nextEpochData)
-
 	}
 
 	if nextEpochData != nil {
-
 		// Reset touched sets before executing delayed txs for next epoch so we only persist what they touch.
 		utils.ResetExecTouchedSets()
 
@@ -898,9 +832,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		// Exec delayed txs here
 
 		for _, delayedTx := range nextEpochData.DelayedTransactions {
-
 			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
-
 		}
 
 		// Prepare epoch handler for next epoch
@@ -923,9 +855,7 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData = make(map[string]structures.ExecutionStats)
 
 		for _, validatorPubkey := range handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.LeadersSequence {
-
 			handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[validatorPubkey] = structures.NewExecutionStatsTemplate()
-
 		}
 
 		// Finally, clean & nullify sequence data
@@ -943,60 +873,39 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		// Commit the changes of state using atomic batch. Because we modified state via delayed transactions when epoch finished
 
 		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
-
 			if accountDataBytes, err := json.Marshal(accountData); err == nil {
-
 				dbBatch.Put([]byte(accountID), accountDataBytes)
-
 			} else {
-
 				panic("Impossible to add new account data to atomic batch")
-
 			}
-
 		}
 
 		for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
-
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
-
 				// storageKey already includes DBKeyPrefixValidatorStorage.
 				dbBatch.Put([]byte(storageKey), dataBytes)
-
 			} else {
-
 				panic("Impossible to add validator storage to atomic batch")
-
 			}
-
 		}
 
 		if execThreadRawBytes, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.Handler); err == nil {
-
 			dbBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
-
 		} else {
-
 			panic("Impossible to store updated execution thread version to atomic batch")
-
 		}
 
 		if err := databases.STATE.Write(dbBatch, nil); err != nil {
-
 			panic("Impossible to modify the state when epoch finished")
-
 		}
 
 		// Version check once new epoch started
 
 		if utils.IsMyCoreVersionOld(&handlers.EXECUTION_THREAD_METADATA.Handler) {
-
 			utils.LogWithTime("New version detected on EXECUTION_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 			utils.GracefulShutdown()
-
 		}
-
 	} else {
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
@@ -1005,11 +914,9 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 			utils.YELLOW_COLOR,
 		)
 	}
-
 }
 
 func hasVerifiedHeightAttestation(absoluteHeight int, blockId, blockHash string) bool {
-
 	proof := LoadHeightAttestation(absoluteHeight)
 
 	if proof != nil && proof.BlockId == blockId && proof.BlockHash == blockHash {

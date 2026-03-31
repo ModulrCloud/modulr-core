@@ -12,7 +12,6 @@ import (
 )
 
 func GetAccountById(ctx *fasthttp.RequestCtx) {
-
 	accountIdRaw := ctx.UserValue("accountId")
 	accountId, ok := accountIdRaw.(string)
 

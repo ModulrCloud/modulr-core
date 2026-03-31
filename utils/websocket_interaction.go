@@ -80,13 +80,10 @@ func NewWebsocketGuards() *WebsocketGuards {
 }
 
 func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
-
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
 		POD_ACCESS_MUTEX.Lock()
 
 		if POD_WEBSOCKET_CONNECTION == nil {
-
 			conn, err := openWebsocketConnectionWithPoD()
 
 			if err != nil {
@@ -105,7 +102,6 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 			}
 
 			POD_WEBSOCKET_CONNECTION = conn
-
 		}
 
 		c := POD_WEBSOCKET_CONNECTION
@@ -163,19 +159,15 @@ func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
 }
 
 // SendWebsocketMessageToPoDForBlocks is the same as SendWebsocketMessageToPoD but uses a dedicated PoD connection.
 // Use it for high-frequency block fetching so it doesn't block other PoD calls (proofs, stores, etc).
 func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
-
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
 		POD_BULK_ACCESS_MUTEX.Lock()
 
 		if POD_WEBSOCKET_CONNECTION_BULK == nil {
-
 			conn, err := openWebsocketConnectionWithPoD()
 
 			if err != nil {
@@ -194,7 +186,6 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 			}
 
 			POD_WEBSOCKET_CONNECTION_BULK = conn
-
 		}
 
 		c := POD_WEBSOCKET_CONNECTION_BULK
@@ -258,17 +249,13 @@ func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
 		RED_COLOR,
 	)
 	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
 }
 
 func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
-
 	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
 		ANCHORS_POD_ACCESS_MUTEX.Lock()
 
 		if ANCHORS_POD_WEBSOCKET_CONNECTION == nil {
-
 			conn, err := openWebsocketConnectionWithAnchorsPoD()
 
 			if err != nil {
@@ -287,7 +274,6 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 			}
 
 			ANCHORS_POD_WEBSOCKET_CONNECTION = conn
-
 		}
 
 		c := ANCHORS_POD_WEBSOCKET_CONNECTION
@@ -342,7 +328,6 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 		}
 
 		return resp, nil
-
 	}
 
 	LogWithTimeThrottled(
@@ -352,7 +337,6 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 		RED_COLOR,
 	)
 	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
@@ -431,7 +415,6 @@ func (qw *QuorumWaiter) SendAndWait(
 	ctx context.Context, message []byte, quorum []string,
 	wsConnMap map[string]*websocket.Conn, majority int,
 ) (map[string][]byte, bool) {
-
 	// Reset state
 	qw.mu.Lock()
 	for k := range qw.answered {
@@ -526,7 +509,6 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 	wsConnMap map[string]*websocket.Conn, majority int,
 	validate func(id string, raw []byte) bool,
 ) (map[string][]byte, bool) {
-
 	// Reset state
 	qw.mu.Lock()
 	for k := range qw.answered {
@@ -698,7 +680,6 @@ func (qw *QuorumWaiter) getWriteMuConn(c *websocket.Conn) *sync.Mutex {
 }
 
 func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-
 	// Get validator metadata
 	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixValidatorStorage+pubkey), nil)
 	if err != nil {
@@ -722,7 +703,6 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 	}
 	wsConnMap[pubkey] = conn
 	guards.ConnMu.Unlock()
-
 }
 
 func (qw *QuorumWaiter) reconnectFailed(wsConnMap map[string]*websocket.Conn) {

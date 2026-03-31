@@ -117,10 +117,10 @@ func GetLeaderFinalizationState() LeaderFinalizationState {
 		entry := RecentEpochEntry{
 			EpochId:     eid,
 			AllResolved: epochCompleted,
-			Leaders:     make([]RecentEpochLeader, 0, len(snap.EpochDataHandler.LeadersSequence)),
+			Leaders:     make([]RecentEpochLeader, 0, len(snap.LeadersSequence)),
 		}
 
-		for _, leader := range snap.EpochDataHandler.LeadersSequence {
+		for _, leader := range snap.LeadersSequence {
 			included := utils.HasAnyAlfpIncluded(eid, leader)
 			hasAlfp := leaderHasAlfp(eid, leader)
 			confirmedByAlignment := false

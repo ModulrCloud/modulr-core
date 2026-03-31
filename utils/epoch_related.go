@@ -19,7 +19,6 @@ type ValidatorData struct {
 }
 
 func GetCurrentLeader() CurrentLeaderData {
-
 	// Snapshot leader data under RLock, then release lock before calling validator getter.
 	// This avoids a potential lock-upgrade deadlock, because GetValidatorFromApprovementThreadState
 	// may need a write lock to populate the cache on a miss.
@@ -29,25 +28,19 @@ func GetCurrentLeader() CurrentLeaderData {
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 	if currentLeaderPubKey != globals.CONFIGURATION.PublicKey {
-
 		validatorStorage := GetValidatorFromApprovementThreadState(currentLeaderPubKey)
 
 		if validatorStorage != nil {
-
 			return CurrentLeaderData{IsMeLeader: false, Url: validatorStorage.ValidatorUrl}
-
 		}
 
 		return CurrentLeaderData{IsMeLeader: false, Url: ""}
-
 	}
 
 	return CurrentLeaderData{IsMeLeader: true, Url: ""}
-
 }
 
 func GetQuorumMajority(epochHandler *structures.EpochDataHandler) int {
-
 	quorumSize := len(epochHandler.Quorum)
 
 	majority := (2 * quorumSize) / 3
@@ -62,7 +55,6 @@ func GetQuorumMajority(epochHandler *structures.EpochDataHandler) int {
 }
 
 func GetAnchorsQuorumMajority() int {
-
 	quorumSize := len(globals.ANCHORS)
 
 	majority := (2 * quorumSize) / 3
@@ -77,27 +69,21 @@ func GetAnchorsQuorumMajority() int {
 }
 
 func GetQuorumUrlsAndPubkeys(epochHandler *structures.EpochDataHandler) []structures.QuorumMemberData {
-
 	var toReturn []structures.QuorumMemberData
 
 	for _, pubKey := range epochHandler.Quorum {
-
 		validatorStorage := GetValidatorFromApprovementThreadState(pubKey)
 
 		toReturn = append(toReturn, structures.QuorumMemberData{PubKey: pubKey, Url: validatorStorage.ValidatorUrl})
-
 	}
 
 	return toReturn
-
 }
 
 func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize int, newEpochSeed string) []string {
-
 	totalNumberOfValidators := len(epochHandler.ValidatorsRegistry)
 
 	if totalNumberOfValidators <= quorumSize {
-
 		futureQuorum := make([]string, len(epochHandler.ValidatorsRegistry))
 
 		copy(futureQuorum, epochHandler.ValidatorsRegistry)
@@ -145,11 +131,9 @@ func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize
 // handlers.APPROVEMENT_THREAD_METADATA.RWMutex is already held in write mode (Lock).
 // It avoids self-deadlocks by using GetValidatorFromApprovementThreadStateUnderLock.
 func GetCurrentEpochQuorumUnderLock(epochHandler *structures.EpochDataHandler, quorumSize int, newEpochSeed string) []string {
-
 	totalNumberOfValidators := len(epochHandler.ValidatorsRegistry)
 
 	if totalNumberOfValidators <= quorumSize {
-
 		futureQuorum := make([]string, len(epochHandler.ValidatorsRegistry))
 
 		copy(futureQuorum, epochHandler.ValidatorsRegistry)
@@ -194,7 +178,6 @@ func GetCurrentEpochQuorumUnderLock(epochHandler *structures.EpochDataHandler, q
 }
 
 func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed string) {
-
 	hashOfMetadataFromOldEpoch := Blake3(epochSeed)
 
 	pubkeys := make([]string, 0, len(epochHandler.ValidatorsRegistry))
@@ -229,7 +212,6 @@ func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed str
 // handlers.APPROVEMENT_THREAD_METADATA.RWMutex is already held in write mode (Lock).
 // It avoids self-deadlocks by using GetValidatorFromApprovementThreadStateUnderLock.
 func SetLeadersSequenceUnderLock(epochHandler *structures.EpochDataHandler, epochSeed string) {
-
 	hashOfMetadataFromOldEpoch := Blake3(epochSeed)
 
 	pubkeys := make([]string, 0, len(epochHandler.ValidatorsRegistry))

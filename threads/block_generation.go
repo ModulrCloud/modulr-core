@@ -31,9 +31,7 @@ const (
 )
 
 func BlockGenerationThread() {
-
 	for {
-
 		// Don't hold AT lock while generating blocks (generation may include network I/O for delayed tx quorum signatures).
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 		blockTime := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.BlockTime
@@ -42,13 +40,10 @@ func BlockGenerationThread() {
 		generateBlock()
 
 		time.Sleep(time.Duration(blockTime) * time.Millisecond)
-
 	}
-
 }
 
 func getTransactionsFromMempool(limit int) []structures.Transaction {
-
 	globals.MEMPOOL.Mutex.Lock()
 
 	defer globals.MEMPOOL.Mutex.Unlock()
@@ -56,9 +51,7 @@ func getTransactionsFromMempool(limit int) []structures.Transaction {
 	mempoolSize := len(globals.MEMPOOL.Slice)
 
 	if limit > mempoolSize {
-
 		limit = mempoolSize
-
 	}
 
 	transactions := make([]structures.Transaction, limit)
@@ -95,7 +88,6 @@ func compactMempoolIfNeeded() {
 }
 
 func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHandler, indexOfLeader int) structures.DelayedTransactionsBatch {
-
 	prevEpochIndex := epochSnapshot.Id - 2
 	majority := utils.GetQuorumMajority(&epochSnapshot)
 
@@ -217,11 +209,9 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 	batch.Proofs = proofs
 
 	return batch
-
 }
 
 func generateBlock() {
-
 	// Snapshot AT quickly; do heavy work without holding AT lock.
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 	atSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler
@@ -230,9 +220,7 @@ func generateBlock() {
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 	if !utils.EpochStillFresh(&atSnapshot) {
-
 		return
-
 	}
 
 	epochFullID := epochSnapshot.Hash + "#" + strconv.Itoa(epochSnapshot.Id)
@@ -250,13 +238,11 @@ func generateBlock() {
 	shouldRotateEpochOnGenerationThread := handlers.GENERATION_THREAD_METADATA.EpochFullId != epochFullID
 
 	if shouldGenerateBlocks || shouldRotateEpochOnGenerationThread {
-
 		PROOFS_GRABBER_MUTEX.RUnlock()
 
 		// Check if <epochFullID> is the same in APPROVEMENT_THREAD and in GENERATION_THREAD
 
 		if shouldRotateEpochOnGenerationThread {
-
 			// Update the index & hash of epoch (by assigning new epoch full ID)
 
 			handlers.GENERATION_THREAD_METADATA.EpochFullId = epochFullID
@@ -266,7 +252,6 @@ func generateBlock() {
 			handlers.GENERATION_THREAD_METADATA.PrevHash = constants.ZeroBlockHash
 
 			handlers.GENERATION_THREAD_METADATA.NextIndex = 0
-
 		}
 
 		// Safe "if" branch to prevent unnecessary blocks generation
@@ -295,13 +280,11 @@ func generateBlock() {
 		utils.LogWithTime("New block generated "+blockID+" (txs: "+strconv.Itoa(len(blockCandidate.Transactions))+", hash: "+blockHash[:8]+"...)", utils.CYAN_COLOR)
 
 		if blockBytes, serializeErr := json.Marshal(blockCandidate); serializeErr == nil {
-
 			handlers.GENERATION_THREAD_METADATA.PrevHash = blockHash
 
 			handlers.GENERATION_THREAD_METADATA.NextIndex++
 
 			if gtBytes, serializeErr2 := json.Marshal(handlers.GENERATION_THREAD_METADATA); serializeErr2 == nil {
-
 				// Store block locally
 
 				blockDbAtomicBatch.Put([]byte(blockID), blockBytes)
@@ -311,19 +294,11 @@ func generateBlock() {
 				blockDbAtomicBatch.Put([]byte("GT"), gtBytes)
 
 				if err := databases.BLOCKS.Write(blockDbAtomicBatch, nil); err != nil {
-
 					panic("Can't store GT and block candidate")
-
 				}
-
 			}
-
 		}
-
 	} else {
-
 		PROOFS_GRABBER_MUTEX.RUnlock()
-
 	}
-
 }

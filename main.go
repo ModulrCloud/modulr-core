@@ -15,35 +15,26 @@ import (
 )
 
 func main() {
-
 	configsRawJson, readError := os.ReadFile(globals.CHAINDATA_PATH + "/configs.json")
 
 	if readError != nil {
-
 		panic("Error while reading configs: " + readError.Error())
-
 	}
 
 	if err := json.Unmarshal(configsRawJson, &globals.CONFIGURATION); err != nil {
-
 		panic("Error with configs parsing: " + err.Error())
-
 	}
 
 	anchorsRawJson, readError := os.ReadFile(globals.CHAINDATA_PATH + "/anchors.json")
 
 	if readError != nil {
-
 		panic("Error while reading anchors: " + readError.Error())
-
 	}
 
 	var anchorsList []structures.Anchor
 
 	if err := json.Unmarshal(anchorsRawJson, &anchorsList); err != nil {
-
 		panic("Error with anchors parsing: " + err.Error())
-
 	}
 
 	globals.ANCHORS = anchorsList
@@ -57,15 +48,11 @@ func main() {
 	genesisRawJson, readError := os.ReadFile(globals.CHAINDATA_PATH + "/genesis.json")
 
 	if readError != nil {
-
 		panic("Error while reading genesis: " + readError.Error())
-
 	}
 
 	if err := json.Unmarshal(genesisRawJson, &globals.GENESIS); err != nil {
-
 		panic("Error with genesis parsing: " + err.Error())
-
 	}
 
 	username := "unknown"
@@ -82,12 +69,10 @@ func main() {
 	// Function that runs the main logic
 
 	RunBlockchain()
-
 }
 
 // Function to handle Ctrl+C interruptions
 func signalHandler() {
-
 	sig := make(chan os.Signal, 1)
 
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -95,5 +80,4 @@ func signalHandler() {
 	<-sig
 
 	utils.GracefulShutdown()
-
 }

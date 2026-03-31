@@ -33,7 +33,6 @@ type Transaction struct {
 }
 
 func (t *Transaction) Hash() string {
-
 	payload := t.Payload
 
 	if payload == nil {

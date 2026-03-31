@@ -26,7 +26,6 @@ type delayedTransactionsSignResponse struct {
 }
 
 func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
-
 	var request delayedTransactionsSignRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")

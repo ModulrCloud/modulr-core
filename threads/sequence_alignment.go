@@ -31,12 +31,10 @@ type SequenceAlignmentDataResponse struct {
 }
 
 func SequenceAlignmentThread() {
-
-	var cachedFirstBlockEpoch int = -1
-	var cachedFirstBlockExists bool = false
+	var cachedFirstBlockEpoch = -1
+	var cachedFirstBlockExists = false
 
 	for {
-
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 
 		epochSnapshot := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
@@ -52,7 +50,6 @@ func SequenceAlignmentThread() {
 			if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id == epochSnapshot.Id &&
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption == currentAnchorIndex &&
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorBlockIndexObserved == currentAnchorBlockPointerObserved {
-
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption++
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorBlockIndexObserved = -1
 			}
@@ -94,10 +91,8 @@ func SequenceAlignmentThread() {
 
 		if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochSnapshot.Id ||
 			handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption != currentAnchorIndex {
-
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 			continue
-
 		}
 
 		alignmentData := &handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData
@@ -106,14 +101,13 @@ func SequenceAlignmentThread() {
 
 		currentBlockMatchesAnchor := infoAboutAnchorLastBlockExists && infoAboutAnchorLastBlock.Index == observedIndex && responseBlockHash == infoAboutAnchorLastBlock.Hash
 
-		if !(currentBlockMatchesAnchor || afpValid) {
+		if !currentBlockMatchesAnchor && !afpValid {
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 			continue
 		}
 
 		for leader, stats := range validLeaderStats {
 			if _, exists := alignmentData.LastBlocksByLeaders[leader]; !exists {
-
 				alignmentData.LastBlocksByLeaders[leader] = stats
 
 				hashPreview := stats.Hash
@@ -125,7 +119,6 @@ func SequenceAlignmentThread() {
 					fmt.Sprintf("Sequence alignment: last block for leader %s set at index %d (hash %s...) in epoch %d", leader, stats.Index, hashPreview, epochSnapshot.Id),
 					utils.CYAN_COLOR,
 				)
-
 			}
 		}
 
@@ -160,7 +153,5 @@ func SequenceAlignmentThread() {
 		alignmentData.CurrentAnchorBlockIndexObserved++
 
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
-
 	}
-
 }

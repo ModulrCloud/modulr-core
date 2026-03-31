@@ -14,7 +14,6 @@ import (
 )
 
 func GetValidatorByPubkey(ctx *fasthttp.RequestCtx) {
-
 	pubkeyRaw := ctx.UserValue("validatorPubkey")
 	pubkey, ok := pubkeyRaw.(string)
 

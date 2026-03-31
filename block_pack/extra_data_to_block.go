@@ -25,7 +25,6 @@ func (ed ExtraDataToBlock) MarshalJSON() ([]byte, error) {
 }
 
 func (ed *ExtraDataToBlock) UnmarshalJSON(data []byte) error {
-
 	type alias ExtraDataToBlock
 
 	var aux alias
@@ -41,5 +40,4 @@ func (ed *ExtraDataToBlock) UnmarshalJSON(data []byte) error {
 	*ed = ExtraDataToBlock(aux)
 
 	return nil
-
 }

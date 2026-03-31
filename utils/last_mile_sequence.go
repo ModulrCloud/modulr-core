@@ -20,9 +20,7 @@ type LastMileSequenceState struct {
 // It auto-skips leaders whose blocks are fully processed or who produced no blocks.
 // Returns empty string if the tracker can't advance (data not yet available or all leaders done).
 func (s *LastMileSequenceState) CurrentBlockId(leadersSequence []string, lastBlocksByLeaders map[string]structures.ExecutionStats) string {
-
 	for s.LeaderIndex < len(leadersSequence) {
-
 		leader := leadersSequence[s.LeaderIndex]
 		lastBlock, known := lastBlocksByLeaders[leader]
 
@@ -61,7 +59,6 @@ func (s *LastMileSequenceState) AdvanceToNextEpoch() {
 }
 
 func LoadLastMileSequenceState(dbKey string) *LastMileSequenceState {
-
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(dbKey), nil)
 
 	if err != nil || len(raw) == 0 {
@@ -78,7 +75,6 @@ func LoadLastMileSequenceState(dbKey string) *LastMileSequenceState {
 }
 
 func PersistLastMileSequenceState(dbKey string, state *LastMileSequenceState) {
-
 	if raw, err := json.Marshal(state); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(dbKey), raw, nil)
 	}
