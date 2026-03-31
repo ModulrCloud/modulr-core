@@ -164,7 +164,7 @@ func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *
 
 									if parsedRequest.Block.Index == 0 {
 
-										prevBlockHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+										prevBlockHash = constants.ZeroBlockHash
 
 									} else {
 
@@ -307,7 +307,7 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 					dataToSignForLeaderFinalization = "LEADER_FINALIZATION_PROOF:" + leaderToFinalize
 
-					dataToSignForLeaderFinalization += ":-1:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:"
+					dataToSignForLeaderFinalization += ":-1:" + constants.ZeroBlockHash + ":"
 
 					dataToSignForLeaderFinalization += epochFullID
 

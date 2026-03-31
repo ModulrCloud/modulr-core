@@ -62,19 +62,23 @@ func GracefulShutdown() {
 }
 
 func LogWithTime(msg, msgColor string) {
-
-	formattedDate := time.Now().Format("02 January 2006 at 03:04:05 PM")
-
-	fmt.Printf(DEEP_GREEN_COLOR+"[%s]"+MAGENTA_COLOR+"(pid:%d)"+msgColor+"  %s\n"+RESET_COLOR, formattedDate, os.Getpid(), msg)
-
+	logWithTimestamp(msg, msgColor, DEEP_GREEN_COLOR)
 }
 
-func LogWithTime2(msg, msgColor string) {
+func LogWithTimeAlt(msg, msgColor string) {
+	logWithTimestamp(msg, msgColor, DEEP_YELLOW)
+}
 
+func logWithTimestamp(msg, msgColor, timestampColor string) {
 	formattedDate := time.Now().Format("02 January 2006 at 03:04:05 PM")
+	fmt.Printf(timestampColor+"[%s]"+MAGENTA_COLOR+"(pid:%d)"+msgColor+"  %s\n"+RESET_COLOR, formattedDate, os.Getpid(), msg)
+}
 
-	fmt.Printf(DEEP_YELLOW+"[%s]"+MAGENTA_COLOR+"(pid:%d)"+msgColor+"  %s\n"+RESET_COLOR, formattedDate, os.Getpid(), msg)
-
+func ShortHash(h string) string {
+	if len(h) > 8 {
+		return h[:8]
+	}
+	return h
 }
 
 func Blake3(data string) string {

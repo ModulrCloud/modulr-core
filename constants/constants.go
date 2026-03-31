@@ -80,6 +80,10 @@ const (
 	DefaultValidatorsCacheMax = 5_000
 )
 
+// Sentinel hash used as the "previous block hash" for the very first block
+// and as the initial state for various hash chains.
+const ZeroBlockHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
 // Native currency precision:
 // 1 coin = 10^9 smallest units.
 const (

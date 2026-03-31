@@ -596,9 +596,9 @@ func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizatio
 			leaderPubKey,
 			epochHandler.Id,
 			prevIndex,
-			shortHash8(prevHash),
+			utils.ShortHash(prevHash),
 			response.SkipData.Index,
-			shortHash8(response.SkipData.Hash),
+			utils.ShortHash(response.SkipData.Hash),
 		),
 		utils.CYAN_COLOR,
 	)
@@ -801,11 +801,4 @@ func requestLeaderFinalizationFromPoD(epochHandler *structures.EpochDataHandler,
 
 		persistAggregatedLeaderFinalizationProofDirect(aggregated)
 	}()
-}
-
-func shortHash8(h string) string {
-	if len(h) > 8 {
-		return h[:8]
-	}
-	return h
 }

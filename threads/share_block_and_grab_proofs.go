@@ -94,7 +94,7 @@ func BlocksSharingAndProofsGrabingThread() {
 
 					AcceptedIndex: -1,
 
-					AcceptedHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+					AcceptedHash: constants.ZeroBlockHash,
 				}
 
 				// Also - clean the mapping with the signatures for AFP

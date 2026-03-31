@@ -507,13 +507,6 @@ func nextBlockId(blockId string) string {
 	return strings.Join(parts, ":")
 }
 
-func shortHash(h string) string {
-	if len(h) > 8 {
-		return h[:8]
-	}
-	return h
-}
-
 func executeBlock(block *block_pack.Block) {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
 	stateBatch, logMsg, ok := buildExecutionBatch(block)
@@ -524,7 +517,7 @@ func executeBlock(block *block_pack.Block) {
 	}
 
 	if err := databases.STATE.Write(stateBatch, nil); err == nil {
-		utils.LogWithTime2(logMsg, utils.CYAN_COLOR)
+		utils.LogWithTimeAlt(logMsg, utils.CYAN_COLOR)
 	} else {
 		panic("Impossible to commit changes in atomic batch to permanent state")
 	}
@@ -550,7 +543,7 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 		utils.LogWithTimeThrottled(
 			"exec:prev_hash_mismatch:"+currentBlockId,
 			2*time.Second,
-			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, shortHash(expectedPrevHash), shortHash(block.PrevHash)),
+			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, utils.ShortHash(expectedPrevHash), utils.ShortHash(block.PrevHash)),
 			utils.YELLOW_COLOR,
 		)
 		return nil, "", false
