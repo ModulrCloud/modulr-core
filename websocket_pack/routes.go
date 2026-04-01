@@ -465,7 +465,7 @@ func GetBlockWithProof(parsedRequest WsBlockWithAfpRequest, connection *gws.Conn
 		var block block_pack.Block
 
 		if err := json.Unmarshal(blockBytes, &block); err == nil {
-			resp := WsBlockWithAfpResponse{&block, nil}
+			resp := WsBlockWithAfpResponse{Block: &block}
 
 			// Now try to get AFP for block
 
