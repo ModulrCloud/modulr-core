@@ -45,8 +45,9 @@ type WsBlockWithAfpRequest struct {
 }
 
 type WsBlockWithAfpResponse struct {
-	Block *block_pack.Block                       `json:"block"`
-	Afp   *structures.AggregatedFinalizationProof `json:"afp"`
+	Block             *block_pack.Block                       `json:"block"`
+	Afp               *structures.AggregatedFinalizationProof `json:"afp"`
+	HeightAttestation *structures.HeightAttestation           `json:"heightAttestation,omitempty"`
 }
 
 type WsAnchorBlockWithAfpRequest struct {

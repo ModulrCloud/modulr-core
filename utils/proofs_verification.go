@@ -216,7 +216,6 @@ func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandle
 		close(resultChan)
 	}()
 
-	// Return first valid AFP
 	for res := range resultChan {
 		if res != nil {
 			return res
@@ -274,6 +273,62 @@ func GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(blockID string, epoc
 				}
 			}
 		}(anchor.AnchorUrl)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	for res := range resultChan {
+		if res != nil {
+			return res
+		}
+	}
+
+	return nil
+}
+
+func GetVerifiedHeightAttestationFromQuorum(absoluteHeight int, expectedBlockId, expectedBlockHash string, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+	if epochHandler == nil {
+		return nil
+	}
+
+	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
+	resultChan := make(chan *structures.HeightAttestation, len(quorum))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	for _, node := range quorum {
+		wg.Add(1)
+		go func(endpoint string) {
+			defer wg.Done()
+
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/height_attestation/"+strconv.Itoa(absoluteHeight), nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			var proof structures.HeightAttestation
+			if json.NewDecoder(resp.Body).Decode(&proof) == nil &&
+				proof.BlockId == expectedBlockId &&
+				proof.BlockHash == expectedBlockHash &&
+				VerifyHeightAttestation(&proof, epochHandler) {
+				select {
+				case resultChan <- &proof:
+					cancel()
+				default:
+				}
+			}
+		}(node.Url)
 	}
 
 	go func() {
