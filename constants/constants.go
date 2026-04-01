@@ -38,9 +38,9 @@ const (
 
 // Common DB key fragments/prefixes.
 const (
-	DBKeyExecutionThreadMetadata   = "ET"
-	DBKeyApprovementThreadMetadata = "AT"
-	DBKeyGenerationThreadMetadata  = "GT"
+	DBKeyExecutionThreadMetadata   = "EXECUTION_THREAD_METADATA"
+	DBKeyApprovementThreadMetadata = "APPROVEMENT_THREAD_METADATA"
+	DBKeyGenerationThreadMetadata  = "GENERATION_THREAD_METADATA"
 	DBKeyLatestBatchIndex          = "LATEST_BATCH_INDEX"
 
 	DBKeyPrefixBlockIndex          = "BLOCK_INDEX:"

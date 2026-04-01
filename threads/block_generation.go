@@ -291,7 +291,7 @@ func generateBlock() {
 
 				// Update the GENERATION_THREAD after all
 
-				blockDbAtomicBatch.Put([]byte("GT"), gtBytes)
+				blockDbAtomicBatch.Put([]byte(constants.DBKeyGenerationThreadMetadata), gtBytes)
 
 				if err := databases.BLOCKS.Write(blockDbAtomicBatch, nil); err != nil {
 					panic("Can't store GT and block candidate")
