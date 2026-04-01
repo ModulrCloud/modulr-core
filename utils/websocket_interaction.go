@@ -414,6 +414,13 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 					} else {
 						validMu.Unlock()
 					}
+				} else {
+					// Validation failed (e.g. NOT_READY) — remove from answered
+					// so the node gets resent to on the next timer tick.
+					qw.mu.Lock()
+					delete(qw.answered, id)
+					delete(qw.responses, id)
+					qw.mu.Unlock()
 				}
 			}(r.id, r.msg)
 
