@@ -22,6 +22,12 @@ import (
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
+var wsNotReadyResponse = []byte(`{"status":"NOT_READY"}`)
+
+func sendNotReady(connection *gws.Conn) {
+	connection.WriteMessage(gws.OpcodeText, wsNotReadyResponse)
+}
+
 func getEpochHandlerForLeaderFinalization(epochIndex int) *structures.EpochDataHandler {
 	if epochIndex < 0 {
 		return nil
@@ -45,6 +51,7 @@ func getEpochHandlerForLeaderFinalization(epochIndex int) *structures.EpochDataH
 
 func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		sendNotReady(connection)
 		return
 	}
 
@@ -177,6 +184,7 @@ func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *
 
 func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		sendNotReady(connection)
 		return
 	}
 
@@ -186,16 +194,27 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 	epochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.EpochIndex)
 	if epochHandler == nil {
+		sendNotReady(connection)
 		return
 	}
 
 	isRequestForPastEpoch := parsedRequest.EpochIndex < activeEpochID
 
 	if parsedRequest.IndexOfLeaderToFinalize < 0 || parsedRequest.IndexOfLeaderToFinalize >= len(epochHandler.LeadersSequence) {
+		sendNotReady(connection)
 		return
 	}
 
-	if !isRequestForPastEpoch && epochHandler.CurrentLeaderIndex <= parsedRequest.IndexOfLeaderToFinalize {
+	if !isRequestForPastEpoch && epochHandler.CurrentLeaderIndex < parsedRequest.IndexOfLeaderToFinalize {
+		sendNotReady(connection)
+		return
+	}
+
+	lastLeaderIdx := len(epochHandler.LeadersSequence) - 1
+	isLastLeader := parsedRequest.IndexOfLeaderToFinalize == lastLeaderIdx && epochHandler.CurrentLeaderIndex == lastLeaderIdx
+
+	if !isRequestForPastEpoch && epochHandler.CurrentLeaderIndex <= parsedRequest.IndexOfLeaderToFinalize && !isLastLeader {
+		sendNotReady(connection)
 		return
 	}
 
@@ -204,7 +223,7 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 	leaderToFinalize := epochHandler.LeadersSequence[parsedRequest.IndexOfLeaderToFinalize]
 
-	if isRequestForPastEpoch || epochHandler.CurrentLeaderIndex > parsedRequest.IndexOfLeaderToFinalize {
+	if isRequestForPastEpoch || epochHandler.CurrentLeaderIndex > parsedRequest.IndexOfLeaderToFinalize || isLastLeader {
 		localVotingData := structures.NewLeaderVotingStatTemplate()
 
 		localVotingDataRaw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(strconv.Itoa(epochIndex)+":"+leaderToFinalize), nil)
@@ -291,6 +310,7 @@ var heightAttestationVoterMutex sync.Mutex
 
 func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		sendNotReady(connection)
 		return
 	}
 
@@ -375,6 +395,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 
 func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		sendNotReady(connection)
 		return
 	}
 
