@@ -22,10 +22,8 @@ import (
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
-var wsNotReadyResponse = []byte(`{"status":"NOT_READY"}`)
-
 func sendNotReady(connection *gws.Conn) {
-	connection.WriteMessage(gws.OpcodeText, wsNotReadyResponse)
+	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
 }
 
 func getEpochHandlerForLeaderFinalization(epochIndex int) *structures.EpochDataHandler {
