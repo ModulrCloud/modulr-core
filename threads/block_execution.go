@@ -56,7 +56,7 @@ func BlockExecutionThread() {
 		currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-		attestation := fetchVerifiedHeightAttestation(int(nextHeight))
+		attestation, block := fetchAttestationAndBlock(int(nextHeight))
 		if attestation == nil {
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -89,7 +89,9 @@ func BlockExecutionThread() {
 			}
 		}
 
-		block := fetchBlockForExecution(attestation.BlockId)
+		if block == nil {
+			block = fetchBlockForExecution(attestation.BlockId)
+		}
 		if block == nil {
 			utils.LogWithTimeThrottled(
 				"exec:block_fetch_fail:"+attestation.BlockId,
@@ -114,6 +116,44 @@ func BlockExecutionThread() {
 
 		executeBlock(block)
 	}
+}
+
+// fetchAttestationAndBlock tries to get both the HeightAttestation and the block for a given height
+// in a single PoD round-trip. Falls back to separate fetches if the combined route doesn't return both.
+func fetchAttestationAndBlock(absoluteHeight int) (*structures.HeightAttestation, *block_pack.Block) {
+	localProof := LoadHeightAttestation(absoluteHeight)
+	if localProof != nil {
+		epochHandler := getEpochHandlerForTracker(localProof.EpochId)
+		if epochHandler != nil && utils.VerifyHeightAttestation(localProof, epochHandler) {
+			block := fetchBlockForExecution(localProof.BlockId)
+			return localProof, block
+		}
+	}
+
+	combined := websocket_pack.GetBlockByHeightFromPoD(absoluteHeight)
+	if combined != nil && combined.HeightAttestation != nil {
+		epochHandler := getEpochHandlerForTracker(combined.HeightAttestation.EpochId)
+		if epochHandler != nil && utils.VerifyHeightAttestation(combined.HeightAttestation, epochHandler) {
+			storeHeightAttestation(combined.HeightAttestation)
+			var block *block_pack.Block
+			if combined.Block != nil && combined.Block.VerifySignature() {
+				block = combined.Block
+			}
+			return combined.HeightAttestation, block
+		}
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	httpProof := utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, &currentEpochHandler)
+	if httpProof != nil {
+		storeHeightAttestation(httpProof)
+		return httpProof, nil
+	}
+
+	return nil, nil
 }
 
 func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttestation {

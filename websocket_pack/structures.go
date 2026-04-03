@@ -142,3 +142,15 @@ type WsQuorumRotationAttestationGetRequest struct {
 type WsQuorumRotationAttestationGetResponse struct {
 	Attestation *structures.QuorumRotationAttestation `json:"attestation"`
 }
+
+// Combined block + attestation retrieval by absolute height
+
+type WsBlockByHeightRequest struct {
+	Route          string `json:"route"`
+	AbsoluteHeight int    `json:"absoluteHeight"`
+}
+
+type WsBlockByHeightResponse struct {
+	Block             *block_pack.Block             `json:"block"`
+	HeightAttestation *structures.HeightAttestation `json:"heightAttestation"`
+}

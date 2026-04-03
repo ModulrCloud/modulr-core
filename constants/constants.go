@@ -34,6 +34,7 @@ const (
 	WsRouteGetHeightAttestationFromPoD          = "get_height_attestation_from_pod"
 	WsRouteAcceptQuorumRotationAttestation      = "accept_quorum_rotation_attestation"
 	WsRouteGetQuorumRotationAttestationFromPoD  = "get_quorum_rotation_attestation_from_pod"
+	WsRouteGetBlockByHeight                     = "get_block_by_height"
 )
 
 // Common DB key fragments/prefixes.

@@ -102,3 +102,16 @@ func GetQuorumRotationAttestationFromPoD(epochId int) *structures.QuorumRotation
 	}
 	return nil
 }
+
+func GetBlockByHeightFromPoD(absoluteHeight int) *WsBlockByHeightResponse {
+	req := WsBlockByHeightRequest{Route: constants.WsRouteGetBlockByHeight, AbsoluteHeight: absoluteHeight}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
+			var resp WsBlockByHeightResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return &resp
+			}
+		}
+	}
+	return nil
+}
