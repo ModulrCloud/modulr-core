@@ -1,4 +1,6 @@
-// Thread to fetch blocks from the network and execute them sequentially based on the sequence alignment (sequence_alignment.go)
+// Thread to execute blocks sequentially driven by HeightAttestations from the quorum.
+// The quorum (via LastMileFinalizerThread + SignHeightAttestation) resolves block ordering
+// and assigns absolute heights. This thread simply follows that sequence.
 package threads
 
 import (
@@ -28,11 +30,8 @@ import (
 )
 
 const (
-	// How many consecutive PoD misses for the same blockID before we start querying the network (quorum/anchors) directly.
 	POD_MISSES_BEFORE_NETWORK_FALLBACK = 3
-
-	// Prevent spamming anchors with HTTP fallbacks if multiple threads call into anchors-PoD getter concurrently.
-	ANCHORS_FALLBACK_MIN_INTERVAL = 500 * time.Millisecond
+	ANCHORS_FALLBACK_MIN_INTERVAL      = 500 * time.Millisecond
 )
 
 type AnchorsPodMissState struct {
@@ -48,176 +47,129 @@ var (
 )
 
 func BlockExecutionThread() {
-	// Track PoD misses per blockID so we only fall back to querying the network after several failures.
-	podMisses := make(map[string]int)
-	lastEpochId := -1
-
 	for {
-		// NOTE: Don't hold EXECUTION_THREAD_METADATA lock during network I/O to PoD.
-		// On high-latency links this blocks alignment/monitor threads and can cause huge execution lag.
-
-		progressed := false
-
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
-
-		epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
-		currentEpochAlignmentData := &epochHandlerRef.SequenceAlignmentData
-
-		epochSnapshot := epochHandlerRef.EpochDataHandler
-		if epochSnapshot.Id != lastEpochId {
-			// New epoch: drop stale miss counters (safety against growth across epochs).
-			podMisses = make(map[string]int)
-			lastEpochId = epochSnapshot.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		var nextHeight int64
+		if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
+			nextHeight = handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.LastHeight + 1
 		}
+		currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-		leaderIndexToExec := currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom
-		if leaderIndexToExec < 0 || leaderIndexToExec >= len(epochSnapshot.LeadersSequence) {
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		attestation := fetchVerifiedHeightAttestation(int(nextHeight))
+		if attestation == nil {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		leaderPubkeyToExecBlocks := epochSnapshot.LeadersSequence[leaderIndexToExec]
-		execStatsOfLeader := epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks] // {index,hash}
-		infoAboutLastBlockByThisLeader, infoAboutLastBlockExists := currentEpochAlignmentData.LastBlocksByLeaders[leaderPubkeyToExecBlocks]
-
-		// If we already executed everything we know for this leader, advance leader/epoch.
-		if infoAboutLastBlockExists && execStatsOfLeader.Index == infoAboutLastBlockByThisLeader.Index {
-			allBlocksInEpochWereExecuted := len(epochSnapshot.LeadersSequence) == currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom+1
-			if allBlocksInEpochWereExecuted {
-				setupNextEpoch(&epochHandlerRef.EpochDataHandler)
-			} else {
-				epochHandlerRef.SequenceAlignmentData.CurrentLeaderToExecBlocksFrom++
-			}
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		nextAttestation := fetchVerifiedHeightAttestation(int(nextHeight) + 1)
+		if nextAttestation == nil {
+			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
-
-		// ___________ Now start a cycle to fetch blocks and exec ___________
-		for {
-			blockId := strconv.Itoa(epochSnapshot.Id) + ":" + leaderPubkeyToExecBlocks + ":" + strconv.Itoa(execStatsOfLeader.Index+1)
-
-			// Network I/O (PoD) - no locks held.
-			response := getBlockAndAfpFromPoD(blockId)
-			if response == nil || response.Block == nil {
-				podMisses[blockId]++
-
-				// Safety valve: avoid unbounded growth if keys become highly dynamic.
-				if len(podMisses) > 5000 {
-					podMisses = make(map[string]int)
-				}
-
-				utils.LogWithTimeThrottled(
-					"exec:pod_block_miss:"+blockId,
-					2*time.Second,
-					fmt.Sprintf("EXECUTION: can't fetch block %s from PoD (miss %d/%d)", blockId, podMisses[blockId], POD_MISSES_BEFORE_NETWORK_FALLBACK),
-					utils.YELLOW_COLOR,
-				)
-
-				// After a few PoD misses, try to fetch the block from quorum/network directly (HTTP).
-				if podMisses[blockId] >= POD_MISSES_BEFORE_NETWORK_FALLBACK {
-					utils.LogWithTimeThrottled(
-						"exec:pod_block_fallback:"+blockId,
-						5*time.Second,
-						fmt.Sprintf("EXECUTION: falling back to quorum HTTP for block %s", blockId),
-						utils.DEEP_GRAY,
-					)
-
-					if fallbackBlock := getBlockFromNetworkById(blockId, &epochSnapshot); fallbackBlock != nil {
-						response = &websocket_pack.WsBlockWithAfpResponse{Block: fallbackBlock}
-						// success via fallback - reset counter
-						delete(podMisses, blockId)
-
-						utils.LogWithTimeThrottled(
-							"exec:pod_block_fallback_ok:"+blockId,
-							5*time.Second,
-							fmt.Sprintf("EXECUTION: fetched block %s via quorum HTTP fallback", blockId),
-							utils.CYAN_COLOR,
-						)
-					}
-				}
-
-				// Still nothing - stop this execution cycle and retry later.
-				if response == nil || response.Block == nil {
-					break
-				}
-			} else {
-				// Got data from PoD - reset counter.
-				delete(podMisses, blockId)
-			}
-
-			// Decide whether we can execute this block.
-			canExecWithoutAfp := infoAboutLastBlockExists &&
-				execStatsOfLeader.Index+1 == infoAboutLastBlockByThisLeader.Index &&
-				response.Block.GetHash() == infoAboutLastBlockByThisLeader.Hash
-
-			// Only fetch/verify AFP if we can't safely execute without it.
-			if !canExecWithoutAfp && response.Afp == nil {
-				if nextID := nextBlockId(blockId); nextID != "" {
-					if afp := utils.GetVerifiedAggregatedFinalizationProofByBlockId(nextID, &epochSnapshot); afp != nil {
-						response.Afp = afp
-					} else {
-						utils.LogWithTimeThrottled(
-							"exec:afp_missing:"+blockId,
-							2*time.Second,
-							fmt.Sprintf("EXECUTION: missing AFP for block %s (attempted quorum AFP for %s)", blockId, nextID),
-							utils.YELLOW_COLOR,
-						)
-					}
-				}
-			}
-
-			// Verify AFP only if we can't safely execute without it (AFP verification is relatively expensive).
-			mustExecWithAfp := false
-			if !canExecWithoutAfp {
-				mustExecWithAfp = response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
-				if response.Afp != nil && !mustExecWithAfp {
-					utils.LogWithTimeThrottled(
-						"exec:afp_invalid:"+blockId,
-						2*time.Second,
-						fmt.Sprintf("EXECUTION: AFP verification failed for block %s", blockId),
-						utils.YELLOW_COLOR,
-					)
-				}
-			}
-
-			if !canExecWithoutAfp && !mustExecWithAfp {
-				break
-			}
+		if attestation.EpochId > currentEpochId {
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			setupNextEpoch(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler)
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-			var nextAbsoluteHeight int64
-			if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
-				nextAbsoluteHeight = handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.LastHeight + 1
-			}
+			currentEpochId = handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-			if !hasVerifiedHeightAttestation(int(nextAbsoluteHeight), blockId, response.Block.GetHash(), response.HeightAttestation) {
+			if attestation.EpochId != currentEpochId {
 				utils.LogWithTimeThrottled(
-					"exec:height_attestation_missing:"+blockId,
+					"exec:epoch_mismatch",
 					5*time.Second,
-					fmt.Sprintf("EXECUTION: waiting for height attestation for height %d (%s)", nextAbsoluteHeight, blockId),
+					fmt.Sprintf("EXECUTION: waiting for epoch %d (currently at %d)", attestation.EpochId, currentEpochId),
 					utils.YELLOW_COLOR,
 				)
-				break
+				time.Sleep(200 * time.Millisecond)
+				continue
 			}
-
-			// Apply block (executes with internal lock; DB write happens outside lock).
-			executeBlock(response.Block)
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-			execStatsOfLeader = handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[leaderPubkeyToExecBlocks]
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-			progressed = true
 		}
 
-		// Avoid tight loop when PoD doesn't have the next block yet (especially on high RTT links).
-		if !progressed {
-			time.Sleep(100 * time.Millisecond)
+		block := fetchBlockForExecution(attestation.BlockId)
+		if block == nil {
+			utils.LogWithTimeThrottled(
+				"exec:block_fetch_fail:"+attestation.BlockId,
+				2*time.Second,
+				fmt.Sprintf("EXECUTION: can't fetch block %s for height %d", attestation.BlockId, nextHeight),
+				utils.YELLOW_COLOR,
+			)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		if block.GetHash() != attestation.BlockHash {
+			utils.LogWithTimeThrottled(
+				"exec:hash_mismatch:"+attestation.BlockId,
+				5*time.Second,
+				fmt.Sprintf("EXECUTION: block hash mismatch for %s at height %d", attestation.BlockId, nextHeight),
+				utils.YELLOW_COLOR,
+			)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		executeBlock(block)
+	}
+}
+
+func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
+	proof := LoadHeightAttestation(absoluteHeight)
+	if proof != nil {
+		epochHandler := getEpochHandlerForTracker(proof.EpochId)
+		if epochHandler != nil && utils.VerifyHeightAttestation(proof, epochHandler) {
+			return proof
 		}
 	}
+
+	podProof := websocket_pack.GetHeightAttestationFromPoD(absoluteHeight)
+	if podProof != nil {
+		epochHandler := getEpochHandlerForTracker(podProof.EpochId)
+		if epochHandler != nil && utils.VerifyHeightAttestation(podProof, epochHandler) {
+			storeHeightAttestation(podProof)
+			return podProof
+		}
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	httpProof := utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, &currentEpochHandler)
+	if httpProof != nil {
+		storeHeightAttestation(httpProof)
+		return httpProof
+	}
+
+	return nil
+}
+
+func fetchBlockForExecution(blockId string) *block_pack.Block {
+	blockRaw, err := databases.BLOCKS.Get([]byte(blockId), nil)
+	if err == nil {
+		var block block_pack.Block
+		if json.Unmarshal(blockRaw, &block) == nil && block.VerifySignature() {
+			return &block
+		}
+	}
+
+	response := getBlockAndAfpFromPoD(blockId)
+	if response != nil && response.Block != nil && response.Block.VerifySignature() {
+		return response.Block
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	epochSnapshot := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	if networkBlock := getBlockFromNetworkById(blockId, &epochSnapshot); networkBlock != nil {
+		return networkBlock
+	}
+
+	return nil
 }
 
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {
@@ -914,45 +866,4 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 			utils.YELLOW_COLOR,
 		)
 	}
-}
-
-func hasVerifiedHeightAttestation(absoluteHeight int, blockId, blockHash string, prefetched *structures.HeightAttestation) bool {
-	// 1. Check local DB first
-	proof := LoadHeightAttestation(absoluteHeight)
-	if proof != nil && proof.BlockId == blockId && proof.BlockHash == blockHash {
-		epochHandler := getEpochHandlerForTracker(proof.EpochId)
-		return epochHandler != nil && utils.VerifyHeightAttestation(proof, epochHandler)
-	}
-
-	// 2. Use prefetched attestation from PoD combined response
-	if prefetched != nil && prefetched.BlockId == blockId && prefetched.BlockHash == blockHash {
-		epochHandler := getEpochHandlerForTracker(prefetched.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(prefetched, epochHandler) {
-			storeHeightAttestation(prefetched)
-			return true
-		}
-	}
-
-	// 3. Try dedicated PoD request
-	podProof := websocket_pack.GetHeightAttestationFromPoD(absoluteHeight)
-	if podProof != nil && podProof.BlockId == blockId && podProof.BlockHash == blockHash {
-		epochHandler := getEpochHandlerForTracker(podProof.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(podProof, epochHandler) {
-			storeHeightAttestation(podProof)
-			return true
-		}
-	}
-
-	// 4. HTTP fallback: fetch from quorum members directly
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	httpProof := utils.GetVerifiedHeightAttestationFromQuorum(absoluteHeight, blockId, blockHash, &currentEpochHandler)
-	if httpProof != nil {
-		storeHeightAttestation(httpProof)
-		return true
-	}
-
-	return false
 }
