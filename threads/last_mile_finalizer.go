@@ -324,11 +324,9 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		lastBlocksByLeaders, ok := snapshotAlignmentData()
-
-		if !ok {
-			time.Sleep(200 * time.Millisecond)
-			continue
+		lastBlocksByLeaders, _ := snapshotAlignmentData()
+		if lastBlocksByLeaders == nil {
+			lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
 		}
 
 		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
@@ -351,12 +349,13 @@ func LastMileFinalizerThread() {
 		blockHash := getBlockHashById(blockId)
 
 		if blockHash == "" {
-			utils.LogWithTimeThrottled(
-				"last_mile:block_hash_not_found:"+blockId,
-				5*time.Second,
-				fmt.Sprintf("Last mile finalizer: can't get hash for block %s", blockId),
-				utils.YELLOW_COLOR,
-			)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		confirmed, _ := tracker.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
+
+		if !confirmed {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

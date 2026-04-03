@@ -333,9 +333,8 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 			}
 
 			lastBlocksByLeaders := snapshotAlignmentDataForHeightVoter()
-
 			if lastBlocksByLeaders == nil {
-				break
+				lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
 			}
 
 			blockId := state.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
@@ -345,7 +344,16 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 					state.AdvanceToNextEpoch()
 					continue
 				}
+				break
+			}
 
+			blockHash := getBlockHashForHeightVoter(blockId)
+			if blockHash == "" {
+				break
+			}
+
+			confirmed, _ := state.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
+			if !confirmed {
 				break
 			}
 
@@ -362,12 +370,14 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
+		sendNotReady(connection)
 		return
 	}
 
 	storedBlockHash := getBlockHashForHeightVoter(parsedRequest.BlockId)
 
 	if storedBlockHash == "" || storedBlockHash != parsedRequest.BlockHash {
+		sendNotReady(connection)
 		return
 	}
 
