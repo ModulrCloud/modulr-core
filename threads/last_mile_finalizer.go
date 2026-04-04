@@ -252,8 +252,13 @@ func LastMileFinalizerThread() {
 	quorumConnectionsReady := false
 	anchorConnectionsSent := false
 	lastRotationEpoch := -1
+	lastFirstBlockEpochId := -1
 
 	tracker := utils.LoadLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker)
+
+	if getFirstBlockDataFromDB(tracker.EpochId) != nil {
+		lastFirstBlockEpochId = tracker.EpochId
+	}
 
 	for {
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
@@ -364,18 +369,31 @@ func LastMileFinalizerThread() {
 
 		if proof != nil {
 			storeHeightAttestation(proof)
+
+			if proof.EpochId != lastFirstBlockEpochId {
+				if getFirstBlockDataFromDB(proof.EpochId) == nil {
+					parts := strings.Split(blockId, ":")
+					if len(parts) == 3 {
+						_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
+							FirstBlockCreator: parts[1],
+							FirstBlockHash:    blockHash,
+						})
+						utils.LogWithTime(
+							fmt.Sprintf("First core block in epoch %d detected: creator=%s, hash=%s...", proof.EpochId, parts[1], utils.ShortHash(blockHash)),
+							utils.GREEN_COLOR,
+						)
+					}
+				}
+				lastFirstBlockEpochId = proof.EpochId
+			}
+
 			tracker.Advance()
 			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 
 			websocket_pack.SendHeightAttestationToPoD(*proof)
 
-			hashPreview := blockHash
-			if len(hashPreview) > 8 {
-				hashPreview = hashPreview[:8]
-			}
-
 			utils.LogWithTime(
-				fmt.Sprintf("Height attestation collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, hashPreview),
+				fmt.Sprintf("Height attestation collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, utils.ShortHash(blockHash)),
 				utils.DEEP_GREEN_COLOR,
 			)
 

@@ -36,12 +36,10 @@ func FirstBlockInEpochMonitorThread() {
 			continue
 		}
 
-		// First block is now determined by sequence_alignment.go when processing anchor blocks
-		// Just wait and check periodically
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("first_block_monitor:missing:%d", epochUnderObservation),
 			5*time.Second,
-			fmt.Sprintf("FirstBlockMonitor: waiting for first anchor block for epoch %d (sequence alignment)", epochUnderObservation),
+			fmt.Sprintf("FirstBlockMonitor: waiting for first core block for epoch %d (height attestation voting)", epochUnderObservation),
 			utils.YELLOW_COLOR,
 		)
 
