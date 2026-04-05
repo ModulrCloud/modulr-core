@@ -103,6 +103,30 @@ func GetEpochDataAttestationFromPoD(epochId int) *structures.EpochDataAttestatio
 	return nil
 }
 
+func SendAnchorEpochAckToPoD(proof structures.AnchorEpochAckProof) {
+	req := WsAnchorEpochAckStoreRequest{Route: constants.WsRouteAcceptAnchorEpochAckOnPoD, Proof: proof}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAnchorEpochAck(proof.EpochId), reqBytes)
+	}
+}
+
+func GetAnchorEpochAckFromPoD(epochId int) *structures.AnchorEpochAckProof {
+	req := WsAnchorEpochAckGetRequest{Route: constants.WsRouteGetAnchorEpochAckFromPoD, EpochId: epochId}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsAnchorEpochAckGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Proof
+			}
+		}
+	}
+	return nil
+}
+
 func GetBlockByHeightFromPoD(absoluteHeight int) *WsBlockByHeightResponse {
 	req := WsBlockByHeightRequest{Route: constants.WsRouteGetBlockByHeight, AbsoluteHeight: absoluteHeight}
 	if reqBytes, err := json.Marshal(req); err == nil {

@@ -98,6 +98,7 @@ All voting/finalization-related data: proofs grabber state, ALFPs, height attest
 | `HEIGHT_ATTESTATION_VOTER_STATE` | JSON state | `last_mile_finalizer.go` | Tracks which heights have been voted on |
 | `LAST_MILE_FINALIZER_TRACKER` | `LastMileSequenceState` JSON | `last_mile_sequence.go` | Tracks the last mile finalizer's progress (NextHeight, LastBlocksByLeaders) |
 | `LAST_MILE_HEIGHT_MAP:{height}` | `blockId` string | `last_mile_sequence.go` | Pre-computed height → blockId mapping (from sequence alignment) |
+| `ANCHOR_EPOCH_ACK:{epochId}` | `AnchorEpochAckProof` JSON | `last_mile_finalizer.go`, `websocket_pack/routes.go` | Aggregated anchor signatures confirming epoch transition receipt — gates new quorum voting |
 | `POD_OUTBOX:{id}` | Raw WS message bytes | `pod_outbox.go` | Outbox queue for reliable delivery to PoD |
 
 **Recovery**: Wiped entirely. All voting/finalization state is rebuilt from scratch.

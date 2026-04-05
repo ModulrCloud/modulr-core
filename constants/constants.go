@@ -29,12 +29,15 @@ const (
 	WsRouteAcceptAggregatedLeaderFinalization   = "accept_aggregated_leader_finalization_proof"
 	WsRouteGetAggregatedLeaderFinalizationProof = "get_aggregated_leader_finalization_proof"
 	WsRouteSignHeightAttestation                = "sign_height_attestation"
-	WsRouteSignEpochDataAttestation            = "sign_epoch_data_attestation"
-	WsRouteAcceptHeightAttestation             = "accept_height_attestation"
-	WsRouteGetHeightAttestationFromPoD         = "get_height_attestation_from_pod"
-	WsRouteAcceptEpochDataAttestation          = "accept_epoch_data_attestation"
-	WsRouteGetEpochDataAttestationFromPoD      = "get_epoch_data_attestation_from_pod"
+	WsRouteSignEpochDataAttestation             = "sign_epoch_data_attestation"
+	WsRouteAcceptHeightAttestation              = "accept_height_attestation"
+	WsRouteGetHeightAttestationFromPoD          = "get_height_attestation_from_pod"
+	WsRouteAcceptEpochDataAttestation           = "accept_epoch_data_attestation"
+	WsRouteGetEpochDataAttestationFromPoD       = "get_epoch_data_attestation_from_pod"
 	WsRouteGetBlockByHeight                     = "get_block_by_height"
+	WsRouteAcceptAnchorEpochAck                 = "accept_anchor_epoch_ack"
+	WsRouteAcceptAnchorEpochAckOnPoD            = "accept_anchor_epoch_ack_proof"
+	WsRouteGetAnchorEpochAckFromPoD             = "get_anchor_epoch_ack_proof"
 )
 
 // Common DB key fragments/prefixes.
@@ -44,22 +47,23 @@ const (
 	DBKeyGenerationThreadMetadata  = "GENERATION_THREAD_METADATA"
 	DBKeyLatestBatchIndex          = "LATEST_BATCH_INDEX"
 
-	DBKeyPrefixBlockIndex          = "BLOCK_INDEX:"
-	DBKeyPrefixEpochData           = "EPOCH_DATA:"
-	DBKeyPrefixEpochHandler        = "EPOCH_HANDLER:"
-	DBKeyPrefixEpochFinish         = "EPOCH_FINISH:"
-	DBKeyPrefixEpochStats          = "EPOCH_STATS:"
-	DBKeyPrefixTxReceipt           = "TX:"
-	DBKeyPrefixValidatorStorage    = "VALIDATOR_STORAGE:"
-	DBKeyPrefixPodOutbox           = "POD_OUTBOX:"
-	DBKeyPrefixDelayedTransactions = "DELAYED_TRANSACTIONS:"
-	DBKeyPrefixFirstBlockData      = "FIRST_BLOCK_DATA:"
-	DBKeyPrefixHeightAttestation   = "HEIGHT_ATTESTATION:"
-	DBKeyPrefixLastMileHeightMap   = "LAST_MILE_HEIGHT_MAP:"
-	DBKeyPrefixAfp                 = "AFP:"
+	DBKeyPrefixBlockIndex           = "BLOCK_INDEX:"
+	DBKeyPrefixEpochData            = "EPOCH_DATA:"
+	DBKeyPrefixEpochHandler         = "EPOCH_HANDLER:"
+	DBKeyPrefixEpochFinish          = "EPOCH_FINISH:"
+	DBKeyPrefixEpochStats           = "EPOCH_STATS:"
+	DBKeyPrefixTxReceipt            = "TX:"
+	DBKeyPrefixValidatorStorage     = "VALIDATOR_STORAGE:"
+	DBKeyPrefixPodOutbox            = "POD_OUTBOX:"
+	DBKeyPrefixDelayedTransactions  = "DELAYED_TRANSACTIONS:"
+	DBKeyPrefixFirstBlockData       = "FIRST_BLOCK_DATA:"
+	DBKeyPrefixHeightAttestation    = "HEIGHT_ATTESTATION:"
+	DBKeyPrefixLastMileHeightMap    = "LAST_MILE_HEIGHT_MAP:"
+	DBKeyPrefixAfp                  = "AFP:"
 	DBKeyPrefixEpochDataAttestation = "EPOCH_DATA_ATTESTATION:"
 
 	DBKeyPrefixFirstBlockAttestation = "FIRST_BLOCK_ATTESTATION:"
+	DBKeyPrefixAnchorEpochAck        = "ANCHOR_EPOCH_ACK:"
 	DBKeyPrefixAlfp                  = "ALFP:"
 
 	DBKeyAlfpProgress                = "ALFP_PROGRESS"
@@ -70,9 +74,10 @@ const (
 // Signing prefixes (used as salts for cryptographic signatures).
 const (
 	SigningPrefixEpochDataAttestation = "EPOCH_DATA_ATTESTATION"
-	SigningPrefixDelayedOperations  = "SIG_DELAYED_OPERATIONS:"
-	SigningPrefixHeightAttestation  = "HEIGHT_ATTESTATION"
-	SigningPrefixLeaderFinalization = "LEADER_FINALIZATION_PROOF"
+	SigningPrefixDelayedOperations    = "SIG_DELAYED_OPERATIONS:"
+	SigningPrefixHeightAttestation    = "HEIGHT_ATTESTATION"
+	SigningPrefixLeaderFinalization   = "LEADER_FINALIZATION_PROOF"
+	SigningPrefixAnchorEpochAck       = "ANCHOR_EPOCH_ACK"
 )
 
 // Default in-memory cache limits (bounded caches to avoid unbounded growth).

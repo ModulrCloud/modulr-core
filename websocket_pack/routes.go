@@ -2,9 +2,11 @@ package websocket_pack
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
@@ -17,6 +19,8 @@ import (
 
 	"github.com/lxzan/gws"
 )
+
+var httpClient = &http.Client{Timeout: 2 * time.Second}
 
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
@@ -305,8 +309,119 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 
 var heightAttestationVoterMutex sync.Mutex
 
+var (
+	anchorEpochAckMutex      sync.RWMutex
+	anchorEpochAckConfirmed  = make(map[int]bool)
+	anchorAckLastPullAttempt sync.Map
+)
+
+func AcceptAnchorEpochAck(parsedRequest WsAcceptAnchorEpochAckRequest, connection *gws.Conn) {
+	proof := &parsedRequest.Proof
+	if !utils.VerifyAnchorEpochAckProof(proof) {
+		sendNotReady(connection)
+		return
+	}
+
+	persistAnchorEpochAck(proof)
+	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"OK"}`))
+}
+
+func persistAnchorEpochAck(proof *structures.AnchorEpochAckProof) {
+	key := []byte(constants.DBKeyPrefixAnchorEpochAck + strconv.Itoa(proof.EpochId))
+	if raw, err := json.Marshal(proof); err == nil {
+		_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
+	}
+
+	anchorEpochAckMutex.Lock()
+	anchorEpochAckConfirmed[proof.EpochId] = true
+	anchorEpochAckMutex.Unlock()
+}
+
+func isAnchorEpochAckAvailable(epochId int) bool {
+	anchorEpochAckMutex.RLock()
+	if anchorEpochAckConfirmed[epochId] {
+		anchorEpochAckMutex.RUnlock()
+		return true
+	}
+	anchorEpochAckMutex.RUnlock()
+
+	key := []byte(constants.DBKeyPrefixAnchorEpochAck + strconv.Itoa(epochId))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err == nil && len(raw) > 0 {
+		var proof structures.AnchorEpochAckProof
+		if json.Unmarshal(raw, &proof) == nil && utils.VerifyAnchorEpochAckProof(&proof) {
+			anchorEpochAckMutex.Lock()
+			anchorEpochAckConfirmed[epochId] = true
+			anchorEpochAckMutex.Unlock()
+			return true
+		}
+	}
+
+	return tryPullAnchorEpochAck(epochId)
+}
+
+func tryPullAnchorEpochAck(epochId int) bool {
+	now := time.Now()
+	if lastAttempt, ok := anchorAckLastPullAttempt.Load(epochId); ok {
+		if now.Sub(lastAttempt.(time.Time)) < 3*time.Second {
+			return false
+		}
+	}
+	anchorAckLastPullAttempt.Store(epochId, now)
+
+	if proof := GetAnchorEpochAckFromPoD(epochId); proof != nil && utils.VerifyAnchorEpochAckProof(proof) {
+		persistAnchorEpochAck(proof)
+		return true
+	}
+
+	if proof := fetchAnchorEpochAckFromHTTP(epochId); proof != nil && utils.VerifyAnchorEpochAckProof(proof) {
+		persistAnchorEpochAck(proof)
+		return true
+	}
+
+	return false
+}
+
+func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AnchorEpochAckProof {
+	epochHandler := getEpochHandlerForLeaderFinalization(epochId)
+
+	var urls []string
+	if epochHandler != nil {
+		for _, member := range utils.GetQuorumUrlsAndPubkeys(epochHandler) {
+			if member.Url != globals.CONFIGURATION.MyHostname {
+				urls = append(urls, member.Url)
+			}
+		}
+	}
+	urls = append(urls, globals.CONFIGURATION.BootstrapNodes...)
+
+	for _, endpoint := range urls {
+		if endpoint == globals.CONFIGURATION.MyHostname {
+			continue
+		}
+		resp, err := httpClient.Get(endpoint + "/anchor_epoch_ack/" + strconv.Itoa(epochId))
+		if err != nil {
+			continue
+		}
+		var proof structures.AnchorEpochAckProof
+		if json.NewDecoder(resp.Body).Decode(&proof) == nil {
+			resp.Body.Close()
+			return &proof
+		}
+		resp.Body.Close()
+	}
+	return nil
+}
+
 func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		sendNotReady(connection)
+		return
+	}
+
+	// For epoch > 0, require an AnchorEpochAckProof before signing any HeightAttestation.
+	// Check BEFORE acquiring the voter mutex so network fallbacks don't block signing.
+	if parsedRequest.EpochId > 0 && !isAnchorEpochAckAvailable(parsedRequest.EpochId) {
 		sendNotReady(connection)
 		return
 	}

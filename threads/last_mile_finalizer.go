@@ -305,9 +305,24 @@ func LastMileFinalizerThread() {
 						openAnchorConnectionsForLastMile()
 						anchorConnectionsSent = true
 					}
-					deliverEpochDataAttestationToAnchors(epochDataAttestation)
+
+					ackProof := deliverEpochDataAttestationToAnchors(epochDataAttestation)
 					websocket_pack.SendEpochDataAttestationToPoD(*epochDataAttestation)
 					storeEpochDataAttestation(epochDataAttestation)
+
+					if ackProof != nil && utils.VerifyAnchorEpochAckProof(ackProof) {
+						storeAnchorEpochAckProof(ackProof)
+						websocket_pack.SendAnchorEpochAckToPoD(*ackProof)
+
+						nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
+						deliverAnchorEpochAckToNewQuorum(ackProof, nextEpochHandler)
+
+						utils.LogWithTime(
+							fmt.Sprintf("Anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+							utils.DEEP_GREEN_COLOR,
+						)
+					}
+
 					lastRotationEpoch = prevEpochId
 					utils.LogWithTime(
 						fmt.Sprintf("Epoch data attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
@@ -630,7 +645,7 @@ func LoadEpochDataAttestation(epochId int) *structures.EpochDataAttestation {
 	return &attestation
 }
 
-func deliverEpochDataAttestationToAnchors(attestation *structures.EpochDataAttestation) {
+func deliverEpochDataAttestationToAnchors(attestation *structures.EpochDataAttestation) *structures.AnchorEpochAckProof {
 	LAST_MILE_MUTEX.Lock()
 	conns := LAST_MILE_ANCHOR_WS_CONNS
 	LAST_MILE_MUTEX.Unlock()
@@ -644,12 +659,120 @@ func deliverEpochDataAttestationToAnchors(attestation *structures.EpochDataAttes
 	})
 
 	if err != nil {
+		return nil
+	}
+
+	type anchorAck struct {
+		Anchor string
+		Sig    string
+	}
+
+	ackChan := make(chan anchorAck, len(conns))
+	var wg sync.WaitGroup
+
+	for anchorKey, conn := range conns {
+		if conn == nil {
+			continue
+		}
+		wg.Add(1)
+		go func(key string, c *websocket.Conn) {
+			defer wg.Done()
+
+			if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+				return
+			}
+
+			c.SetReadDeadline(time.Now().Add(5 * time.Second))
+			_, respBytes, err := c.ReadMessage()
+			c.SetReadDeadline(time.Time{})
+			if err != nil {
+				return
+			}
+
+			var resp struct {
+				Status    string `json:"status"`
+				Anchor    string `json:"anchor"`
+				Signature string `json:"signature"`
+			}
+			if json.Unmarshal(respBytes, &resp) != nil || resp.Status != "OK" || resp.Signature == "" || resp.Anchor == "" {
+				return
+			}
+
+			ackChan <- anchorAck{Anchor: resp.Anchor, Sig: resp.Signature}
+		}(anchorKey, conn)
+	}
+
+	go func() {
+		wg.Wait()
+		close(ackChan)
+	}()
+
+	proofs := make(map[string]string)
+	for ack := range ackChan {
+		proofs[ack.Anchor] = ack.Sig
+	}
+
+	majority := utils.GetAnchorsQuorumMajority()
+	if len(proofs) < majority {
+		return nil
+	}
+
+	return &structures.AnchorEpochAckProof{
+		EpochId:       attestation.EpochId,
+		NextEpochId:   attestation.NextEpochId,
+		EpochDataHash: attestation.EpochDataHash,
+		Proofs:        proofs,
+	}
+}
+
+func storeAnchorEpochAckProof(proof *structures.AnchorEpochAckProof) {
+	if proof == nil {
+		return
+	}
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAnchorEpochAck, proof.EpochId))
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return
+	}
+	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
+}
+
+func LoadAnchorEpochAckProof(epochId int) *structures.AnchorEpochAckProof {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAnchorEpochAck, epochId))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err != nil {
+		return nil
+	}
+	var proof structures.AnchorEpochAckProof
+	if json.Unmarshal(raw, &proof) != nil {
+		return nil
+	}
+	return &proof
+}
+
+func deliverAnchorEpochAckToNewQuorum(proof *structures.AnchorEpochAckProof, nextEpochHandler *structures.EpochDataHandler) {
+	if proof == nil || nextEpochHandler == nil {
 		return
 	}
 
-	for _, conn := range conns {
-		if conn != nil {
+	message, err := json.Marshal(websocket_pack.WsAcceptAnchorEpochAckRequest{
+		Route: constants.WsRouteAcceptAnchorEpochAck,
+		Proof: *proof,
+	})
+	if err != nil {
+		return
+	}
+
+	quorumUrlsAndPubkeys := utils.GetQuorumUrlsAndPubkeys(nextEpochHandler)
+
+	for _, member := range quorumUrlsAndPubkeys {
+		go func(wsUrl string) {
+			conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
+			if err != nil {
+				return
+			}
+			defer conn.Close()
 			_ = conn.WriteMessage(websocket.TextMessage, message)
-		}
+		}(strings.Replace(member.Url, "http://", "ws://", 1) + "/ws")
 	}
 }

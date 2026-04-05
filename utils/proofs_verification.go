@@ -204,6 +204,40 @@ func VerifyEpochDataAttestation(attestation *structures.EpochDataAttestation, ep
 	return okSignatures >= majority
 }
 
+func VerifyAnchorEpochAckProof(proof *structures.AnchorEpochAckProof) bool {
+	if proof == nil {
+		return false
+	}
+
+	majority := GetAnchorsQuorumMajority()
+
+	anchorMap := make(map[string]bool, len(globals.ANCHORS_PUBKEYS))
+	for _, pk := range globals.ANCHORS_PUBKEYS {
+		anchorMap[pk] = true
+	}
+
+	dataToVerify := strings.Join([]string{
+		constants.SigningPrefixAnchorEpochAck,
+		strconv.Itoa(proof.EpochId),
+		strconv.Itoa(proof.NextEpochId),
+		proof.EpochDataHash,
+	}, ":")
+
+	okSignatures := 0
+	seen := make(map[string]bool)
+
+	for pubKey, signature := range proof.Proofs {
+		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
+			if anchorMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
+			}
+		}
+	}
+
+	return okSignatures >= majority
+}
+
 func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
 	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockID), nil)
 

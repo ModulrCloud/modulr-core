@@ -41,6 +41,43 @@ func (ha HeightAttestation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
+type AnchorEpochAckProof struct {
+	EpochId       int               `json:"epochId"`
+	NextEpochId   int               `json:"nextEpochId"`
+	EpochDataHash string            `json:"epochDataHash"`
+	Proofs        map[string]string `json:"proofs"`
+}
+
+func (a *AnchorEpochAckProof) UnmarshalJSON(data []byte) error {
+	type alias AnchorEpochAckProof
+
+	var aux alias
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if aux.Proofs == nil {
+		aux.Proofs = make(map[string]string)
+	}
+
+	*a = AnchorEpochAckProof(aux)
+
+	return nil
+}
+
+func (a AnchorEpochAckProof) MarshalJSON() ([]byte, error) {
+	type alias AnchorEpochAckProof
+
+	aux := alias(a)
+
+	if aux.Proofs == nil {
+		aux.Proofs = make(map[string]string)
+	}
+
+	return json.Marshal(aux)
+}
+
 type EpochDataAttestation struct {
 	EpochId       int                  `json:"epochId"`
 	NextEpochId   int                  `json:"nextEpochId"`

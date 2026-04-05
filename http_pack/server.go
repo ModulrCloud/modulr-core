@@ -30,6 +30,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/aggregated_finalization_proof/{blockId}", routes.GetAggregatedFinalizationProof)
 	r.GET("/height_attestation/{height}", routes.GetHeightAttestation)
 	r.GET("/first_block_in_epoch/{epochId}", routes.GetFirstBlockInEpoch)
+	r.GET("/anchor_epoch_ack/{epochId}", routes.GetAnchorEpochAck)
 
 	r.GET("/transaction/{hash}", routes.GetTransactionByHash)
 	r.POST("/transaction", routes.AcceptTransaction)

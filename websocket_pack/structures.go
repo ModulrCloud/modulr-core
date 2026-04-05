@@ -144,6 +144,29 @@ type WsEpochDataAttestationGetResponse struct {
 	Attestation *structures.EpochDataAttestation `json:"attestation"`
 }
 
+// Anchor epoch ack (quorum member receives proof that anchors acknowledged epoch transition)
+
+type WsAcceptAnchorEpochAckRequest struct {
+	Route string                         `json:"route"`
+	Proof structures.AnchorEpochAckProof `json:"proof"`
+}
+
+// PoD storage/retrieval for anchor epoch ack proofs
+
+type WsAnchorEpochAckStoreRequest struct {
+	Route string                         `json:"route"`
+	Proof structures.AnchorEpochAckProof `json:"proof"`
+}
+
+type WsAnchorEpochAckGetRequest struct {
+	Route   string `json:"route"`
+	EpochId int    `json:"epochId"`
+}
+
+type WsAnchorEpochAckGetResponse struct {
+	Proof *structures.AnchorEpochAckProof `json:"proof"`
+}
+
 // Combined block + attestation retrieval by absolute height
 
 type WsBlockByHeightRequest struct {
