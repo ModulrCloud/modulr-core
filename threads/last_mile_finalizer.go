@@ -365,7 +365,16 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler)
+		var previousAttestation *structures.HeightAttestation
+		if tracker.NextHeight > 0 {
+			previousAttestation = LoadHeightAttestation(int(tracker.NextHeight - 1))
+			if previousAttestation == nil {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+		}
+
+		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousAttestation)
 
 		if proof != nil {
 			storeHeightAttestation(proof)
@@ -417,16 +426,17 @@ func getBlockHashById(blockId string) string {
 	return ""
 }
 
-func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler, previousAttestation *structures.HeightAttestation) *structures.HeightAttestation {
 	majority := utils.GetQuorumMajority(epochHandler)
 
 	request := websocket_pack.WsHeightAttestationRequest{
-		Route:          constants.WsRouteSignHeightAttestation,
-		AbsoluteHeight: absoluteHeight,
-		BlockId:        blockId,
-		BlockHash:      blockHash,
-		EpochId:        epochId,
-		HeightInEpoch:  heightInEpoch,
+		Route:                     constants.WsRouteSignHeightAttestation,
+		AbsoluteHeight:            absoluteHeight,
+		BlockId:                   blockId,
+		BlockHash:                 blockHash,
+		EpochId:                   epochId,
+		HeightInEpoch:             heightInEpoch,
+		PreviousHeightAttestation: previousAttestation,
 	}
 
 	message, err := json.Marshal(request)
@@ -626,7 +636,7 @@ func deliverEpochDataAttestationToAnchors(attestation *structures.EpochDataAttes
 	LAST_MILE_MUTEX.Unlock()
 
 	message, err := json.Marshal(struct {
-		Route       string                            `json:"route"`
+		Route       string                          `json:"route"`
 		Attestation structures.EpochDataAttestation `json:"attestation"`
 	}{
 		Route:       "accept_epoch_data_attestation",

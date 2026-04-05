@@ -84,12 +84,13 @@ type WsAggregatedLeaderFinalizationProofResponse struct {
 // Height attestation (quorum member signs height->block mapping)
 
 type WsHeightAttestationRequest struct {
-	Route          string `json:"route"`
-	AbsoluteHeight int    `json:"absoluteHeight"`
-	BlockId        string `json:"blockId"`
-	BlockHash      string `json:"blockHash"`
-	EpochId        int    `json:"epochId"`
-	HeightInEpoch  int    `json:"heightInEpoch"`
+	Route                     string                        `json:"route"`
+	AbsoluteHeight            int                           `json:"absoluteHeight"`
+	BlockId                   string                        `json:"blockId"`
+	BlockHash                 string                        `json:"blockHash"`
+	EpochId                   int                           `json:"epochId"`
+	HeightInEpoch             int                           `json:"heightInEpoch"`
+	PreviousHeightAttestation *structures.HeightAttestation `json:"previousHeightAttestation,omitempty"`
 }
 
 type WsHeightAttestationResponse struct {
@@ -130,7 +131,7 @@ type WsEpochDataAttestationResponse struct {
 // PoD storage/retrieval for epoch data attestations
 
 type WsEpochDataAttestationStoreRequest struct {
-	Route       string                            `json:"route"`
+	Route       string                          `json:"route"`
 	Attestation structures.EpochDataAttestation `json:"attestation"`
 }
 

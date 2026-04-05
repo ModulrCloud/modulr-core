@@ -314,6 +314,21 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	heightAttestationVoterMutex.Lock()
 	defer heightAttestationVoterMutex.Unlock()
 
+	// Verify the chain: for height > 0 a valid previous HeightAttestation must be provided
+	if parsedRequest.AbsoluteHeight > 0 {
+		prev := parsedRequest.PreviousHeightAttestation
+		if prev == nil || prev.AbsoluteHeight != parsedRequest.AbsoluteHeight-1 {
+			sendNotReady(connection)
+			return
+		}
+
+		prevEpochHandler := getEpochHandlerForLeaderFinalization(prev.EpochId)
+		if prevEpochHandler == nil || !utils.VerifyHeightAttestation(prev, prevEpochHandler) {
+			sendNotReady(connection)
+			return
+		}
+	}
+
 	state := utils.LoadLastMileSequenceState(constants.DBKeyHeightAttestationVoterState)
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
