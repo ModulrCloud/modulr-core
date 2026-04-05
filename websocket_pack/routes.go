@@ -2,7 +2,6 @@ package websocket_pack
 
 import (
 	"encoding/json"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -413,57 +412,59 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 }
 
-func SignQuorumRotation(parsedRequest WsQuorumRotationRequest, connection *gws.Conn) {
+func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		sendNotReady(connection)
 		return
 	}
 
 	epochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.EpochId)
-
 	if epochHandler == nil {
 		return
 	}
 
-	nextEpochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.NextEpochId)
-
-	if nextEpochHandler == nil {
+	localEpochData := loadLocalNextEpochData(parsedRequest.NextEpochId)
+	if localEpochData == nil {
 		return
 	}
 
-	if nextEpochHandler.Hash != parsedRequest.NextEpochHash {
+	localHash := utils.ComputeEpochDataHash(localEpochData)
+	if localHash != parsedRequest.EpochDataHash {
 		return
 	}
 
-	sortedQuorum := make([]string, len(nextEpochHandler.Quorum))
-	copy(sortedQuorum, nextEpochHandler.Quorum)
-	sort.Strings(sortedQuorum)
+	dataToSign := strings.Join([]string{
+		constants.SigningPrefixEpochDataAttestation,
+		strconv.Itoa(parsedRequest.EpochId),
+		strconv.Itoa(parsedRequest.NextEpochId),
+		parsedRequest.EpochDataHash,
+	}, ":")
 
-	expectedSorted := make([]string, len(parsedRequest.NextQuorum))
-	copy(expectedSorted, parsedRequest.NextQuorum)
-	sort.Strings(expectedSorted)
-
-	if len(sortedQuorum) != len(expectedSorted) {
-		return
-	}
-	for i := range sortedQuorum {
-		if sortedQuorum[i] != expectedSorted[i] {
-			return
-		}
-	}
-
-	dataToSign := constants.SigningPrefixQuorumRotation + strconv.Itoa(parsedRequest.EpochId) + ":" + strconv.Itoa(parsedRequest.NextEpochId) + ":" + parsedRequest.NextEpochHash + ":" + strings.Join(sortedQuorum, ",")
-
-	response := WsQuorumRotationResponse{
+	response := WsEpochDataAttestationResponse{
 		Voter: globals.CONFIGURATION.PublicKey,
 		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataToSign),
 	}
 
 	jsonResponse, err := json.Marshal(response)
-
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
 	}
+}
+
+func loadLocalNextEpochData(nextEpochId int) *structures.NextEpochDataHandler {
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(
+		[]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), nil,
+	)
+	if err != nil {
+		return nil
+	}
+
+	var data structures.NextEpochDataHandler
+	if json.Unmarshal(raw, &data) != nil {
+		return nil
+	}
+
+	return &data
 }
 
 func snapshotAlignmentDataForHeightVoter() map[string]structures.ExecutionStats {

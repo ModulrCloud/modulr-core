@@ -113,35 +113,34 @@ type WsHeightAttestationGetResponse struct {
 	Proof *structures.HeightAttestation `json:"proof"`
 }
 
-// Quorum rotation (quorum member signs next-epoch quorum)
+// Epoch data attestation (quorum member signs next-epoch data hash)
 
-type WsQuorumRotationRequest struct {
-	Route         string   `json:"route"`
-	EpochId       int      `json:"epochId"`
-	NextEpochId   int      `json:"nextEpochId"`
-	NextEpochHash string   `json:"nextEpochHash"`
-	NextQuorum    []string `json:"nextQuorum"`
+type WsEpochDataAttestationRequest struct {
+	Route         string `json:"route"`
+	EpochId       int    `json:"epochId"`
+	NextEpochId   int    `json:"nextEpochId"`
+	EpochDataHash string `json:"epochDataHash"`
 }
 
-type WsQuorumRotationResponse struct {
+type WsEpochDataAttestationResponse struct {
 	Voter string `json:"voter"`
 	Sig   string `json:"sig"`
 }
 
-// PoD storage/retrieval for quorum rotation attestations
+// PoD storage/retrieval for epoch data attestations
 
-type WsQuorumRotationAttestationStoreRequest struct {
-	Route       string                               `json:"route"`
-	Attestation structures.QuorumRotationAttestation `json:"attestation"`
+type WsEpochDataAttestationStoreRequest struct {
+	Route       string                            `json:"route"`
+	Attestation structures.EpochDataAttestation `json:"attestation"`
 }
 
-type WsQuorumRotationAttestationGetRequest struct {
+type WsEpochDataAttestationGetRequest struct {
 	Route   string `json:"route"`
 	EpochId int    `json:"epochId"`
 }
 
-type WsQuorumRotationAttestationGetResponse struct {
-	Attestation *structures.QuorumRotationAttestation `json:"attestation"`
+type WsEpochDataAttestationGetResponse struct {
+	Attestation *structures.EpochDataAttestation `json:"attestation"`
 }
 
 // Combined block + attestation retrieval by absolute height

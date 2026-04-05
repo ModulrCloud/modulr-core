@@ -1,4 +1,4 @@
-// Thread for collecting height attestations from quorum and delivering quorum rotation attestations to anchors
+// Thread for collecting height attestations and epoch data attestations from quorum
 package threads
 
 import (
@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -285,8 +284,8 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		// On epoch change, collect QuorumRotationAttestation from *previous* epoch's quorum
-		// and deliver to anchors. Must happen before opening connections to the new quorum.
+		// On epoch change, collect EpochDataAttestation from *previous* epoch's quorum
+		// and deliver to anchors + PoD. Must happen before opening connections to the new quorum.
 		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
 			prevEpochId := epochSnapshot.Id - 1
 			prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
@@ -294,23 +293,24 @@ func LastMileFinalizerThread() {
 			if prevEpochHandler != nil {
 				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
 
-				rotationAttestation := tryCollectQuorumRotationWithConns(
-					prevEpochId, epochSnapshot.Id, epochSnapshot.Hash, epochSnapshot.Quorum,
+				epochDataAttestation := tryCollectEpochDataAttestationWithConns(
+					prevEpochId, epochSnapshot.Id,
 					prevEpochHandler, tmpConns, tmpWaiter,
 				)
 
 				closeTemporaryQuorumConnections(tmpConns)
 
-				if rotationAttestation != nil {
+				if epochDataAttestation != nil {
 					if !anchorConnectionsSent {
 						openAnchorConnectionsForLastMile()
 						anchorConnectionsSent = true
 					}
-					deliverQuorumRotationToAnchors(rotationAttestation)
-					websocket_pack.SendQuorumRotationAttestationToPoD(*rotationAttestation)
+					deliverEpochDataAttestationToAnchors(epochDataAttestation)
+					websocket_pack.SendEpochDataAttestationToPoD(*epochDataAttestation)
+					storeEpochDataAttestation(epochDataAttestation)
 					lastRotationEpoch = prevEpochId
 					utils.LogWithTime(
-						fmt.Sprintf("Quorum rotation attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+						fmt.Sprintf("Epoch data attestation sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
 						utils.DEEP_GREEN_COLOR,
 					)
 				}
@@ -506,27 +506,32 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	}
 }
 
-func tryCollectQuorumRotationWithConns(
-	epochId, nextEpochId int, nextEpochHash string, nextQuorum []string,
+func tryCollectEpochDataAttestationWithConns(
+	epochId, nextEpochId int,
 	prevEpochHandler *structures.EpochDataHandler,
 	wsConns map[string]*websocket.Conn, waiter *utils.QuorumWaiter,
-) *structures.QuorumRotationAttestation {
+) *structures.EpochDataAttestation {
 	if prevEpochHandler == nil || waiter == nil {
+		return nil
+	}
+
+	localEpochData := loadLocalNextEpochData(nextEpochId)
+	if localEpochData == nil {
+		return nil
+	}
+
+	epochDataHash := utils.ComputeEpochDataHash(localEpochData)
+	if epochDataHash == "" {
 		return nil
 	}
 
 	majority := utils.GetQuorumMajority(prevEpochHandler)
 
-	sortedQuorum := make([]string, len(nextQuorum))
-	copy(sortedQuorum, nextQuorum)
-	sort.Strings(sortedQuorum)
-
-	request := websocket_pack.WsQuorumRotationRequest{
-		Route:         constants.WsRouteSignQuorumRotation,
+	request := websocket_pack.WsEpochDataAttestationRequest{
+		Route:         constants.WsRouteSignEpochDataAttestation,
 		EpochId:       epochId,
 		NextEpochId:   nextEpochId,
-		NextEpochHash: nextEpochHash,
-		NextQuorum:    nextQuorum,
+		EpochDataHash: epochDataHash,
 	}
 
 	message, err := json.Marshal(request)
@@ -537,32 +542,32 @@ func tryCollectQuorumRotationWithConns(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	dataToVerify := constants.SigningPrefixQuorumRotation + strconv.Itoa(epochId) + ":" + strconv.Itoa(nextEpochId) + ":" + nextEpochHash + ":" + strings.Join(sortedQuorum, ",")
+	dataToVerify := strings.Join([]string{
+		constants.SigningPrefixEpochDataAttestation,
+		strconv.Itoa(epochId),
+		strconv.Itoa(nextEpochId),
+		epochDataHash,
+	}, ":")
 
 	validateProof := func(id string, raw []byte) bool {
-		var response websocket_pack.WsQuorumRotationResponse
-
+		var response websocket_pack.WsEpochDataAttestationResponse
 		if json.Unmarshal(raw, &response) != nil {
 			return false
 		}
-
 		if !slices.Contains(prevEpochHandler.Quorum, response.Voter) {
 			return false
 		}
-
 		return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
 	}
 
 	responses, ok := waiter.SendAndWaitValidated(ctx, message, prevEpochHandler.Quorum, wsConns, majority, validateProof)
-
 	if !ok {
 		return nil
 	}
 
 	proofs := make(map[string]string)
-
 	for _, raw := range responses {
-		var response websocket_pack.WsQuorumRotationResponse
+		var response websocket_pack.WsEpochDataAttestationResponse
 		if json.Unmarshal(raw, &response) == nil {
 			proofs[response.Voter] = response.Sig
 		}
@@ -572,25 +577,59 @@ func tryCollectQuorumRotationWithConns(
 		return nil
 	}
 
-	return &structures.QuorumRotationAttestation{
+	return &structures.EpochDataAttestation{
 		EpochId:       epochId,
 		NextEpochId:   nextEpochId,
-		NextEpochHash: nextEpochHash,
-		NextQuorum:    nextQuorum,
+		EpochData:     *localEpochData,
+		EpochDataHash: epochDataHash,
 		Proofs:        proofs,
 	}
 }
 
-func deliverQuorumRotationToAnchors(attestation *structures.QuorumRotationAttestation) {
+func loadLocalNextEpochData(nextEpochId int) *structures.NextEpochDataHandler {
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(
+		[]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), nil,
+	)
+	if err != nil {
+		return nil
+	}
+	var data structures.NextEpochDataHandler
+	if json.Unmarshal(raw, &data) != nil {
+		return nil
+	}
+	return &data
+}
+
+func storeEpochDataAttestation(attestation *structures.EpochDataAttestation) {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixEpochDataAttestation, attestation.EpochId))
+	if value, err := json.Marshal(attestation); err == nil {
+		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+	}
+}
+
+func LoadEpochDataAttestation(epochId int) *structures.EpochDataAttestation {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixEpochDataAttestation, epochId))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err != nil {
+		return nil
+	}
+	var attestation structures.EpochDataAttestation
+	if json.Unmarshal(raw, &attestation) != nil {
+		return nil
+	}
+	return &attestation
+}
+
+func deliverEpochDataAttestationToAnchors(attestation *structures.EpochDataAttestation) {
 	LAST_MILE_MUTEX.Lock()
 	conns := LAST_MILE_ANCHOR_WS_CONNS
 	LAST_MILE_MUTEX.Unlock()
 
 	message, err := json.Marshal(struct {
-		Route       string                               `json:"route"`
-		Attestation structures.QuorumRotationAttestation `json:"attestation"`
+		Route       string                            `json:"route"`
+		Attestation structures.EpochDataAttestation `json:"attestation"`
 	}{
-		Route:       "accept_quorum_rotation",
+		Route:       "accept_epoch_data_attestation",
 		Attestation: *attestation,
 	})
 

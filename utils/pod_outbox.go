@@ -92,6 +92,6 @@ func PoDOutboxIdForHeightAttestation(absoluteHeight int) string {
 	return fmt.Sprintf(constants.DBKeyPrefixHeightAttestation+"%d", absoluteHeight)
 }
 
-func PoDOutboxIdForQuorumRotation(epochId int) string {
-	return fmt.Sprintf(constants.DBKeyPrefixQuorumRotation+"%d", epochId)
+func PoDOutboxIdForEpochDataAttestation(epochId int) string {
+	return fmt.Sprintf(constants.DBKeyPrefixEpochDataAttestation+"%d", epochId)
 }

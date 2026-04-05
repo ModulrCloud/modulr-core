@@ -58,7 +58,7 @@ Ephemeral per-epoch data: AFPs and epoch-finish signals.
 |-----|-------|-----------|-------|
 | `AFP:{blockId}` | `AggregatedFinalizationProof` JSON | `share_block_and_grab_proofs.go`, `websocket_pack/routes.go` | AFP for a specific block |
 | `EPOCH_FINISH:{epochId}` | `"TRUE"` string | `epoch_rotation.go` | Signal that epoch has rotated (stops AFP/ALFP production) |
-| `EPOCH_DATA:{epochId}` | `NextEpochDataHandler` JSON | `epoch_rotation.go` | Next epoch data (quorum, leaders, delayed txs) — read by ET during epoch transition |
+| `EPOCH_DATA:{epochId}` | `NextEpochDataHandler` JSON | `epoch_rotation.go` | Next epoch data (quorum, leaders, delayed txs) — used for EpochDataAttestation signing |
 
 **Recovery**: Wiped entirely. AFPs are available from PoD and quorum nodes. Epoch rotation data is rebuilt from fresh genesis.
 
@@ -72,7 +72,7 @@ Approvement thread state, epoch snapshots, validator storage (AT copy), and help
 |-----|-------|-----------|-------|
 | `AT` | `ApprovementThreadMetadataHandler` JSON | `epoch_rotation.go`, `leader_rotation.go`, `entrypoint.go` | Full approvement thread metadata |
 | `EPOCH_HANDLER:{epochId}` | `EpochDataSnapshot` JSON | `epoch_rotation.go`, `entrypoint.go` | Epoch snapshot (handler + network params) — used by API, finalization, dashboard |
-| `EPOCH_DATA:{epochId}` | `NextEpochDataHandler` JSON | `epoch_rotation.go` | Same as in EPOCH_DATA db — pre-computed next epoch info for ET |
+| `EPOCH_DATA:{epochId}` | `NextEpochDataHandler` JSON | `epoch_rotation.go` | Pre-computed next epoch info — used for EpochDataAttestation signing and verification |
 | `VALIDATOR_STORAGE:{pubkey}` | Validator JSON | `epoch_rotation.go` (via batch), `db_interaction.go` | Validator data — AT copy (may differ from ET copy during epoch) |
 | `LATEST_BATCH_INDEX` | 8-byte BigEndian int64 | `epoch_rotation.go` | Monotonic batch counter for delayed tx ordering |
 | `FIRST_BLOCK_DATA:{epochId}` | `FirstBlockData` JSON | `first_block_in_epoch_monitor.go` | First block hash/timestamp per epoch (used to derive next epoch hash) |
@@ -94,6 +94,7 @@ All voting/finalization-related data: proofs grabber state, ALFPs, height attest
 | `ALFP_WATCHER_STATE:{epochId}` | `AlfpWatcherState` JSON | `alfp_inclusion_watcher.go` | Tracks ALFP → anchor block inclusion progress |
 | `ALFP_INCLUDED:{epochId}:{leader}:{index}` | `AlfpInclusionMarker` JSON | `alfp_inclusion.go` | Marks that a specific ALFP was included in an anchor block |
 | `HEIGHT_ATTESTATION:{height}` | `HeightAttestation` JSON | `last_mile_finalizer.go`, `block_execution.go` | Quorum-signed height → blockId mapping proof |
+| `EPOCH_DATA_ATTESTATION:{epochId}` | `EpochDataAttestation` JSON | `last_mile_finalizer.go`, `block_execution.go` | Quorum-signed next epoch data — ET uses this for cryptographic epoch transition verification |
 | `HEIGHT_ATTESTATION_VOTER_STATE` | JSON state | `last_mile_finalizer.go` | Tracks which heights have been voted on |
 | `LAST_MILE_FINALIZER_TRACKER` | `LastMileSequenceState` JSON | `last_mile_sequence.go` | Tracks the last mile finalizer's progress (NextHeight, LastBlocksByLeaders) |
 | `LAST_MILE_HEIGHT_MAP:{height}` | `blockId` string | `last_mile_sequence.go` | Pre-computed height → blockId mapping (from sequence alignment) |

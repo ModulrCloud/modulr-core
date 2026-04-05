@@ -157,6 +157,53 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 	return okSignatures >= majority
 }
 
+func ComputeEpochDataHash(data *structures.NextEpochDataHandler) string {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return ""
+	}
+	return Blake3(string(raw))
+}
+
+func VerifyEpochDataAttestation(attestation *structures.EpochDataAttestation, epochHandler *structures.EpochDataHandler) bool {
+	if attestation == nil || epochHandler == nil {
+		return false
+	}
+
+	recomputedHash := ComputeEpochDataHash(&attestation.EpochData)
+	if recomputedHash == "" || recomputedHash != attestation.EpochDataHash {
+		return false
+	}
+
+	majority := GetQuorumMajority(epochHandler)
+
+	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
+	for _, pk := range epochHandler.Quorum {
+		quorumMap[pk] = true
+	}
+
+	dataToVerify := strings.Join([]string{
+		constants.SigningPrefixEpochDataAttestation,
+		strconv.Itoa(attestation.EpochId),
+		strconv.Itoa(attestation.NextEpochId),
+		attestation.EpochDataHash,
+	}, ":")
+
+	okSignatures := 0
+	seen := make(map[string]bool)
+
+	for pubKey, signature := range attestation.Proofs {
+		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
+			if quorumMap[pubKey] && !seen[pubKey] {
+				seen[pubKey] = true
+				okSignatures++
+			}
+		}
+	}
+
+	return okSignatures >= majority
+}
+
 func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
 	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockID), nil)
 

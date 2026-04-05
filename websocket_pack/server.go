@@ -83,16 +83,13 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		SignHeightAttestation(req, connection)
 
-	case constants.WsRouteSignQuorumRotation:
-
-		var req WsQuorumRotationRequest
-
+	case constants.WsRouteSignEpochDataAttestation:
+		var req WsEpochDataAttestationRequest
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
-			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_quorum_rotation_request"}`))
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_epoch_data_attestation_request"}`))
 			return
 		}
-
-		SignQuorumRotation(req, connection)
+		SignEpochDataAttestation(req, connection)
 
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))

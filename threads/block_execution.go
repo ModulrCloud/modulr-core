@@ -69,8 +69,20 @@ func BlockExecutionThread() {
 		}
 
 		if attestation.EpochId > currentEpochId {
+			epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochId)
+			if epochDataAtt == nil {
+				utils.LogWithTimeThrottled(
+					"exec:epoch_data_attestation_wait",
+					5*time.Second,
+					fmt.Sprintf("EXECUTION: waiting for verified epoch data attestation for epoch %d", currentEpochId),
+					utils.YELLOW_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
-			setupNextEpoch(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler)
+			setupNextEpochFromAttestation(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler, &epochDataAtt.EpochData)
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
@@ -182,6 +194,29 @@ func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttest
 	if httpProof != nil {
 		storeHeightAttestation(httpProof)
 		return httpProof
+	}
+
+	return nil
+}
+
+// fetchVerifiedEpochDataAttestation fetches and verifies an EpochDataAttestation for the
+// current epoch (signed by epoch N's quorum, containing data for epoch N+1).
+// Checks local DB first, then PoD.
+func fetchVerifiedEpochDataAttestation(currentEpochId int) *structures.EpochDataAttestation {
+	epochHandler := getEpochHandlerForTracker(currentEpochId)
+	if epochHandler == nil {
+		return nil
+	}
+
+	local := LoadEpochDataAttestation(currentEpochId)
+	if local != nil && utils.VerifyEpochDataAttestation(local, epochHandler) {
+		return local
+	}
+
+	fromPoD := websocket_pack.GetEpochDataAttestationFromPoD(currentEpochId)
+	if fromPoD != nil && utils.VerifyEpochDataAttestation(fromPoD, epochHandler) {
+		storeEpochDataAttestation(fromPoD)
+		return fromPoD
 	}
 
 	return nil
@@ -790,20 +825,9 @@ func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochI
 	return nil
 }
 
-func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
+func setupNextEpochFromAttestation(epochHandler *structures.EpochDataHandler, nextEpochData *structures.NextEpochDataHandler) {
 	currentEpochIndex := epochHandler.Id
-
 	nextEpochIndex := currentEpochIndex + 1
-
-	var nextEpochData *structures.NextEpochDataHandler
-
-	// Take from DB
-
-	rawHandler, dbErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochIndex)), nil)
-
-	if dbErr == nil {
-		json.Unmarshal(rawHandler, &nextEpochData)
-	}
 
 	if nextEpochData != nil {
 		// Reset touched sets before executing delayed txs for next epoch so we only persist what they touch.
