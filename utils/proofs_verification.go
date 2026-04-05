@@ -139,6 +139,7 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 		proof.BlockId,
 		proof.BlockHash,
 		strconv.Itoa(proof.EpochId),
+		strconv.Itoa(proof.HeightInEpoch),
 	}, ":")
 
 	okSignatures := 0
@@ -394,11 +395,85 @@ func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *st
 		close(resultChan)
 	}()
 
-	for res := range resultChan {
-		if res != nil {
-			return res
-		}
+	select {
+	case res := <-resultChan:
+		return res
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+// GetFirstBlockAttestationFromQuorum fetches the HeightAttestation with HeightInEpoch==0
+// for the given epoch from any quorum member via GET /first_block_in_epoch/{epochId}.
+// Verifies the response cryptographically (majority signature + HeightInEpoch == 0).
+func GetFirstBlockAttestationFromQuorum(epochId int) *structures.HeightAttestation {
+	epochHandler := getEpochHandlerForFirstBlockSearch(epochId)
+	if epochHandler == nil {
+		return nil
 	}
 
+	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
+	allNodes := make([]string, 0, len(quorum)+len(globals.CONFIGURATION.BootstrapNodes))
+	for _, node := range quorum {
+		allNodes = append(allNodes, node.Url)
+	}
+	allNodes = append(allNodes, globals.CONFIGURATION.BootstrapNodes...)
+
+	resultChan := make(chan *structures.HeightAttestation, len(allNodes))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	for _, endpoint := range allNodes {
+		if endpoint == globals.CONFIGURATION.MyHostname {
+			continue
+		}
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+
+			req, err := http.NewRequestWithContext(ctx, "GET", url+"/first_block_in_epoch/"+strconv.Itoa(epochId), nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			var proof structures.HeightAttestation
+			if json.NewDecoder(resp.Body).Decode(&proof) == nil &&
+				proof.EpochId == epochId &&
+				proof.HeightInEpoch == 0 &&
+				VerifyHeightAttestation(&proof, epochHandler) {
+				select {
+				case resultChan <- &proof:
+					cancel()
+				default:
+				}
+			}
+		}(endpoint)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res
+	case <-ctx.Done():
+		return nil
+	}
+}
+
+func getEpochHandlerForFirstBlockSearch(epochId int) *structures.EpochDataHandler {
+	if snapshot := GetEpochSnapshot(epochId); snapshot != nil {
+		return &snapshot.EpochDataHandler
+	}
 	return nil
 }

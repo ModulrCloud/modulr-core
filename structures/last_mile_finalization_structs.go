@@ -7,6 +7,7 @@ type HeightAttestation struct {
 	BlockId        string            `json:"blockId"`
 	BlockHash      string            `json:"blockHash"`
 	EpochId        int               `json:"epochId"`
+	HeightInEpoch  int               `json:"heightInEpoch"`
 	Proofs         map[string]string `json:"proofs"`
 }
 

@@ -59,7 +59,8 @@ const (
 	DBKeyPrefixAfp                 = "AFP:"
 	DBKeyPrefixQuorumRotation      = "QUORUM_ROTATION:"
 
-	DBKeyPrefixAlfp = "ALFP:"
+	DBKeyPrefixFirstBlockAttestation = "FIRST_BLOCK_ATTESTATION:"
+	DBKeyPrefixAlfp                  = "ALFP:"
 
 	DBKeyAlfpProgress                = "ALFP_PROGRESS"
 	DBKeyHeightAttestationVoterState = "HEIGHT_ATTESTATION_VOTER_STATE"

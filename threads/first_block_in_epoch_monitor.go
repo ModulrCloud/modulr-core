@@ -1,14 +1,24 @@
-// Thread to monitor and cache the first block of each epoch
-// From this block we'll retrieve the delayed transactions and execute them on the end of epoch
+// Thread to monitor and cache the first block of each epoch.
+// Reads epoch data from APPROVEMENT_THREAD to maintain unidirectional dependency (ET depends on AT, not vice versa).
+//
+// For quorum nodes: the first block attestation (HeightInEpoch == 0) is stored locally
+// by LastMileFinalizerThread when it collects the HeightAttestation.
+//
+// For non-quorum nodes: this thread fetches the signed HeightAttestation with HeightInEpoch == 0
+// from quorum members via HTTP GET /first_block_in_epoch/{epochId}, verifies its Proofs
+// (majority signature), and extracts FirstBlockData from the BlockId field.
 package threads
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/handlers"
+	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/utils"
 )
 
@@ -17,16 +27,15 @@ func FirstBlockInEpochMonitorThread() {
 	var cachedFirstBlockData *FirstBlockData
 
 	for {
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-		currentEpoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+		currentEpoch := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.Id
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 		if currentEpoch != epochUnderObservation {
 			epochUnderObservation = currentEpoch
 			cachedFirstBlockData = nil
 		}
 
-		// Only cache non-nil results; keep checking until found
 		if cachedFirstBlockData == nil {
 			cachedFirstBlockData = getFirstBlockDataFromDB(epochUnderObservation)
 		}
@@ -36,10 +45,28 @@ func FirstBlockInEpochMonitorThread() {
 			continue
 		}
 
+		attestation := fetchFirstBlockAttestationForEpoch(epochUnderObservation)
+
+		if attestation != nil {
+			data := extractFirstBlockData(attestation)
+			if data != nil {
+				_ = storeDataAboutFirstBlockInEpoch(epochUnderObservation, data)
+				storeFirstBlockAttestation(attestation)
+				cachedFirstBlockData = data
+				utils.LogWithTime(
+					fmt.Sprintf("FirstBlockMonitor: first core block for epoch %d found => creator=%s, hash=%s...",
+						epochUnderObservation, data.FirstBlockCreator, utils.ShortHash(data.FirstBlockHash)),
+					utils.GREEN_COLOR,
+				)
+				continue
+			}
+		}
+
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("first_block_monitor:missing:%d", epochUnderObservation),
 			5*time.Second,
-			fmt.Sprintf("FirstBlockMonitor: waiting for first core block for epoch %d (height attestation voting)", epochUnderObservation),
+			fmt.Sprintf("FirstBlockMonitor: waiting for first core block attestation for epoch %d",
+				epochUnderObservation),
 			utils.YELLOW_COLOR,
 		)
 
@@ -47,12 +74,53 @@ func FirstBlockInEpochMonitorThread() {
 	}
 }
 
+// fetchFirstBlockAttestationForEpoch tries local DB first, then quorum HTTP.
+func fetchFirstBlockAttestationForEpoch(epochId int) *structures.HeightAttestation {
+	if local := loadFirstBlockAttestation(epochId); local != nil {
+		epochHandler := getEpochHandlerForTracker(local.EpochId)
+		if epochHandler != nil && local.HeightInEpoch == 0 && utils.VerifyHeightAttestation(local, epochHandler) {
+			return local
+		}
+	}
+
+	return utils.GetFirstBlockAttestationFromQuorum(epochId)
+}
+
+func extractFirstBlockData(attestation *structures.HeightAttestation) *FirstBlockData {
+	parts := strings.Split(attestation.BlockId, ":")
+	if len(parts) != 3 {
+		return nil
+	}
+	return &FirstBlockData{
+		FirstBlockCreator: parts[1],
+		FirstBlockHash:    attestation.BlockHash,
+	}
+}
+
 func storeDataAboutFirstBlockInEpoch(epochIndex int, data *FirstBlockData) error {
 	raw, err := json.Marshal(data)
-
 	if err != nil {
 		return err
 	}
-
 	return databases.APPROVEMENT_THREAD_METADATA.Put(firstBlockDataKey(epochIndex), raw, nil)
+}
+
+func storeFirstBlockAttestation(proof *structures.HeightAttestation) {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, proof.EpochId))
+	if value, err := json.Marshal(proof); err == nil {
+		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+	}
+}
+
+func loadFirstBlockAttestation(epochId int) *structures.HeightAttestation {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, epochId))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err != nil {
+		return nil
+	}
+	var proof structures.HeightAttestation
+	if json.Unmarshal(raw, &proof) != nil {
+		return nil
+	}
+	return &proof
 }

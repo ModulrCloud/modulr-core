@@ -365,26 +365,25 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, epochHandler)
+		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler)
 
 		if proof != nil {
 			storeHeightAttestation(proof)
 
-			if proof.EpochId != lastFirstBlockEpochId {
-				if getFirstBlockDataFromDB(proof.EpochId) == nil {
-					parts := strings.Split(blockId, ":")
-					if len(parts) == 3 {
-						_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
-							FirstBlockCreator: parts[1],
-							FirstBlockHash:    blockHash,
-						})
-						utils.LogWithTime(
-							fmt.Sprintf("First core block in epoch %d detected: creator=%s, hash=%s...", proof.EpochId, parts[1], utils.ShortHash(blockHash)),
-							utils.GREEN_COLOR,
-						)
-					}
+			if proof.HeightInEpoch == 0 && proof.EpochId != lastFirstBlockEpochId {
+				storeFirstBlockAttestation(proof)
+				parts := strings.Split(blockId, ":")
+				if len(parts) == 3 {
+					_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
+						FirstBlockCreator: parts[1],
+						FirstBlockHash:    blockHash,
+					})
 				}
 				lastFirstBlockEpochId = proof.EpochId
+				utils.LogWithTime(
+					fmt.Sprintf("First core block in epoch %d detected (HeightInEpoch=0): creator=%s, hash=%s...", proof.EpochId, parts[1], utils.ShortHash(blockHash)),
+					utils.GREEN_COLOR,
+				)
 			}
 
 			tracker.Advance()
@@ -418,7 +417,7 @@ func getBlockHashById(blockId string) string {
 	return ""
 }
 
-func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
 	majority := utils.GetQuorumMajority(epochHandler)
 
 	request := websocket_pack.WsHeightAttestationRequest{
@@ -427,6 +426,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 		BlockId:        blockId,
 		BlockHash:      blockHash,
 		EpochId:        epochId,
+		HeightInEpoch:  heightInEpoch,
 	}
 
 	message, err := json.Marshal(request)
@@ -464,6 +464,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 			blockId,
 			blockHash,
 			strconv.Itoa(epochId),
+			strconv.Itoa(heightInEpoch),
 		}, ":")
 
 		return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
@@ -500,6 +501,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 		BlockId:        blockId,
 		BlockHash:      blockHash,
 		EpochId:        epochId,
+		HeightInEpoch:  heightInEpoch,
 		Proofs:         proofs,
 	}
 }

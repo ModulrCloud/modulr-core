@@ -10,10 +10,11 @@ import (
 )
 
 type LastMileSequenceState struct {
-	EpochId     int   `json:"epochId"`
-	LeaderIndex int   `json:"leaderIndex"`
-	BlockIndex  int   `json:"blockIndex"`
-	NextHeight  int64 `json:"nextHeight"`
+	EpochId       int   `json:"epochId"`
+	LeaderIndex   int   `json:"leaderIndex"`
+	BlockIndex    int   `json:"blockIndex"`
+	NextHeight    int64 `json:"nextHeight"`
+	HeightInEpoch int   `json:"heightInEpoch"`
 }
 
 // CurrentBlockId returns the blockId at the current tracker position.
@@ -77,6 +78,7 @@ func (s *LastMileSequenceState) AllLeadersDone(leadersSequence []string) bool {
 func (s *LastMileSequenceState) Advance() {
 	s.BlockIndex++
 	s.NextHeight++
+	s.HeightInEpoch++
 }
 
 // AdvanceToNextEpoch resets the tracker for the next epoch.
@@ -84,6 +86,7 @@ func (s *LastMileSequenceState) AdvanceToNextEpoch() {
 	s.EpochId++
 	s.LeaderIndex = 0
 	s.BlockIndex = 0
+	s.HeightInEpoch = 0
 }
 
 // HasLocalVerifiedAfp checks if a verified AFP for the given blockId exists in local EPOCH_DATA DB.
@@ -139,4 +142,24 @@ func LoadHeightBlockIdMapping(height int64) string {
 		return ""
 	}
 	return string(raw)
+}
+
+const dbKeyPrefixHeightInEpochMap = "HEIGHT_IN_EPOCH_MAP:"
+
+func StoreHeightInEpochMapping(height int64, heightInEpoch int) {
+	key := fmt.Sprintf("%s%d", dbKeyPrefixHeightInEpochMap, height)
+	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(key), []byte(fmt.Sprintf("%d", heightInEpoch)), nil)
+}
+
+func LoadHeightInEpochMapping(height int64) (int, bool) {
+	key := fmt.Sprintf("%s%d", dbKeyPrefixHeightInEpochMap, height)
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
+	if err != nil {
+		return 0, false
+	}
+	var val int
+	if _, err := fmt.Sscanf(string(raw), "%d", &val); err != nil {
+		return 0, false
+	}
+	return val, true
 }

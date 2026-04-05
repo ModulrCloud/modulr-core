@@ -319,9 +319,13 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
 	expectedBlockId := ""
+	expectedHeightInEpoch := -1
 
 	if requestedHeight < state.NextHeight {
 		expectedBlockId = utils.LoadHeightBlockIdMapping(requestedHeight)
+		if h, ok := utils.LoadHeightInEpochMapping(requestedHeight); ok {
+			expectedHeightInEpoch = h
+		}
 	} else {
 		maxIterations := 1000
 
@@ -358,9 +362,11 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 			}
 
 			utils.StoreHeightBlockIdMapping(state.NextHeight, blockId)
+			utils.StoreHeightInEpochMapping(state.NextHeight, state.HeightInEpoch)
 
 			if state.NextHeight == requestedHeight {
 				expectedBlockId = blockId
+				expectedHeightInEpoch = state.HeightInEpoch
 			}
 
 			state.Advance()
@@ -370,6 +376,11 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
+		sendNotReady(connection)
+		return
+	}
+
+	if expectedHeightInEpoch < 0 || expectedHeightInEpoch != parsedRequest.HeightInEpoch {
 		sendNotReady(connection)
 		return
 	}
@@ -387,6 +398,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		parsedRequest.BlockId,
 		parsedRequest.BlockHash,
 		strconv.Itoa(parsedRequest.EpochId),
+		strconv.Itoa(parsedRequest.HeightInEpoch),
 	}, ":")
 
 	response := WsHeightAttestationResponse{
