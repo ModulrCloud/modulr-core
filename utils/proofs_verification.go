@@ -558,3 +558,68 @@ func getEpochHandlerForFirstBlockSearch(epochId int) *structures.EpochDataHandle
 	}
 	return nil
 }
+
+// GetEpochDataAttestationFromQuorumByHTTP fetches an EpochDataAttestation from quorum/bootstrap
+// nodes via GET /epoch_data_attestation/{epochId}. Used as a fallback when PoD is unavailable.
+func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structures.EpochDataHandler) *structures.EpochDataAttestation {
+	if epochHandler == nil {
+		return nil
+	}
+
+	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
+	resultChan := make(chan *structures.EpochDataAttestation, len(quorum)+len(globals.CONFIGURATION.BootstrapNodes))
+	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	allNodes := make([]string, 0, len(quorum)+len(globals.CONFIGURATION.BootstrapNodes))
+	for _, node := range quorum {
+		allNodes = append(allNodes, node.Url)
+	}
+	allNodes = append(allNodes, globals.CONFIGURATION.BootstrapNodes...)
+
+	for _, endpoint := range allNodes {
+		if endpoint == globals.CONFIGURATION.MyHostname {
+			continue
+		}
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+
+			req, err := http.NewRequestWithContext(ctx, "GET", url+"/epoch_data_attestation/"+strconv.Itoa(epochId), nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			var attestation structures.EpochDataAttestation
+			if json.NewDecoder(resp.Body).Decode(&attestation) == nil &&
+				attestation.EpochId == epochId &&
+				VerifyEpochDataAttestation(&attestation, epochHandler) {
+				select {
+				case resultChan <- &attestation:
+					cancel()
+				default:
+				}
+			}
+		}(endpoint)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res
+	case <-ctx.Done():
+		return nil
+	}
+}

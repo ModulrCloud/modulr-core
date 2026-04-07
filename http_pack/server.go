@@ -31,6 +31,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/height_attestation/{height}", routes.GetHeightAttestation)
 	r.GET("/first_block_in_epoch/{epochId}", routes.GetFirstBlockInEpoch)
 	r.GET("/anchor_epoch_ack/{epochId}", routes.GetAnchorEpochAck)
+	r.GET("/epoch_data_attestation/{epochId}", routes.GetEpochDataAttestation)
 
 	r.GET("/transaction/{hash}", routes.GetTransactionByHash)
 	r.POST("/transaction", routes.AcceptTransaction)

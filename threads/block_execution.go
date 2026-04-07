@@ -219,6 +219,12 @@ func fetchVerifiedEpochDataAttestation(currentEpochId int) *structures.EpochData
 		return fromPoD
 	}
 
+	fromHTTP := utils.GetEpochDataAttestationFromQuorumByHTTP(currentEpochId, epochHandler)
+	if fromHTTP != nil {
+		storeEpochDataAttestation(fromHTTP)
+		return fromHTTP
+	}
+
 	return nil
 }
 
