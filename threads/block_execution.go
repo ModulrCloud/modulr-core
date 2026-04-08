@@ -159,7 +159,7 @@ func fetchAttestationAndBlock(absoluteHeight int) (*structures.HeightAttestation
 	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-	httpProof := utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, &currentEpochHandler)
+	httpProof := fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
 		storeHeightAttestation(httpProof)
 		return httpProof, nil
@@ -190,13 +190,58 @@ func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttest
 	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-	httpProof := utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, &currentEpochHandler)
+	httpProof := fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
 		storeHeightAttestation(httpProof)
 		return httpProof
 	}
 
 	return nil
+}
+
+func fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight int, currentEpochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+	if currentEpochHandler == nil {
+		return nil
+	}
+
+	if proof := utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, currentEpochHandler); proof != nil {
+		return proof
+	}
+
+	// Boundary fallback: if the next height already belongs to epoch N+1, the current
+	// epoch quorum cannot serve it. Use the signed epoch-data attestation from epoch N
+	// to discover and verify the next epoch quorum, then retry via that quorum.
+	epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
+	if epochDataAtt == nil || epochDataAtt.NextEpochId != currentEpochHandler.Id+1 {
+		return nil
+	}
+
+	nextEpochHandler := buildNextEpochHandlerForBoundaryFetch(currentEpochHandler, &epochDataAtt.EpochData)
+	if nextEpochHandler == nil {
+		return nil
+	}
+
+	return utils.GetHeightAttestationFromQuorumByHeight(absoluteHeight, nextEpochHandler)
+}
+
+func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.EpochDataHandler, nextEpochData *structures.NextEpochDataHandler) *structures.EpochDataHandler {
+	if currentEpochHandler == nil || nextEpochData == nil {
+		return nil
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	epochDuration := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.EpochDuration
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	return &structures.EpochDataHandler{
+		Id:                 currentEpochHandler.Id + 1,
+		Hash:               nextEpochData.NextEpochHash,
+		ValidatorsRegistry: nextEpochData.NextEpochValidatorsRegistry,
+		Quorum:             nextEpochData.NextEpochQuorum,
+		LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
+		StartTimestamp:     currentEpochHandler.StartTimestamp + uint64(epochDuration),
+		CurrentLeaderIndex: 0,
+	}
 }
 
 // fetchVerifiedEpochDataAttestation fetches and verifies an EpochDataAttestation for the
