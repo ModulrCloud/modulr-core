@@ -287,38 +287,30 @@ func fetchBlockForExecution(blockId string) *block_pack.Block {
 		return response.Block
 	}
 
-	epochHandler := getEpochHandlerForBlockFetch(blockId)
-	if networkBlock := getBlockFromNetworkById(blockId, epochHandler); networkBlock != nil {
-		return networkBlock
-	}
-
-	return nil
-}
-
-func getEpochHandlerForBlockFetch(blockId string) *structures.EpochDataHandler {
 	epochIndex, _, _, ok := parseBlockId(blockId)
 	if !ok {
 		return nil
 	}
 
-	if epochHandler := getEpochHandlerForTracker(epochIndex); epochHandler != nil {
-		return epochHandler
+	epochHandler := getEpochHandlerForTracker(epochIndex)
+	if epochHandler == nil {
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+		if epochIndex == currentEpochHandler.Id+1 {
+			epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
+			if epochDataAtt != nil && epochDataAtt.NextEpochId == epochIndex {
+				epochHandler = buildNextEpochHandlerForBoundaryFetch(&currentEpochHandler, &epochDataAtt.EpochData)
+			}
+		}
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	if epochIndex != currentEpochHandler.Id+1 {
-		return nil
+	if networkBlock := getBlockFromNetworkById(blockId, epochHandler); networkBlock != nil {
+		return networkBlock
 	}
 
-	epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
-	if epochDataAtt == nil || epochDataAtt.NextEpochId != epochIndex {
-		return nil
-	}
-
-	return buildNextEpochHandlerForBoundaryFetch(&currentEpochHandler, &epochDataAtt.EpochData)
+	return nil
 }
 
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {

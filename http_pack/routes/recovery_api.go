@@ -34,7 +34,14 @@ func GetRecoveryLastFinalizedHeight(ctx *fasthttp.RequestCtx) {
 
 	lastHeight := int(tracker.NextHeight - 1)
 
-	attestation := loadLatestVerifiedHeightAttestation(lastHeight)
+	var attestation *utils.HeightAttestationInfo
+	for h := lastHeight; h >= 0 && h > lastHeight-10; h-- {
+		if info := utils.LoadHeightAttestationInfo(h); info != nil {
+			attestation = info
+			break
+		}
+	}
+
 	if attestation == nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No height attestation found")
 		return
@@ -62,14 +69,4 @@ func GetRecoveryLastFinalizedHeight(ctx *fasthttp.RequestCtx) {
 	}
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, resp)
-}
-
-func loadLatestVerifiedHeightAttestation(startHeight int) *utils.HeightAttestationInfo {
-	for h := startHeight; h >= 0 && h > startHeight-10; h-- {
-		info := utils.LoadHeightAttestationInfo(h)
-		if info != nil {
-			return info
-		}
-	}
-	return nil
 }

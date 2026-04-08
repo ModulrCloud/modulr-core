@@ -2,13 +2,11 @@ package utils
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/structures"
-	"github.com/syndtr/goleveldb/leveldb"
 )
 
 // GetEpochSnapshot retrieves the epoch snapshot (EpochDataSnapshot) from the APPROVEMENT_THREAD_METADATA DB.
@@ -29,16 +27,20 @@ func GetEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 	return &snapshot
 }
 
-// AddEpochSnapshotToBatch marshals the epoch snapshot and adds it to the provided LevelDB batch.
-// This is useful for atomicity during epoch transitions or genesis initialization.
-func AddEpochSnapshotToBatch(batch *leveldb.Batch, epochId int, snapshot *structures.EpochDataSnapshot) error {
-	valBytes, err := json.Marshal(snapshot)
+// LoadNextEpochData retrieves EPOCH_DATA:{N} from APPROVEMENT_THREAD_METADATA.
+// It returns nil if the data is not found or cannot be unmarshaled.
+func LoadNextEpochData(nextEpochId int) *structures.NextEpochDataHandler {
+	key := []byte(constants.DBKeyPrefixEpochData + strconv.Itoa(nextEpochId))
+
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
 	if err != nil {
-		return fmt.Errorf("failed to marshal epoch snapshot: %w", err)
+		return nil
 	}
 
-	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
-	batch.Put(key, valBytes)
+	var data structures.NextEpochDataHandler
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil
+	}
 
-	return nil
+	return &data
 }

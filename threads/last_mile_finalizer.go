@@ -540,7 +540,7 @@ func tryCollectEpochDataAttestationWithConns(
 		return nil
 	}
 
-	localEpochData := loadLocalNextEpochData(nextEpochId)
+	localEpochData := utils.LoadNextEpochData(nextEpochId)
 	if localEpochData == nil {
 		return nil
 	}
@@ -609,20 +609,6 @@ func tryCollectEpochDataAttestationWithConns(
 		EpochDataHash: epochDataHash,
 		Proofs:        proofs,
 	}
-}
-
-func loadLocalNextEpochData(nextEpochId int) *structures.NextEpochDataHandler {
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(
-		[]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), nil,
-	)
-	if err != nil {
-		return nil
-	}
-	var data structures.NextEpochDataHandler
-	if json.Unmarshal(raw, &data) != nil {
-		return nil
-	}
-	return &data
 }
 
 func storeEpochDataAttestation(attestation *structures.EpochDataAttestation) {

@@ -553,7 +553,7 @@ func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, conne
 		return
 	}
 
-	localEpochData := loadLocalNextEpochData(parsedRequest.NextEpochId)
+	localEpochData := utils.LoadNextEpochData(parsedRequest.NextEpochId)
 	if localEpochData == nil {
 		return
 	}
@@ -579,22 +579,6 @@ func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, conne
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
 	}
-}
-
-func loadLocalNextEpochData(nextEpochId int) *structures.NextEpochDataHandler {
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(
-		[]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), nil,
-	)
-	if err != nil {
-		return nil
-	}
-
-	var data structures.NextEpochDataHandler
-	if json.Unmarshal(raw, &data) != nil {
-		return nil
-	}
-
-	return &data
 }
 
 func snapshotAlignmentDataForHeightVoter() map[string]structures.ExecutionStats {
