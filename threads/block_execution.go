@@ -911,14 +911,7 @@ func setupNextEpochFromAttestation(epochHandler *structures.EpochDataHandler, ne
 			dbBatch.Put([]byte(fmt.Sprintf("EPOCH_STATS:%d", currentEpochIndex)), rawStats)
 		}
 
-		// Exec delayed txs here
-
-		for _, delayedTx := range nextEpochData.DelayedTransactions {
-			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
-		}
-
 		// Prepare epoch handler for next epoch
-
 		templateForNextEpoch := &structures.EpochDataHandler{
 			Id:                 nextEpochIndex,
 			Hash:               nextEpochData.NextEpochHash,
@@ -926,6 +919,20 @@ func setupNextEpochFromAttestation(epochHandler *structures.EpochDataHandler, ne
 			StartTimestamp:     epochHandler.StartTimestamp + uint64(handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.EpochDuration),
 			Quorum:             nextEpochData.NextEpochQuorum,
 			LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
+		}
+
+		// Durable epoch data for API/Explorer is stored in STATE.
+		nextSnapshot := structures.EpochDataSnapshot{
+			EpochDataHandler:  *templateForNextEpoch,
+			NetworkParameters: handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters,
+		}
+		if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochIndex)), nextValBytes)
+		}
+
+		// Exec delayed txs here
+		for _, delayedTx := range nextEpochData.DelayedTransactions {
+			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
 		}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = *templateForNextEpoch

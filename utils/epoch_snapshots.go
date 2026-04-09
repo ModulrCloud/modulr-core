@@ -9,22 +9,30 @@ import (
 	"github.com/modulrcloud/modulr-core/structures"
 )
 
-// GetEpochSnapshot retrieves the epoch snapshot (EpochDataSnapshot) from the APPROVEMENT_THREAD_METADATA DB.
-// It returns nil if the snapshot is not found or cannot be unmarshaled.
+// GetEpochSnapshot retrieves the epoch snapshot (EpochDataSnapshot).
+// It first tries to read from the durable STATE DB, then falls back to APPROVEMENT_THREAD_METADATA.
 func GetEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
-	key := []byte(constants.DBKeyPrefixEpochHandler + strconv.Itoa(epochId))
+	epochIdStr := strconv.Itoa(epochId)
 
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
-	if err != nil {
-		return nil
+	// 1. Try durable STATE DB first (source of truth for historical epochs)
+	stateKey := []byte(constants.DBKeyPrefixEpochData + epochIdStr)
+	if raw, err := databases.STATE.Get(stateKey, nil); err == nil {
+		var snapshot structures.EpochDataSnapshot
+		if json.Unmarshal(raw, &snapshot) == nil {
+			return &snapshot
+		}
 	}
 
-	var snapshot structures.EpochDataSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
-		return nil
+	// 2. Fallback to APPROVEMENT_THREAD_METADATA (source of truth for current/future epochs)
+	atKey := []byte(constants.DBKeyPrefixEpochHandler + epochIdStr)
+	if raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(atKey, nil); err == nil {
+		var snapshot structures.EpochDataSnapshot
+		if json.Unmarshal(raw, &snapshot) == nil {
+			return &snapshot
+		}
 	}
 
-	return &snapshot
+	return nil
 }
 
 // LoadNextEpochData retrieves EPOCH_DATA:{N} from APPROVEMENT_THREAD_METADATA.

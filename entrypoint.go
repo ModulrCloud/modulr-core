@@ -401,6 +401,9 @@ func setGenesisToState() error {
 	// so it becomes visible atomically with the rest of the genesis bootstrap data.
 	approvementThreadBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
 
+	// Durable epoch data for API/Explorer is stored in STATE.
+	execThreadBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
+
 	// Commit changes
 	if err := databases.APPROVEMENT_THREAD_METADATA.Write(approvementThreadBatch, nil); err != nil {
 		return err

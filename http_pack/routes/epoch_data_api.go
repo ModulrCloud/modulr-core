@@ -30,15 +30,11 @@ func GetEpochData(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
-	// to be committed atomically with AT updates.
 	epochId, err := strconv.Atoi(epochIndex)
 	if err == nil {
 		if snapshot := utils.GetEpochSnapshot(epochId); snapshot != nil {
-			if value, err := json.Marshal(snapshot); err == nil {
-				helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, value)
-				return
-			}
+			helpers.WriteJSON(ctx, fasthttp.StatusOK, snapshot)
+			return
 		}
 	}
 
