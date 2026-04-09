@@ -908,7 +908,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			finishingEpochStats = &structures.Statistics{LastHeight: -1}
 		}
 		if rawStats, err := json.Marshal(finishingEpochStats); err == nil {
-			dbBatch.Put([]byte(fmt.Sprintf("EPOCH_STATS:%d", currentEpochIndex)), rawStats)
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochStats+strconv.Itoa(currentEpochIndex)), rawStats)
 		}
 
 		// Prepare epoch handler for next epoch
