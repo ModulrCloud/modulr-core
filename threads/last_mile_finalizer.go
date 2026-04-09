@@ -186,7 +186,7 @@ func openAnchorConnectionsForLastMile() {
 	}
 }
 
-func storeHeightAttestation(proof *structures.AggregatedHeightProof) {
+func storeAggregatedHeightProof(proof *structures.AggregatedHeightProof) {
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", proof.AbsoluteHeight))
 
 	if value, err := json.Marshal(proof); err == nil {
@@ -194,7 +194,7 @@ func storeHeightAttestation(proof *structures.AggregatedHeightProof) {
 	}
 }
 
-func LoadHeightAttestation(absoluteHeight int) *structures.AggregatedHeightProof {
+func LoadAggregatedHeightProof(absoluteHeight int) *structures.AggregatedHeightProof {
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", absoluteHeight))
 
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
@@ -284,7 +284,7 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		// On epoch change, collect EpochDataAttestation from *previous* epoch's quorum
+		// On epoch change, collect AggregatedEpochRotationProof from *previous* epoch's quorum
 		// and deliver to anchors + PoD. Must happen before opening connections to the new quorum.
 		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
 			prevEpochId := epochSnapshot.Id - 1
@@ -293,39 +293,39 @@ func LastMileFinalizerThread() {
 			if prevEpochHandler != nil {
 				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
 
-				epochDataAttestation := tryCollectEpochDataAttestationWithConns(
+				epochRotationProof := tryCollectAggregatedEpochRotationProofWithConns(
 					prevEpochId, epochSnapshot.Id,
 					prevEpochHandler, tmpConns, tmpWaiter,
 				)
 
 				closeTemporaryQuorumConnections(tmpConns)
 
-				if epochDataAttestation != nil {
+				if epochRotationProof != nil {
 					if !anchorConnectionsSent {
 						openAnchorConnectionsForLastMile()
 						anchorConnectionsSent = true
 					}
 
-				ackProof := deliverEpochDataAttestationToAnchors(epochDataAttestation)
-				websocket_pack.SendEpochDataAttestationToPoD(*epochDataAttestation)
-				storeEpochDataAttestation(epochDataAttestation)
+					ackProof := deliverAggregatedEpochRotationProofToAnchors(epochRotationProof)
+					websocket_pack.SendAggregatedEpochRotationProofToPoD(*epochRotationProof)
+					storeAggregatedEpochRotationProof(epochRotationProof)
 
-				if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
-						storeAnchorEpochAckProof(ackProof)
-						websocket_pack.SendAnchorEpochAckToPoD(*ackProof)
+					if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
+						storeAggregatedAnchorEpochAckProof(ackProof)
+						websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
 
 						nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
-						deliverAnchorEpochAckToNewQuorum(ackProof, nextEpochHandler)
+						deliverAggregatedAnchorEpochAckProofToNewQuorum(ackProof, nextEpochHandler)
 
-				utils.LogWithTime(
-					fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
-					utils.DEEP_GREEN_COLOR,
-				)
-			}
+						utils.LogWithTime(
+							fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+							utils.DEEP_GREEN_COLOR,
+						)
+					}
 
-			lastRotationEpoch = prevEpochId
-			utils.LogWithTime(
-				fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+					lastRotationEpoch = prevEpochId
+					utils.LogWithTime(
+						fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
 						utils.DEEP_GREEN_COLOR,
 					)
 				}
@@ -382,20 +382,20 @@ func LastMileFinalizerThread() {
 
 		var previousProof *structures.AggregatedHeightProof
 		if tracker.NextHeight > 0 {
-			previousProof = LoadHeightAttestation(int(tracker.NextHeight - 1))
+			previousProof = LoadAggregatedHeightProof(int(tracker.NextHeight - 1))
 			if previousProof == nil {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
 		}
 
-		proof := tryCollectHeightAttestation(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousProof)
+		proof := tryCollectAggregatedHeightProof(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousProof)
 
 		if proof != nil {
-			storeHeightAttestation(proof)
+			storeAggregatedHeightProof(proof)
 
 			if proof.HeightInEpoch == 0 && proof.EpochId != lastFirstBlockEpochId {
-				storeFirstBlockAttestation(proof)
+				storeFirstBlockAggregatedHeightProof(proof)
 				parts := strings.Split(blockId, ":")
 				if len(parts) == 3 {
 					_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
@@ -413,7 +413,7 @@ func LastMileFinalizerThread() {
 			tracker.Advance()
 			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 
-			websocket_pack.SendHeightAttestationToPoD(*proof)
+			websocket_pack.SendAggregatedHeightProofToPoD(*proof)
 
 			utils.LogWithTime(
 				fmt.Sprintf("Aggregated height proof collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, utils.ShortHash(blockHash)),
@@ -441,17 +441,17 @@ func getBlockHashById(blockId string) string {
 	return ""
 }
 
-func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler, previousProof *structures.AggregatedHeightProof) *structures.AggregatedHeightProof {
+func tryCollectAggregatedHeightProof(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler, previousProof *structures.AggregatedHeightProof) *structures.AggregatedHeightProof {
 	majority := utils.GetQuorumMajority(epochHandler)
 
-	request := websocket_pack.WsHeightAttestationRequest{
-		Route:                     constants.WsRouteSignHeightAttestation,
-		AbsoluteHeight:            absoluteHeight,
-		BlockId:                   blockId,
-		BlockHash:                 blockHash,
-		EpochId:                   epochId,
-		HeightInEpoch:             heightInEpoch,
-		PreviousHeightAttestation: previousProof,
+	request := websocket_pack.WsHeightProofRequest{
+		Route:                         constants.WsRouteSignHeightProof,
+		AbsoluteHeight:                absoluteHeight,
+		BlockId:                       blockId,
+		BlockHash:                     blockHash,
+		EpochId:                       epochId,
+		HeightInEpoch:                 heightInEpoch,
+		PreviousAggregatedHeightProof: previousProof,
 	}
 
 	message, err := json.Marshal(request)
@@ -473,7 +473,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	defer cancel()
 
 	validateProof := func(id string, raw []byte) bool {
-		var response websocket_pack.WsHeightAttestationResponse
+		var response websocket_pack.WsHeightProofResponse
 
 		if json.Unmarshal(raw, &response) != nil {
 			return false
@@ -501,7 +501,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("last_mile:ha_majority_failed:%d", absoluteHeight),
 			5*time.Second,
-			fmt.Sprintf("Last mile: failed to collect height attestation majority for height %d (quorum=%d majority=%d)", absoluteHeight, len(epochHandler.Quorum), majority),
+			fmt.Sprintf("Last mile: failed to collect aggregated height proof majority for height %d (quorum=%d majority=%d)", absoluteHeight, len(epochHandler.Quorum), majority),
 			utils.YELLOW_COLOR,
 		)
 		return nil
@@ -510,7 +510,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	proofs := make(map[string]string)
 
 	for _, raw := range responses {
-		var response websocket_pack.WsHeightAttestationResponse
+		var response websocket_pack.WsHeightProofResponse
 
 		if json.Unmarshal(raw, &response) == nil {
 			proofs[response.Voter] = response.Sig
@@ -531,7 +531,7 @@ func tryCollectHeightAttestation(absoluteHeight int, blockId, blockHash string, 
 	}
 }
 
-func tryCollectEpochDataAttestationWithConns(
+func tryCollectAggregatedEpochRotationProofWithConns(
 	epochId, nextEpochId int,
 	prevEpochHandler *structures.EpochDataHandler,
 	wsConns map[string]*websocket.Conn, waiter *utils.QuorumWaiter,
@@ -552,8 +552,8 @@ func tryCollectEpochDataAttestationWithConns(
 
 	majority := utils.GetQuorumMajority(prevEpochHandler)
 
-	request := websocket_pack.WsEpochDataAttestationRequest{
-		Route:         constants.WsRouteSignEpochDataAttestation,
+	request := websocket_pack.WsEpochRotationProofRequest{
+		Route:         constants.WsRouteSignEpochRotationProof,
 		EpochId:       epochId,
 		NextEpochId:   nextEpochId,
 		EpochDataHash: epochDataHash,
@@ -575,7 +575,7 @@ func tryCollectEpochDataAttestationWithConns(
 	}, ":")
 
 	validateProof := func(id string, raw []byte) bool {
-		var response websocket_pack.WsEpochDataAttestationResponse
+		var response websocket_pack.WsEpochRotationProofResponse
 		if json.Unmarshal(raw, &response) != nil {
 			return false
 		}
@@ -592,7 +592,7 @@ func tryCollectEpochDataAttestationWithConns(
 
 	proofs := make(map[string]string)
 	for _, raw := range responses {
-		var response websocket_pack.WsEpochDataAttestationResponse
+		var response websocket_pack.WsEpochRotationProofResponse
 		if json.Unmarshal(raw, &response) == nil {
 			proofs[response.Voter] = response.Sig
 		}
@@ -611,14 +611,14 @@ func tryCollectEpochDataAttestationWithConns(
 	}
 }
 
-func storeEpochDataAttestation(proof *structures.AggregatedEpochRotationProof) {
+func storeAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotationProof) {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, proof.EpochId))
 	if value, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
 	}
 }
 
-func LoadEpochDataAttestation(epochId int) *structures.AggregatedEpochRotationProof {
+func LoadAggregatedEpochRotationProof(epochId int) *structures.AggregatedEpochRotationProof {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
@@ -631,14 +631,14 @@ func LoadEpochDataAttestation(epochId int) *structures.AggregatedEpochRotationPr
 	return &proof
 }
 
-func deliverEpochDataAttestationToAnchors(proof *structures.AggregatedEpochRotationProof) *structures.AggregatedAnchorEpochAckProof {
+func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEpochRotationProof) *structures.AggregatedAnchorEpochAckProof {
 	LAST_MILE_MUTEX.Lock()
 	conns := LAST_MILE_ANCHOR_WS_CONNS
 	LAST_MILE_MUTEX.Unlock()
 
 	message, err := json.Marshal(struct {
 		Route string                                  `json:"route"`
-		Proof structures.AggregatedEpochRotationProof `json:"attestation"`
+		Proof structures.AggregatedEpochRotationProof `json:"proof"`
 	}{
 		Route: "accept_aggregated_epoch_rotation_proof",
 		Proof: *proof,
@@ -711,7 +711,7 @@ func deliverEpochDataAttestationToAnchors(proof *structures.AggregatedEpochRotat
 	}
 }
 
-func storeAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) {
+func storeAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) {
 	if proof == nil {
 		return
 	}
@@ -723,7 +723,7 @@ func storeAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) {
 	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 }
 
-func LoadAnchorEpochAckProof(epochId int) *structures.AggregatedAnchorEpochAckProof {
+func LoadAggregatedAnchorEpochAckProof(epochId int) *structures.AggregatedAnchorEpochAckProof {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
@@ -736,12 +736,12 @@ func LoadAnchorEpochAckProof(epochId int) *structures.AggregatedAnchorEpochAckPr
 	return &proof
 }
 
-func deliverAnchorEpochAckToNewQuorum(proof *structures.AggregatedAnchorEpochAckProof, nextEpochHandler *structures.EpochDataHandler) {
+func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.AggregatedAnchorEpochAckProof, nextEpochHandler *structures.EpochDataHandler) {
 	if proof == nil || nextEpochHandler == nil {
 		return
 	}
 
-	message, err := json.Marshal(websocket_pack.WsAcceptAnchorEpochAckRequest{
+	message, err := json.Marshal(websocket_pack.WsAcceptAggregatedAnchorEpochAckProofRequest{
 		Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof,
 		Proof: *proof,
 	})

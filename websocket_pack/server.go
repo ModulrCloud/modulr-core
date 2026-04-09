@@ -72,32 +72,32 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		GetBlockWithProof(req, connection)
 
-	case constants.WsRouteSignHeightAttestation:
+	case constants.WsRouteSignHeightProof:
 
-		var req WsHeightAttestationRequest
+		var req WsHeightProofRequest
 
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
-			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_height_attestation_request"}`))
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_height_proof_request"}`))
 			return
 		}
 
-		SignHeightAttestation(req, connection)
+		SignHeightProof(req, connection)
 
 	case constants.WsRouteAcceptAggregatedAnchorEpochAckProof:
-		var req WsAcceptAnchorEpochAckRequest
+		var req WsAcceptAggregatedAnchorEpochAckProofRequest
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
-			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_anchor_epoch_ack_request"}`))
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_aggregated_anchor_epoch_ack_proof_request"}`))
 			return
 		}
-		AcceptAnchorEpochAck(req, connection)
+		AcceptAggregatedAnchorEpochAckProof(req, connection)
 
-	case constants.WsRouteSignEpochDataAttestation:
-		var req WsEpochDataAttestationRequest
+	case constants.WsRouteSignEpochRotationProof:
+		var req WsEpochRotationProofRequest
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
-			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_epoch_data_attestation_request"}`))
+			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_epoch_rotation_proof_request"}`))
 			return
 		}
-		SignEpochDataAttestation(req, connection)
+		SignEpochRotationProof(req, connection)
 
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))

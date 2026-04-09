@@ -45,9 +45,9 @@ type WsBlockWithAfpRequest struct {
 }
 
 type WsBlockWithAfpResponse struct {
-	Block              *block_pack.Block                       `json:"block"`
-	Afp                *structures.AggregatedFinalizationProof `json:"afp"`
-	AggregatedHeightProof *structures.AggregatedHeightProof   `json:"heightAttestation,omitempty"`
+	Block                 *block_pack.Block                       `json:"block"`
+	Afp                   *structures.AggregatedFinalizationProof `json:"afp"`
+	AggregatedHeightProof *structures.AggregatedHeightProof       `json:"aggregatedHeightProof,omitempty"`
 }
 
 type WsAnchorBlockWithAfpRequest struct {
@@ -81,93 +81,93 @@ type WsAggregatedLeaderFinalizationProofResponse struct {
 	Proof *structures.AggregatedLeaderFinalizationProof `json:"proof"`
 }
 
-// Height attestation (quorum member signs height->block mapping)
-
-type WsHeightAttestationRequest struct {
-	Route                        string                              `json:"route"`
-	AbsoluteHeight               int                                 `json:"absoluteHeight"`
-	BlockId                      string                              `json:"blockId"`
-	BlockHash                    string                              `json:"blockHash"`
-	EpochId                      int                                 `json:"epochId"`
-	HeightInEpoch                int                                 `json:"heightInEpoch"`
-	PreviousHeightAttestation    *structures.AggregatedHeightProof   `json:"previousHeightAttestation,omitempty"`
+// WsHeightProofRequest is sent by the last-mile finalizer to request a single
+// height-proof signature from a quorum member.
+type WsHeightProofRequest struct {
+	Route                         string                            `json:"route"`
+	AbsoluteHeight                int                               `json:"absoluteHeight"`
+	BlockId                       string                            `json:"blockId"`
+	BlockHash                     string                            `json:"blockHash"`
+	EpochId                       int                               `json:"epochId"`
+	HeightInEpoch                 int                               `json:"heightInEpoch"`
+	PreviousAggregatedHeightProof *structures.AggregatedHeightProof `json:"previousAggregatedHeightProof,omitempty"`
 }
 
-type WsHeightAttestationResponse struct {
+type WsHeightProofResponse struct {
 	Voter string `json:"voter"`
 	Sig   string `json:"sig"`
 }
 
-// PoD storage/retrieval for height attestations
+// PoD storage/retrieval for aggregated height proofs
 
-type WsHeightAttestationStoreRequest struct {
-	Route string                            `json:"route"`
-	Proof structures.AggregatedHeightProof  `json:"proof"`
+type WsAggregatedHeightProofStoreRequest struct {
+	Route string                           `json:"route"`
+	Proof structures.AggregatedHeightProof `json:"proof"`
 }
 
-type WsHeightAttestationGetRequest struct {
+type WsAggregatedHeightProofGetRequest struct {
 	Route          string `json:"route"`
 	AbsoluteHeight int    `json:"absoluteHeight"`
 }
 
-type WsHeightAttestationGetResponse struct {
+type WsAggregatedHeightProofGetResponse struct {
 	Proof *structures.AggregatedHeightProof `json:"proof"`
 }
 
-// Epoch data attestation (quorum member signs next-epoch data hash)
-
-type WsEpochDataAttestationRequest struct {
+// WsEpochRotationProofRequest is sent by the last-mile finalizer to request a single
+// epoch-rotation-proof signature from a quorum member.
+type WsEpochRotationProofRequest struct {
 	Route         string `json:"route"`
 	EpochId       int    `json:"epochId"`
 	NextEpochId   int    `json:"nextEpochId"`
 	EpochDataHash string `json:"epochDataHash"`
 }
 
-type WsEpochDataAttestationResponse struct {
+type WsEpochRotationProofResponse struct {
 	Voter string `json:"voter"`
 	Sig   string `json:"sig"`
 }
 
-// PoD storage/retrieval for epoch data attestations
+// PoD storage/retrieval for aggregated epoch rotation proofs
 
-type WsEpochDataAttestationStoreRequest struct {
+type WsAggregatedEpochRotationProofStoreRequest struct {
 	Route string                                  `json:"route"`
-	Proof structures.AggregatedEpochRotationProof `json:"attestation"`
+	Proof structures.AggregatedEpochRotationProof `json:"proof"`
 }
 
-type WsEpochDataAttestationGetRequest struct {
+type WsAggregatedEpochRotationProofGetRequest struct {
 	Route   string `json:"route"`
 	EpochId int    `json:"epochId"`
 }
 
-type WsEpochDataAttestationGetResponse struct {
-	Proof *structures.AggregatedEpochRotationProof `json:"attestation"`
+type WsAggregatedEpochRotationProofGetResponse struct {
+	Proof *structures.AggregatedEpochRotationProof `json:"proof"`
 }
 
 // Anchor epoch ack (quorum member receives proof that anchors acknowledged epoch transition)
 
-type WsAcceptAnchorEpochAckRequest struct {
-	Route string                                  `json:"route"`
+type WsAcceptAggregatedAnchorEpochAckProofRequest struct {
+	Route string                                   `json:"route"`
 	Proof structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
-// PoD storage/retrieval for anchor epoch ack proofs
+// PoD storage/retrieval for aggregated anchor epoch ack proofs
 
-type WsAnchorEpochAckStoreRequest struct {
-	Route string                                  `json:"route"`
+type WsAggregatedAnchorEpochAckProofStoreRequest struct {
+	Route string                                   `json:"route"`
 	Proof structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
-type WsAnchorEpochAckGetRequest struct {
+type WsAggregatedAnchorEpochAckProofGetRequest struct {
 	Route   string `json:"route"`
 	EpochId int    `json:"epochId"`
 }
 
-type WsAnchorEpochAckGetResponse struct {
+type WsAggregatedAnchorEpochAckProofGetResponse struct {
 	Proof *structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
-// Combined block + attestation retrieval by absolute height
+// Combined block + proof retrieval by absolute height
 
 type WsBlockByHeightRequest struct {
 	Route          string `json:"route"`
@@ -175,6 +175,6 @@ type WsBlockByHeightRequest struct {
 }
 
 type WsBlockByHeightResponse struct {
-	Block                 *block_pack.Block                  `json:"block"`
-	AggregatedHeightProof *structures.AggregatedHeightProof  `json:"heightAttestation"`
+	Block                 *block_pack.Block                 `json:"block"`
+	AggregatedHeightProof *structures.AggregatedHeightProof `json:"aggregatedHeightProof"`
 }

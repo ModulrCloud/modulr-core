@@ -41,7 +41,7 @@ func GetEpochData(ctx *fasthttp.RequestCtx) {
 	helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No epoch data found")
 }
 
-func GetEpochDataAttestation(ctx *fasthttp.RequestCtx) {
+func GetAggregatedEpochRotationProof(ctx *fasthttp.RequestCtx) {
 	epochIdRaw := ctx.UserValue("epochId")
 	epochIdStr, ok := epochIdRaw.(string)
 

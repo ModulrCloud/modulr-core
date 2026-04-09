@@ -55,22 +55,22 @@ func GetAggregatedLeaderFinalizationProofFromPoD(epochIndex int, leader string) 
 	return nil
 }
 
-func SendHeightAttestationToPoD(proof structures.AggregatedHeightProof) {
-	req := WsHeightAttestationStoreRequest{Route: constants.WsRouteAcceptAggregatedHeightProof, Proof: proof}
+func SendAggregatedHeightProofToPoD(proof structures.AggregatedHeightProof) {
+	req := WsAggregatedHeightProofStoreRequest{Route: constants.WsRouteAcceptAggregatedHeightProof, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if globals.CONFIGURATION.DisablePoDOutbox {
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
 			return
 		}
-		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForHeightAttestation(proof.AbsoluteHeight), reqBytes)
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedHeightProof(proof.AbsoluteHeight), reqBytes)
 	}
 }
 
-func GetHeightAttestationFromPoD(absoluteHeight int) *structures.AggregatedHeightProof {
-	req := WsHeightAttestationGetRequest{Route: constants.WsRouteGetAggregatedHeightProofFromPoD, AbsoluteHeight: absoluteHeight}
+func GetAggregatedHeightProofFromPoD(absoluteHeight int) *structures.AggregatedHeightProof {
+	req := WsAggregatedHeightProofGetRequest{Route: constants.WsRouteGetAggregatedHeightProofFromPoD, AbsoluteHeight: absoluteHeight}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
-			var resp WsHeightAttestationGetResponse
+			var resp WsAggregatedHeightProofGetResponse
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
 				return resp.Proof
 			}
@@ -79,22 +79,22 @@ func GetHeightAttestationFromPoD(absoluteHeight int) *structures.AggregatedHeigh
 	return nil
 }
 
-func SendEpochDataAttestationToPoD(proof structures.AggregatedEpochRotationProof) {
-	req := WsEpochDataAttestationStoreRequest{Route: constants.WsRouteAcceptAggregatedEpochRotationProof, Proof: proof}
+func SendAggregatedEpochRotationProofToPoD(proof structures.AggregatedEpochRotationProof) {
+	req := WsAggregatedEpochRotationProofStoreRequest{Route: constants.WsRouteAcceptAggregatedEpochRotationProof, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if globals.CONFIGURATION.DisablePoDOutbox {
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
 			return
 		}
-		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForEpochDataAttestation(proof.EpochId), reqBytes)
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedEpochRotationProof(proof.EpochId), reqBytes)
 	}
 }
 
-func GetEpochDataAttestationFromPoD(epochId int) *structures.AggregatedEpochRotationProof {
-	req := WsEpochDataAttestationGetRequest{Route: constants.WsRouteGetEpochDataAttestationFromPoD, EpochId: epochId}
+func GetAggregatedEpochRotationProofFromPoD(epochId int) *structures.AggregatedEpochRotationProof {
+	req := WsAggregatedEpochRotationProofGetRequest{Route: constants.WsRouteGetAggregatedEpochRotationProofFromPoD, EpochId: epochId}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
-			var resp WsEpochDataAttestationGetResponse
+			var resp WsAggregatedEpochRotationProofGetResponse
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
 				return resp.Proof
 			}
@@ -103,22 +103,22 @@ func GetEpochDataAttestationFromPoD(epochId int) *structures.AggregatedEpochRota
 	return nil
 }
 
-func SendAnchorEpochAckToPoD(proof structures.AggregatedAnchorEpochAckProof) {
-	req := WsAnchorEpochAckStoreRequest{Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof, Proof: proof}
+func SendAggregatedAnchorEpochAckProofToPoD(proof structures.AggregatedAnchorEpochAckProof) {
+	req := WsAggregatedAnchorEpochAckProofStoreRequest{Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if globals.CONFIGURATION.DisablePoDOutbox {
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
 			return
 		}
-		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAnchorEpochAck(proof.EpochId), reqBytes)
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedAnchorEpochAckProof(proof.EpochId), reqBytes)
 	}
 }
 
-func GetAnchorEpochAckFromPoD(epochId int) *structures.AggregatedAnchorEpochAckProof {
-	req := WsAnchorEpochAckGetRequest{Route: constants.WsRouteGetAnchorEpochAckFromPoD, EpochId: epochId}
+func GetAggregatedAnchorEpochAckProofFromPoD(epochId int) *structures.AggregatedAnchorEpochAckProof {
+	req := WsAggregatedAnchorEpochAckProofGetRequest{Route: constants.WsRouteGetAnchorEpochAckFromPoD, EpochId: epochId}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
-			var resp WsAnchorEpochAckGetResponse
+			var resp WsAggregatedAnchorEpochAckProofGetResponse
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
 				return resp.Proof
 			}

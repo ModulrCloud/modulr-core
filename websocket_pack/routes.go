@@ -307,7 +307,7 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 	}
 }
 
-var heightAttestationVoterMutex sync.Mutex
+var heightProofVoterMutex sync.Mutex
 
 var (
 	anchorEpochAckMutex      sync.RWMutex
@@ -315,7 +315,7 @@ var (
 	anchorAckLastPullAttempt sync.Map
 )
 
-func AcceptAnchorEpochAck(parsedRequest WsAcceptAnchorEpochAckRequest, connection *gws.Conn) {
+func AcceptAggregatedAnchorEpochAckProof(parsedRequest WsAcceptAggregatedAnchorEpochAckProofRequest, connection *gws.Conn) {
 	proof := &parsedRequest.Proof
 	if !utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		sendNotReady(connection)
@@ -369,7 +369,7 @@ func tryPullAnchorEpochAck(epochId int) bool {
 	}
 	anchorAckLastPullAttempt.Store(epochId, now)
 
-	if proof := GetAnchorEpochAckFromPoD(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
+	if proof := GetAggregatedAnchorEpochAckProofFromPoD(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		persistAnchorEpochAck(proof)
 		return true
 	}
@@ -399,7 +399,7 @@ func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochA
 		if endpoint == globals.CONFIGURATION.MyHostname {
 			continue
 		}
-		resp, err := httpClient.Get(endpoint + "/anchor_epoch_ack/" + strconv.Itoa(epochId))
+		resp, err := httpClient.Get(endpoint + "/aggregated_anchor_epoch_ack_proof/" + strconv.Itoa(epochId))
 		if err != nil {
 			continue
 		}
@@ -413,7 +413,7 @@ func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochA
 	return nil
 }
 
-func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection *gws.Conn) {
+func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		sendNotReady(connection)
 		return
@@ -426,12 +426,12 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		return
 	}
 
-	heightAttestationVoterMutex.Lock()
-	defer heightAttestationVoterMutex.Unlock()
+	heightProofVoterMutex.Lock()
+	defer heightProofVoterMutex.Unlock()
 
 	// Verify the chain: for height > 0 a valid previous AggregatedHeightProof must be provided
 	if parsedRequest.AbsoluteHeight > 0 {
-		prev := parsedRequest.PreviousHeightAttestation
+		prev := parsedRequest.PreviousAggregatedHeightProof
 		if prev == nil || prev.AbsoluteHeight != parsedRequest.AbsoluteHeight-1 {
 			sendNotReady(connection)
 			return
@@ -444,7 +444,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		}
 	}
 
-	state := utils.LoadLastMileSequenceState(constants.DBKeyHeightAttestationVoterState)
+	state := utils.LoadLastMileSequenceState(constants.DBKeyHeightProofVoterState)
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
 	expectedBlockId := ""
@@ -501,7 +501,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 			state.Advance()
 		}
 
-		utils.PersistLastMileSequenceState(constants.DBKeyHeightAttestationVoterState, state)
+		utils.PersistLastMileSequenceState(constants.DBKeyHeightProofVoterState, state)
 	}
 
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
@@ -530,7 +530,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		strconv.Itoa(parsedRequest.HeightInEpoch),
 	}, ":")
 
-	response := WsHeightAttestationResponse{
+	response := WsHeightProofResponse{
 		Voter: globals.CONFIGURATION.PublicKey,
 		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataToSign),
 	}
@@ -542,7 +542,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 }
 
-func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, connection *gws.Conn) {
+func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		sendNotReady(connection)
 		return
@@ -570,7 +570,7 @@ func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, conne
 		parsedRequest.EpochDataHash,
 	}, ":")
 
-	response := WsEpochDataAttestationResponse{
+	response := WsEpochRotationProofResponse{
 		Voter: globals.CONFIGURATION.PublicKey,
 		Sig:   cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataToSign),
 	}

@@ -137,7 +137,7 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 	helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, block)
 }
 
-func GetHeightAttestation(ctx *fasthttp.RequestCtx) {
+func GetAggregatedHeightProof(ctx *fasthttp.RequestCtx) {
 	heightRaw := ctx.UserValue("height")
 	heightStr, ok := heightRaw.(string)
 
@@ -183,7 +183,7 @@ func GetFirstBlockInEpoch(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, epochId))
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAggregatedHeightProof, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")

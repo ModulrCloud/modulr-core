@@ -13,7 +13,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func GetAnchorEpochAck(ctx *fasthttp.RequestCtx) {
+func GetAggregatedAnchorEpochAckProof(ctx *fasthttp.RequestCtx) {
 	epochIdRaw := ctx.UserValue("epochId")
 	epochIdStr, ok := epochIdRaw.(string)
 

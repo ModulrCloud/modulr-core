@@ -88,14 +88,14 @@ func PoDOutboxIdForALFP(epochIndex int, leader string) string {
 	return fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochIndex, leader)
 }
 
-func PoDOutboxIdForHeightAttestation(absoluteHeight int) string {
+func PoDOutboxIdForAggregatedHeightProof(absoluteHeight int) string {
 	return fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", absoluteHeight)
 }
 
-func PoDOutboxIdForEpochDataAttestation(epochId int) string {
+func PoDOutboxIdForAggregatedEpochRotationProof(epochId int) string {
 	return fmt.Sprintf(constants.DBKeyPrefixAggregatedEpochRotationProof+"%d", epochId)
 }
 
-func PoDOutboxIdForAnchorEpochAck(epochId int) string {
+func PoDOutboxIdForAggregatedAnchorEpochAckProof(epochId int) string {
 	return fmt.Sprintf(constants.DBKeyPrefixAggregatedAnchorEpochAckProof+"%d", epochId)
 }

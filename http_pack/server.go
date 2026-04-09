@@ -20,14 +20,14 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/height/{absoluteHeightIndex}", routes.GetBlockByHeight)
 	r.GET("/last_height", routes.GetLastHeight)
 	r.GET("/aggregated_finalization_proof/{blockId}", routes.GetAggregatedFinalizationProof)
-	r.GET("/height_attestation/{height}", routes.GetHeightAttestation)
+	r.GET("/aggregated_height_proof/{height}", routes.GetAggregatedHeightProof)
 	r.GET("/first_block_in_epoch/{epochId}", routes.GetFirstBlockInEpoch)
 
 	// Information about epoch
 	r.GET("/epoch_data/{epochIndex}", routes.GetEpochData)
 	r.GET("/epoch_stats", routes.GetCurrentEpochStats)
 	r.GET("/epoch_stats/{epochIndex}", routes.GetEpochStatsByEpochIndex)
-	r.GET("/epoch_data_attestation/{epochId}", routes.GetEpochDataAttestation)
+	r.GET("/aggregated_epoch_rotation_proof/{epochId}", routes.GetAggregatedEpochRotationProof)
 
 	// Information about accounts and validators
 	r.GET("/account/{accountId}", routes.GetAccountById)
@@ -49,7 +49,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/dashboard/api/leader_finalization", routes.ServeDashboardLeaderFinalization)
 
 	// Other
-	r.GET("/anchor_epoch_ack/{epochId}", routes.GetAnchorEpochAck)
+	r.GET("/aggregated_anchor_epoch_ack_proof/{epochId}", routes.GetAggregatedAnchorEpochAckProof)
 	r.GET("/live_stats", routes.GetLiveStats)
 
 	return r.Handler

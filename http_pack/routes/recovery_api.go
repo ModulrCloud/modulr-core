@@ -34,24 +34,24 @@ func GetRecoveryLastFinalizedHeight(ctx *fasthttp.RequestCtx) {
 
 	lastHeight := int(tracker.NextHeight - 1)
 
-	var attestation *utils.HeightAttestationInfo
+	var proofInfo *utils.AggregatedHeightProofInfo
 	for h := lastHeight; h >= 0 && h > lastHeight-10; h-- {
-		if info := utils.LoadHeightAttestationInfo(h); info != nil {
-			attestation = info
+		if info := utils.LoadAggregatedHeightProofInfo(h); info != nil {
+			proofInfo = info
 			break
 		}
 	}
 
-	if attestation == nil {
-		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No height attestation found")
+	if proofInfo == nil {
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "No aggregated height proof found")
 		return
 	}
 
 	payload := RecoveryLastFinalizedHeightPayload{
-		LastHeight: attestation.AbsoluteHeight,
-		BlockId:    attestation.BlockId,
-		BlockHash:  attestation.BlockHash,
-		EpochId:    attestation.EpochId,
+		LastHeight: proofInfo.AbsoluteHeight,
+		BlockId:    proofInfo.BlockId,
+		BlockHash:  proofInfo.BlockHash,
+		EpochId:    proofInfo.EpochId,
 	}
 
 	payloadBytes, err := json.Marshal(payload)

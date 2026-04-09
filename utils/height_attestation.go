@@ -9,16 +9,16 @@ import (
 	"github.com/modulrcloud/modulr-core/structures"
 )
 
-type HeightAttestationInfo struct {
+type AggregatedHeightProofInfo struct {
 	AbsoluteHeight int    `json:"absoluteHeight"`
 	BlockId        string `json:"blockId"`
 	BlockHash      string `json:"blockHash"`
 	EpochId        int    `json:"epochId"`
 }
 
-// LoadHeightAttestationInfo reads an AggregatedHeightProof from FINALIZATION_VOTING_STATS
+// LoadAggregatedHeightProofInfo reads an AggregatedHeightProof from FINALIZATION_VOTING_STATS
 // and returns a summary suitable for the recovery API.
-func LoadHeightAttestationInfo(absoluteHeight int) *HeightAttestationInfo {
+func LoadAggregatedHeightProofInfo(absoluteHeight int) *AggregatedHeightProofInfo {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedHeightProof, absoluteHeight))
 
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
@@ -31,7 +31,7 @@ func LoadHeightAttestationInfo(absoluteHeight int) *HeightAttestationInfo {
 		return nil
 	}
 
-	return &HeightAttestationInfo{
+	return &AggregatedHeightProofInfo{
 		AbsoluteHeight: proof.AbsoluteHeight,
 		BlockId:        proof.BlockId,
 		BlockHash:      proof.BlockHash,

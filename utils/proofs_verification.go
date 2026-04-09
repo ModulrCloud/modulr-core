@@ -371,9 +371,9 @@ func GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(blockID string, epoc
 	return nil
 }
 
-// GetHeightAttestationFromQuorumByHeight fetches an AggregatedHeightProof by absolute height from quorum HTTP endpoints.
+// GetAggregatedHeightProofFromQuorumByHeight fetches an AggregatedHeightProof by absolute height from quorum HTTP endpoints.
 // The proof itself is the source of truth for which block is at this height.
-func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *structures.EpochDataHandler) *structures.AggregatedHeightProof {
+func GetAggregatedHeightProofFromQuorumByHeight(absoluteHeight int, epochHandler *structures.EpochDataHandler) *structures.AggregatedHeightProof {
 	if epochHandler == nil {
 		return nil
 	}
@@ -390,7 +390,7 @@ func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *st
 		go func(endpoint string) {
 			defer wg.Done()
 
-			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/height_attestation/"+strconv.Itoa(absoluteHeight), nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/aggregated_height_proof/"+strconv.Itoa(absoluteHeight), nil)
 			if err != nil {
 				return
 			}
@@ -427,10 +427,10 @@ func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *st
 	}
 }
 
-// GetFirstBlockAttestationFromQuorum fetches the AggregatedHeightProof with HeightInEpoch==0
+// GetFirstBlockAggregatedHeightProofFromQuorum fetches the AggregatedHeightProof with HeightInEpoch==0
 // for the given epoch from any quorum member via GET /first_block_in_epoch/{epochId}.
 // Verifies the response cryptographically (majority signature + HeightInEpoch == 0).
-func GetFirstBlockAttestationFromQuorum(epochId int) *structures.AggregatedHeightProof {
+func GetFirstBlockAggregatedHeightProofFromQuorum(epochId int) *structures.AggregatedHeightProof {
 	snapshot := GetEpochSnapshot(epochId)
 	if snapshot == nil {
 		return nil
@@ -496,9 +496,9 @@ func GetFirstBlockAttestationFromQuorum(epochId int) *structures.AggregatedHeigh
 	}
 }
 
-// GetEpochDataAttestationFromQuorumByHTTP fetches an AggregatedEpochRotationProof from quorum/bootstrap
-// nodes via GET /epoch_data_attestation/{epochId}. Used as a fallback when PoD is unavailable.
-func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structures.EpochDataHandler) *structures.AggregatedEpochRotationProof {
+// GetAggregatedEpochRotationProofFromQuorumByHTTP fetches an AggregatedEpochRotationProof from quorum/bootstrap
+// nodes via GET /aggregated_epoch_rotation_proof/{epochId}. Used as a fallback when PoD is unavailable.
+func GetAggregatedEpochRotationProofFromQuorumByHTTP(epochId int, epochHandler *structures.EpochDataHandler) *structures.AggregatedEpochRotationProof {
 	if epochHandler == nil {
 		return nil
 	}
@@ -524,7 +524,7 @@ func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structur
 		go func(url string) {
 			defer wg.Done()
 
-			req, err := http.NewRequestWithContext(ctx, "GET", url+"/epoch_data_attestation/"+strconv.Itoa(epochId), nil)
+			req, err := http.NewRequestWithContext(ctx, "GET", url+"/aggregated_epoch_rotation_proof/"+strconv.Itoa(epochId), nil)
 			if err != nil {
 				return
 			}
