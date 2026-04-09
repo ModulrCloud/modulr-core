@@ -54,6 +54,6 @@ type ExecutionStats struct {
 func NewExecutionStatsTemplate() ExecutionStats {
 	return ExecutionStats{
 		Index: -1,
-		Hash:  constants.ZeroBlockHash,
+		Hash:  constants.ZeroHash,
 	}
 }

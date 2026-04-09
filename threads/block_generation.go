@@ -249,7 +249,7 @@ func generateBlock() {
 
 			// Nullish the index & hash in generation thread for new epoch
 
-			handlers.GENERATION_THREAD_METADATA.PrevHash = constants.ZeroBlockHash
+			handlers.GENERATION_THREAD_METADATA.PrevHash = constants.ZeroHash
 
 			handlers.GENERATION_THREAD_METADATA.NextIndex = 0
 		}

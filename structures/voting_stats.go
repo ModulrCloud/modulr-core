@@ -11,7 +11,7 @@ type VotingStat struct {
 func NewLeaderVotingStatTemplate() VotingStat {
 	return VotingStat{
 		Index: -1,
-		Hash:  constants.ZeroBlockHash,
+		Hash:  constants.ZeroHash,
 		Afp:   AggregatedFinalizationProof{},
 	}
 }

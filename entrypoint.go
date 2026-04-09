@@ -160,8 +160,8 @@ func prepareBlockchain() error {
 		handlers.GENERATION_THREAD_METADATA = gtHandler
 	} else {
 		handlers.GENERATION_THREAD_METADATA = structures.GenerationThreadMetadataHandler{
-			EpochFullId: utils.Blake3(constants.ZeroBlockHash+globals.GENESIS.NetworkId) + "#-1",
-			PrevHash:    constants.ZeroBlockHash,
+			EpochFullId: utils.Blake3(constants.ZeroHash+globals.GENESIS.NetworkId) + "#-1",
+			PrevHash:    constants.ZeroHash,
 			NextIndex:   0,
 		}
 	}
@@ -344,7 +344,7 @@ func setGenesisToState() error {
 
 	handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 
-	hashInput := constants.ZeroBlockHash + globals.GENESIS.NetworkId + strconv.FormatUint(epochTimestamp, 10)
+	hashInput := constants.ZeroHash + globals.GENESIS.NetworkId + strconv.FormatUint(epochTimestamp, 10)
 
 	initEpochHash := utils.Blake3(hashInput)
 
