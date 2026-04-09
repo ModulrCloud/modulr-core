@@ -45,9 +45,9 @@ type WsBlockWithAfpRequest struct {
 }
 
 type WsBlockWithAfpResponse struct {
-	Block             *block_pack.Block                       `json:"block"`
-	Afp               *structures.AggregatedFinalizationProof `json:"afp"`
-	HeightAttestation *structures.HeightAttestation           `json:"heightAttestation,omitempty"`
+	Block              *block_pack.Block                       `json:"block"`
+	Afp                *structures.AggregatedFinalizationProof `json:"afp"`
+	AggregatedHeightProof *structures.AggregatedHeightProof   `json:"heightAttestation,omitempty"`
 }
 
 type WsAnchorBlockWithAfpRequest struct {
@@ -84,13 +84,13 @@ type WsAggregatedLeaderFinalizationProofResponse struct {
 // Height attestation (quorum member signs height->block mapping)
 
 type WsHeightAttestationRequest struct {
-	Route                     string                        `json:"route"`
-	AbsoluteHeight            int                           `json:"absoluteHeight"`
-	BlockId                   string                        `json:"blockId"`
-	BlockHash                 string                        `json:"blockHash"`
-	EpochId                   int                           `json:"epochId"`
-	HeightInEpoch             int                           `json:"heightInEpoch"`
-	PreviousHeightAttestation *structures.HeightAttestation `json:"previousHeightAttestation,omitempty"`
+	Route                        string                              `json:"route"`
+	AbsoluteHeight               int                                 `json:"absoluteHeight"`
+	BlockId                      string                              `json:"blockId"`
+	BlockHash                    string                              `json:"blockHash"`
+	EpochId                      int                                 `json:"epochId"`
+	HeightInEpoch                int                                 `json:"heightInEpoch"`
+	PreviousHeightAttestation    *structures.AggregatedHeightProof   `json:"previousHeightAttestation,omitempty"`
 }
 
 type WsHeightAttestationResponse struct {
@@ -101,8 +101,8 @@ type WsHeightAttestationResponse struct {
 // PoD storage/retrieval for height attestations
 
 type WsHeightAttestationStoreRequest struct {
-	Route string                       `json:"route"`
-	Proof structures.HeightAttestation `json:"proof"`
+	Route string                            `json:"route"`
+	Proof structures.AggregatedHeightProof  `json:"proof"`
 }
 
 type WsHeightAttestationGetRequest struct {
@@ -111,7 +111,7 @@ type WsHeightAttestationGetRequest struct {
 }
 
 type WsHeightAttestationGetResponse struct {
-	Proof *structures.HeightAttestation `json:"proof"`
+	Proof *structures.AggregatedHeightProof `json:"proof"`
 }
 
 // Epoch data attestation (quorum member signs next-epoch data hash)
@@ -131,8 +131,8 @@ type WsEpochDataAttestationResponse struct {
 // PoD storage/retrieval for epoch data attestations
 
 type WsEpochDataAttestationStoreRequest struct {
-	Route       string                          `json:"route"`
-	Attestation structures.EpochDataAttestation `json:"attestation"`
+	Route string                                  `json:"route"`
+	Proof structures.AggregatedEpochRotationProof `json:"attestation"`
 }
 
 type WsEpochDataAttestationGetRequest struct {
@@ -141,21 +141,21 @@ type WsEpochDataAttestationGetRequest struct {
 }
 
 type WsEpochDataAttestationGetResponse struct {
-	Attestation *structures.EpochDataAttestation `json:"attestation"`
+	Proof *structures.AggregatedEpochRotationProof `json:"attestation"`
 }
 
 // Anchor epoch ack (quorum member receives proof that anchors acknowledged epoch transition)
 
 type WsAcceptAnchorEpochAckRequest struct {
-	Route string                         `json:"route"`
-	Proof structures.AnchorEpochAckProof `json:"proof"`
+	Route string                                  `json:"route"`
+	Proof structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
 // PoD storage/retrieval for anchor epoch ack proofs
 
 type WsAnchorEpochAckStoreRequest struct {
-	Route string                         `json:"route"`
-	Proof structures.AnchorEpochAckProof `json:"proof"`
+	Route string                                  `json:"route"`
+	Proof structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
 type WsAnchorEpochAckGetRequest struct {
@@ -164,7 +164,7 @@ type WsAnchorEpochAckGetRequest struct {
 }
 
 type WsAnchorEpochAckGetResponse struct {
-	Proof *structures.AnchorEpochAckProof `json:"proof"`
+	Proof *structures.AggregatedAnchorEpochAckProof `json:"proof"`
 }
 
 // Combined block + attestation retrieval by absolute height
@@ -175,6 +175,6 @@ type WsBlockByHeightRequest struct {
 }
 
 type WsBlockByHeightResponse struct {
-	Block             *block_pack.Block             `json:"block"`
-	HeightAttestation *structures.HeightAttestation `json:"heightAttestation"`
+	Block                 *block_pack.Block                  `json:"block"`
+	AggregatedHeightProof *structures.AggregatedHeightProof  `json:"heightAttestation"`
 }

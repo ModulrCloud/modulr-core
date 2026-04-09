@@ -121,7 +121,7 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	return okSignatures >= majority
 }
 
-func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *structures.EpochDataHandler) bool {
+func VerifyAggregatedHeightProof(proof *structures.AggregatedHeightProof, epochHandler *structures.EpochDataHandler) bool {
 	if proof == nil || epochHandler == nil {
 		return false
 	}
@@ -134,7 +134,7 @@ func VerifyHeightAttestation(proof *structures.HeightAttestation, epochHandler *
 	}
 
 	dataToVerify := strings.Join([]string{
-		constants.SigningPrefixHeightAttestation,
+		constants.SigningPrefixHeightProof,
 		strconv.Itoa(proof.AbsoluteHeight),
 		proof.BlockId,
 		proof.BlockHash,
@@ -165,13 +165,13 @@ func ComputeEpochDataHash(data *structures.NextEpochDataHandler) string {
 	return Blake3(string(raw))
 }
 
-func VerifyEpochDataAttestation(attestation *structures.EpochDataAttestation, epochHandler *structures.EpochDataHandler) bool {
-	if attestation == nil || epochHandler == nil {
+func VerifyAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotationProof, epochHandler *structures.EpochDataHandler) bool {
+	if proof == nil || epochHandler == nil {
 		return false
 	}
 
-	recomputedHash := ComputeEpochDataHash(&attestation.EpochData)
-	if recomputedHash == "" || recomputedHash != attestation.EpochDataHash {
+	recomputedHash := ComputeEpochDataHash(&proof.EpochData)
+	if recomputedHash == "" || recomputedHash != proof.EpochDataHash {
 		return false
 	}
 
@@ -183,16 +183,16 @@ func VerifyEpochDataAttestation(attestation *structures.EpochDataAttestation, ep
 	}
 
 	dataToVerify := strings.Join([]string{
-		constants.SigningPrefixEpochDataAttestation,
-		strconv.Itoa(attestation.EpochId),
-		strconv.Itoa(attestation.NextEpochId),
-		attestation.EpochDataHash,
+		constants.SigningPrefixEpochRotationProof,
+		strconv.Itoa(proof.EpochId),
+		strconv.Itoa(proof.NextEpochId),
+		proof.EpochDataHash,
 	}, ":")
 
 	okSignatures := 0
 	seen := make(map[string]bool)
 
-	for pubKey, signature := range attestation.Proofs {
+	for pubKey, signature := range proof.Proofs {
 		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
 			if quorumMap[pubKey] && !seen[pubKey] {
 				seen[pubKey] = true
@@ -204,7 +204,7 @@ func VerifyEpochDataAttestation(attestation *structures.EpochDataAttestation, ep
 	return okSignatures >= majority
 }
 
-func VerifyAnchorEpochAckProof(proof *structures.AnchorEpochAckProof) bool {
+func VerifyAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) bool {
 	if proof == nil {
 		return false
 	}
@@ -217,7 +217,7 @@ func VerifyAnchorEpochAckProof(proof *structures.AnchorEpochAckProof) bool {
 	}
 
 	dataToVerify := strings.Join([]string{
-		constants.SigningPrefixAnchorEpochAck,
+		constants.SigningPrefixAnchorEpochAckProof,
 		strconv.Itoa(proof.EpochId),
 		strconv.Itoa(proof.NextEpochId),
 		proof.EpochDataHash,
@@ -371,16 +371,15 @@ func GetVerifiedAnchorsAggregatedFinalizationProofByBlockId(blockID string, epoc
 	return nil
 }
 
-// GetHeightAttestationFromQuorumByHeight fetches a HeightAttestation by absolute height from quorum HTTP endpoints.
-// Unlike GetVerifiedHeightAttestationFromQuorum, this does not require knowing the expected blockId/blockHash
-// because the attestation itself is the source of truth for which block is at this height.
-func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+// GetHeightAttestationFromQuorumByHeight fetches an AggregatedHeightProof by absolute height from quorum HTTP endpoints.
+// The proof itself is the source of truth for which block is at this height.
+func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *structures.EpochDataHandler) *structures.AggregatedHeightProof {
 	if epochHandler == nil {
 		return nil
 	}
 
 	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
-	resultChan := make(chan *structures.HeightAttestation, len(quorum))
+	resultChan := make(chan *structures.AggregatedHeightProof, len(quorum))
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -402,10 +401,10 @@ func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *st
 			}
 			defer resp.Body.Close()
 
-			var proof structures.HeightAttestation
+			var proof structures.AggregatedHeightProof
 			if json.NewDecoder(resp.Body).Decode(&proof) == nil &&
 				proof.AbsoluteHeight == absoluteHeight &&
-				VerifyHeightAttestation(&proof, epochHandler) {
+				VerifyAggregatedHeightProof(&proof, epochHandler) {
 				select {
 				case resultChan <- &proof:
 					cancel()
@@ -428,10 +427,10 @@ func GetHeightAttestationFromQuorumByHeight(absoluteHeight int, epochHandler *st
 	}
 }
 
-// GetFirstBlockAttestationFromQuorum fetches the HeightAttestation with HeightInEpoch==0
+// GetFirstBlockAttestationFromQuorum fetches the AggregatedHeightProof with HeightInEpoch==0
 // for the given epoch from any quorum member via GET /first_block_in_epoch/{epochId}.
 // Verifies the response cryptographically (majority signature + HeightInEpoch == 0).
-func GetFirstBlockAttestationFromQuorum(epochId int) *structures.HeightAttestation {
+func GetFirstBlockAttestationFromQuorum(epochId int) *structures.AggregatedHeightProof {
 	snapshot := GetEpochSnapshot(epochId)
 	if snapshot == nil {
 		return nil
@@ -445,7 +444,7 @@ func GetFirstBlockAttestationFromQuorum(epochId int) *structures.HeightAttestati
 	}
 	allNodes = append(allNodes, globals.CONFIGURATION.BootstrapNodes...)
 
-	resultChan := make(chan *structures.HeightAttestation, len(allNodes))
+	resultChan := make(chan *structures.AggregatedHeightProof, len(allNodes))
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -470,11 +469,11 @@ func GetFirstBlockAttestationFromQuorum(epochId int) *structures.HeightAttestati
 			}
 			defer resp.Body.Close()
 
-			var proof structures.HeightAttestation
+			var proof structures.AggregatedHeightProof
 			if json.NewDecoder(resp.Body).Decode(&proof) == nil &&
 				proof.EpochId == epochId &&
 				proof.HeightInEpoch == 0 &&
-				VerifyHeightAttestation(&proof, epochHandler) {
+				VerifyAggregatedHeightProof(&proof, epochHandler) {
 				select {
 				case resultChan <- &proof:
 					cancel()
@@ -497,15 +496,15 @@ func GetFirstBlockAttestationFromQuorum(epochId int) *structures.HeightAttestati
 	}
 }
 
-// GetEpochDataAttestationFromQuorumByHTTP fetches an EpochDataAttestation from quorum/bootstrap
+// GetEpochDataAttestationFromQuorumByHTTP fetches an AggregatedEpochRotationProof from quorum/bootstrap
 // nodes via GET /epoch_data_attestation/{epochId}. Used as a fallback when PoD is unavailable.
-func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structures.EpochDataHandler) *structures.EpochDataAttestation {
+func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structures.EpochDataHandler) *structures.AggregatedEpochRotationProof {
 	if epochHandler == nil {
 		return nil
 	}
 
 	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
-	resultChan := make(chan *structures.EpochDataAttestation, len(quorum)+len(globals.CONFIGURATION.BootstrapNodes))
+	resultChan := make(chan *structures.AggregatedEpochRotationProof, len(quorum)+len(globals.CONFIGURATION.BootstrapNodes))
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -536,12 +535,12 @@ func GetEpochDataAttestationFromQuorumByHTTP(epochId int, epochHandler *structur
 			}
 			defer resp.Body.Close()
 
-			var attestation structures.EpochDataAttestation
-			if json.NewDecoder(resp.Body).Decode(&attestation) == nil &&
-				attestation.EpochId == epochId &&
-				VerifyEpochDataAttestation(&attestation, epochHandler) {
+			var proof structures.AggregatedEpochRotationProof
+			if json.NewDecoder(resp.Body).Decode(&proof) == nil &&
+				proof.EpochId == epochId &&
+				VerifyAggregatedEpochRotationProof(&proof, epochHandler) {
 				select {
-				case resultChan <- &attestation:
+				case resultChan <- &proof:
 					cancel()
 				default:
 				}

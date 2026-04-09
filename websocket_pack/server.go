@@ -83,7 +83,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 
 		SignHeightAttestation(req, connection)
 
-	case constants.WsRouteAcceptAnchorEpochAck:
+	case constants.WsRouteAcceptAggregatedAnchorEpochAckProof:
 		var req WsAcceptAnchorEpochAckRequest
 		if err := json.Unmarshal(message.Bytes(), &req); err != nil {
 			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_anchor_epoch_ack_request"}`))

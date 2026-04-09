@@ -1,4 +1,4 @@
-// Thread to execute blocks sequentially driven by HeightAttestations from the quorum.
+// Thread to execute blocks sequentially driven by AggregatedHeightProofs from the quorum.
 // The quorum (via LastMileFinalizerThread + SignHeightAttestation) resolves block ordering
 // and assigns absolute heights. This thread simply follows that sequence.
 package threads
@@ -69,12 +69,12 @@ func BlockExecutionThread() {
 		}
 
 		if attestation.EpochId > currentEpochId {
-			epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochId)
-			if epochDataAtt == nil {
+			epochRotationProof := fetchVerifiedEpochDataAttestation(currentEpochId)
+			if epochRotationProof == nil {
 				utils.LogWithTimeThrottled(
-					"exec:epoch_data_attestation_wait",
+					"exec:epoch_rotation_proof_wait",
 					5*time.Second,
-					fmt.Sprintf("EXECUTION: waiting for verified epoch data attestation for epoch %d", currentEpochId),
+					fmt.Sprintf("EXECUTION: waiting for verified epoch rotation proof for epoch %d", currentEpochId),
 					utils.YELLOW_COLOR,
 				)
 				time.Sleep(200 * time.Millisecond)
@@ -82,7 +82,7 @@ func BlockExecutionThread() {
 			}
 
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
-			setupNextEpochFromAttestation(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler, &epochDataAtt.EpochData)
+			setupNextEpochFromAttestation(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler, &epochRotationProof.EpochData)
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
@@ -130,28 +130,28 @@ func BlockExecutionThread() {
 	}
 }
 
-// fetchAttestationAndBlock tries to get both the HeightAttestation and the block for a given height
+// fetchAttestationAndBlock tries to get both the AggregatedHeightProof and the block for a given height
 // in a single PoD round-trip. Falls back to separate fetches if the combined route doesn't return both.
-func fetchAttestationAndBlock(absoluteHeight int) (*structures.HeightAttestation, *block_pack.Block) {
+func fetchAttestationAndBlock(absoluteHeight int) (*structures.AggregatedHeightProof, *block_pack.Block) {
 	localProof := LoadHeightAttestation(absoluteHeight)
 	if localProof != nil {
 		epochHandler := getEpochHandlerForTracker(localProof.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(localProof, epochHandler) {
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(localProof, epochHandler) {
 			block := fetchBlockForExecution(localProof.BlockId)
 			return localProof, block
 		}
 	}
 
 	combined := websocket_pack.GetBlockByHeightFromPoD(absoluteHeight)
-	if combined != nil && combined.HeightAttestation != nil {
-		epochHandler := getEpochHandlerForTracker(combined.HeightAttestation.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(combined.HeightAttestation, epochHandler) {
-			storeHeightAttestation(combined.HeightAttestation)
+	if combined != nil && combined.AggregatedHeightProof != nil {
+		epochHandler := getEpochHandlerForTracker(combined.AggregatedHeightProof.EpochId)
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(combined.AggregatedHeightProof, epochHandler) {
+			storeHeightAttestation(combined.AggregatedHeightProof)
 			var block *block_pack.Block
 			if combined.Block != nil && combined.Block.VerifySignature() {
 				block = combined.Block
 			}
-			return combined.HeightAttestation, block
+			return combined.AggregatedHeightProof, block
 		}
 	}
 
@@ -168,11 +168,11 @@ func fetchAttestationAndBlock(absoluteHeight int) (*structures.HeightAttestation
 	return nil, nil
 }
 
-func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttestation {
+func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.AggregatedHeightProof {
 	proof := LoadHeightAttestation(absoluteHeight)
 	if proof != nil {
 		epochHandler := getEpochHandlerForTracker(proof.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(proof, epochHandler) {
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(proof, epochHandler) {
 			return proof
 		}
 	}
@@ -180,7 +180,7 @@ func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttest
 	podProof := websocket_pack.GetHeightAttestationFromPoD(absoluteHeight)
 	if podProof != nil {
 		epochHandler := getEpochHandlerForTracker(podProof.EpochId)
-		if epochHandler != nil && utils.VerifyHeightAttestation(podProof, epochHandler) {
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(podProof, epochHandler) {
 			storeHeightAttestation(podProof)
 			return podProof
 		}
@@ -199,7 +199,7 @@ func fetchVerifiedHeightAttestation(absoluteHeight int) *structures.HeightAttest
 	return nil
 }
 
-func fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight int, currentEpochHandler *structures.EpochDataHandler) *structures.HeightAttestation {
+func fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight int, currentEpochHandler *structures.EpochDataHandler) *structures.AggregatedHeightProof {
 	if currentEpochHandler == nil {
 		return nil
 	}
@@ -209,14 +209,14 @@ func fetchHeightAttestationFromCurrentOrNextEpochQuorum(absoluteHeight int, curr
 	}
 
 	// Boundary fallback: if the next height already belongs to epoch N+1, the current
-	// epoch quorum cannot serve it. Use the signed epoch-data attestation from epoch N
+	// epoch quorum cannot serve it. Use the signed epoch rotation proof from epoch N
 	// to discover and verify the next epoch quorum, then retry via that quorum.
-	epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
-	if epochDataAtt == nil || epochDataAtt.NextEpochId != currentEpochHandler.Id+1 {
+	epochRotationProof := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
+	if epochRotationProof == nil || epochRotationProof.NextEpochId != currentEpochHandler.Id+1 {
 		return nil
 	}
 
-	nextEpochHandler := buildNextEpochHandlerForBoundaryFetch(currentEpochHandler, &epochDataAtt.EpochData)
+	nextEpochHandler := buildNextEpochHandlerForBoundaryFetch(currentEpochHandler, &epochRotationProof.EpochData)
 	if nextEpochHandler == nil {
 		return nil
 	}
@@ -244,22 +244,22 @@ func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.Epoch
 	}
 }
 
-// fetchVerifiedEpochDataAttestation fetches and verifies an EpochDataAttestation for the
+// fetchVerifiedEpochDataAttestation fetches and verifies an AggregatedEpochRotationProof for the
 // current epoch (signed by epoch N's quorum, containing data for epoch N+1).
 // Checks local DB first, then PoD.
-func fetchVerifiedEpochDataAttestation(currentEpochId int) *structures.EpochDataAttestation {
+func fetchVerifiedEpochDataAttestation(currentEpochId int) *structures.AggregatedEpochRotationProof {
 	epochHandler := getEpochHandlerForTracker(currentEpochId)
 	if epochHandler == nil {
 		return nil
 	}
 
 	local := LoadEpochDataAttestation(currentEpochId)
-	if local != nil && utils.VerifyEpochDataAttestation(local, epochHandler) {
+	if local != nil && utils.VerifyAggregatedEpochRotationProof(local, epochHandler) {
 		return local
 	}
 
 	fromPoD := websocket_pack.GetEpochDataAttestationFromPoD(currentEpochId)
-	if fromPoD != nil && utils.VerifyEpochDataAttestation(fromPoD, epochHandler) {
+	if fromPoD != nil && utils.VerifyAggregatedEpochRotationProof(fromPoD, epochHandler) {
 		storeEpochDataAttestation(fromPoD)
 		return fromPoD
 	}
@@ -299,9 +299,9 @@ func fetchBlockForExecution(blockId string) *block_pack.Block {
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 		if epochIndex == currentEpochHandler.Id+1 {
-			epochDataAtt := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
-			if epochDataAtt != nil && epochDataAtt.NextEpochId == epochIndex {
-				epochHandler = buildNextEpochHandlerForBoundaryFetch(&currentEpochHandler, &epochDataAtt.EpochData)
+			epochRotationProof := fetchVerifiedEpochDataAttestation(currentEpochHandler.Id)
+			if epochRotationProof != nil && epochRotationProof.NextEpochId == epochIndex {
+				epochHandler = buildNextEpochHandlerForBoundaryFetch(&currentEpochHandler, &epochRotationProof.EpochData)
 			}
 		}
 	}

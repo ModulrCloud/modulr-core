@@ -75,10 +75,10 @@ func FirstBlockInEpochMonitorThread() {
 }
 
 // fetchFirstBlockAttestationForEpoch tries local DB first, then quorum HTTP.
-func fetchFirstBlockAttestationForEpoch(epochId int) *structures.HeightAttestation {
+func fetchFirstBlockAttestationForEpoch(epochId int) *structures.AggregatedHeightProof {
 	if local := loadFirstBlockAttestation(epochId); local != nil {
 		epochHandler := getEpochHandlerForTracker(local.EpochId)
-		if epochHandler != nil && local.HeightInEpoch == 0 && utils.VerifyHeightAttestation(local, epochHandler) {
+		if epochHandler != nil && local.HeightInEpoch == 0 && utils.VerifyAggregatedHeightProof(local, epochHandler) {
 			return local
 		}
 	}
@@ -86,14 +86,14 @@ func fetchFirstBlockAttestationForEpoch(epochId int) *structures.HeightAttestati
 	return utils.GetFirstBlockAttestationFromQuorum(epochId)
 }
 
-func extractFirstBlockData(attestation *structures.HeightAttestation) *FirstBlockData {
-	parts := strings.Split(attestation.BlockId, ":")
+func extractFirstBlockData(proof *structures.AggregatedHeightProof) *FirstBlockData {
+	parts := strings.Split(proof.BlockId, ":")
 	if len(parts) != 3 {
 		return nil
 	}
 	return &FirstBlockData{
 		FirstBlockCreator: parts[1],
-		FirstBlockHash:    attestation.BlockHash,
+		FirstBlockHash:    proof.BlockHash,
 	}
 }
 
@@ -105,20 +105,20 @@ func storeDataAboutFirstBlockInEpoch(epochIndex int, data *FirstBlockData) error
 	return databases.APPROVEMENT_THREAD_METADATA.Put(firstBlockDataKey(epochIndex), raw, nil)
 }
 
-func storeFirstBlockAttestation(proof *structures.HeightAttestation) {
+func storeFirstBlockAttestation(proof *structures.AggregatedHeightProof) {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, proof.EpochId))
 	if value, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
 	}
 }
 
-func loadFirstBlockAttestation(epochId int) *structures.HeightAttestation {
+func loadFirstBlockAttestation(epochId int) *structures.AggregatedHeightProof {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		return nil
 	}
-	var proof structures.HeightAttestation
+	var proof structures.AggregatedHeightProof
 	if json.Unmarshal(raw, &proof) != nil {
 		return nil
 	}

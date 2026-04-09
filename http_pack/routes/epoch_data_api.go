@@ -56,20 +56,20 @@ func GetEpochDataAttestation(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixEpochDataAttestation, epochId))
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return
 	}
 
-	var attestation structures.EpochDataAttestation
-	if json.Unmarshal(raw, &attestation) != nil {
-		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse attestation")
+	var proof structures.AggregatedEpochRotationProof
+	if json.Unmarshal(raw, &proof) != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse proof")
 		return
 	}
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, attestation)
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, proof)
 }
 
 func GetCurrentEpochStats(ctx *fasthttp.RequestCtx) {

@@ -317,7 +317,7 @@ var (
 
 func AcceptAnchorEpochAck(parsedRequest WsAcceptAnchorEpochAckRequest, connection *gws.Conn) {
 	proof := &parsedRequest.Proof
-	if !utils.VerifyAnchorEpochAckProof(proof) {
+	if !utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		sendNotReady(connection)
 		return
 	}
@@ -326,8 +326,8 @@ func AcceptAnchorEpochAck(parsedRequest WsAcceptAnchorEpochAckRequest, connectio
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"OK"}`))
 }
 
-func persistAnchorEpochAck(proof *structures.AnchorEpochAckProof) {
-	key := []byte(constants.DBKeyPrefixAnchorEpochAck + strconv.Itoa(proof.EpochId))
+func persistAnchorEpochAck(proof *structures.AggregatedAnchorEpochAckProof) {
+	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(proof.EpochId))
 	if raw, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 	}
@@ -345,11 +345,11 @@ func isAnchorEpochAckAvailable(epochId int) bool {
 	}
 	anchorEpochAckMutex.RUnlock()
 
-	key := []byte(constants.DBKeyPrefixAnchorEpochAck + strconv.Itoa(epochId))
+	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err == nil && len(raw) > 0 {
-		var proof structures.AnchorEpochAckProof
-		if json.Unmarshal(raw, &proof) == nil && utils.VerifyAnchorEpochAckProof(&proof) {
+		var proof structures.AggregatedAnchorEpochAckProof
+		if json.Unmarshal(raw, &proof) == nil && utils.VerifyAggregatedAnchorEpochAckProof(&proof) {
 			anchorEpochAckMutex.Lock()
 			anchorEpochAckConfirmed[epochId] = true
 			anchorEpochAckMutex.Unlock()
@@ -369,12 +369,12 @@ func tryPullAnchorEpochAck(epochId int) bool {
 	}
 	anchorAckLastPullAttempt.Store(epochId, now)
 
-	if proof := GetAnchorEpochAckFromPoD(epochId); proof != nil && utils.VerifyAnchorEpochAckProof(proof) {
+	if proof := GetAnchorEpochAckFromPoD(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		persistAnchorEpochAck(proof)
 		return true
 	}
 
-	if proof := fetchAnchorEpochAckFromHTTP(epochId); proof != nil && utils.VerifyAnchorEpochAckProof(proof) {
+	if proof := fetchAnchorEpochAckFromHTTP(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		persistAnchorEpochAck(proof)
 		return true
 	}
@@ -382,7 +382,7 @@ func tryPullAnchorEpochAck(epochId int) bool {
 	return false
 }
 
-func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AnchorEpochAckProof {
+func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochAckProof {
 	epochHandler := getEpochHandlerForLeaderFinalization(epochId)
 
 	var urls []string
@@ -403,7 +403,7 @@ func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AnchorEpochAckProof {
 		if err != nil {
 			continue
 		}
-		var proof structures.AnchorEpochAckProof
+		var proof structures.AggregatedAnchorEpochAckProof
 		if json.NewDecoder(resp.Body).Decode(&proof) == nil {
 			resp.Body.Close()
 			return &proof
@@ -419,7 +419,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		return
 	}
 
-	// For epoch > 0, require an AnchorEpochAckProof before signing any HeightAttestation.
+	// For epoch > 0, require an AggregatedAnchorEpochAckProof before signing any height proof.
 	// Check BEFORE acquiring the voter mutex so network fallbacks don't block signing.
 	if parsedRequest.EpochId > 0 && !isAnchorEpochAckAvailable(parsedRequest.EpochId) {
 		sendNotReady(connection)
@@ -429,7 +429,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	heightAttestationVoterMutex.Lock()
 	defer heightAttestationVoterMutex.Unlock()
 
-	// Verify the chain: for height > 0 a valid previous HeightAttestation must be provided
+	// Verify the chain: for height > 0 a valid previous AggregatedHeightProof must be provided
 	if parsedRequest.AbsoluteHeight > 0 {
 		prev := parsedRequest.PreviousHeightAttestation
 		if prev == nil || prev.AbsoluteHeight != parsedRequest.AbsoluteHeight-1 {
@@ -438,7 +438,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 		}
 
 		prevEpochHandler := getEpochHandlerForLeaderFinalization(prev.EpochId)
-		if prevEpochHandler == nil || !utils.VerifyHeightAttestation(prev, prevEpochHandler) {
+		if prevEpochHandler == nil || !utils.VerifyAggregatedHeightProof(prev, prevEpochHandler) {
 			sendNotReady(connection)
 			return
 		}
@@ -522,7 +522,7 @@ func SignHeightAttestation(parsedRequest WsHeightAttestationRequest, connection 
 	}
 
 	dataToSign := strings.Join([]string{
-		constants.SigningPrefixHeightAttestation,
+		constants.SigningPrefixHeightProof,
 		strconv.Itoa(parsedRequest.AbsoluteHeight),
 		parsedRequest.BlockId,
 		parsedRequest.BlockHash,
@@ -564,7 +564,7 @@ func SignEpochDataAttestation(parsedRequest WsEpochDataAttestationRequest, conne
 	}
 
 	dataToSign := strings.Join([]string{
-		constants.SigningPrefixEpochDataAttestation,
+		constants.SigningPrefixEpochRotationProof,
 		strconv.Itoa(parsedRequest.EpochId),
 		strconv.Itoa(parsedRequest.NextEpochId),
 		parsedRequest.EpochDataHash,

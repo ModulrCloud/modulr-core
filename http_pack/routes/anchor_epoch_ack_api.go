@@ -28,14 +28,14 @@ func GetAnchorEpochAck(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAnchorEpochAck, epochId))
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return
 	}
 
-	var proof structures.AnchorEpochAckProof
+	var proof structures.AggregatedAnchorEpochAckProof
 	if json.Unmarshal(raw, &proof) != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse proof")
 		return
