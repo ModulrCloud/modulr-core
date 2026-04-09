@@ -2,6 +2,7 @@ package routes
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
@@ -18,11 +19,11 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type lastHeightResponse struct {
+type LastHeightResponse struct {
 	LastHeight int64 `json:"lastHeight"`
 }
 
-type liveStatsResponse struct {
+type LiveStatsResponse struct {
 	Statistics        *structures.Statistics       `json:"statistics"`
 	EpochStatistics   *structures.Statistics       `json:"epochStatistics"`
 	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
@@ -39,7 +40,7 @@ func GetLastHeight(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, lastHeightResponse{LastHeight: statistics.LastHeight})
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, LastHeightResponse{LastHeight: statistics.LastHeight})
 }
 
 func GetLiveStats(ctx *fasthttp.RequestCtx) {
@@ -57,7 +58,7 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 		epochStatistics = &structures.Statistics{LastHeight: -1}
 	}
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, liveStatsResponse{
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, LiveStatsResponse{
 		Statistics:        statistics,
 		EpochStatistics:   epochStatistics,
 		NetworkParameters: networkParameters,
@@ -134,6 +135,68 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 	}
 
 	helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, block)
+}
+
+func GetHeightAttestation(ctx *fasthttp.RequestCtx) {
+	heightRaw := ctx.UserValue("height")
+	heightStr, ok := heightRaw.(string)
+
+	if !ok || heightStr == "" {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid height")
+		return
+	}
+
+	height, err := strconv.Atoi(heightStr)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid height")
+		return
+	}
+
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixHeightAttestation, height))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
+		return
+	}
+
+	var proof structures.HeightAttestation
+	if json.Unmarshal(raw, &proof) != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse attestation")
+		return
+	}
+
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, proof)
+}
+
+func GetFirstBlockInEpoch(ctx *fasthttp.RequestCtx) {
+	epochIdRaw := ctx.UserValue("epochId")
+	epochIdStr, ok := epochIdRaw.(string)
+
+	if !ok || epochIdStr == "" {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid epochId")
+		return
+	}
+
+	epochId, err := strconv.Atoi(epochIdStr)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid epochId")
+		return
+	}
+
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAttestation, epochId))
+	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
+		return
+	}
+
+	var proof structures.HeightAttestation
+	if json.Unmarshal(raw, &proof) != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse attestation")
+		return
+	}
+
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, proof)
 }
 
 func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {

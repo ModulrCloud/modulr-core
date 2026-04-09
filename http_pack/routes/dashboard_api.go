@@ -14,21 +14,36 @@ import (
 
 var dashboardStartTime = time.Now()
 
-type dashboardOverviewResponse struct {
+type DashboardOverviewResponse struct {
 	PublicKey   string              `json:"publicKey"`
 	NetworkId   string              `json:"networkId"`
 	CoreVersion int                 `json:"coreVersion"`
 	Uptime      string              `json:"uptime"`
 	Anchors     []structures.Anchor `json:"anchors"`
-	NodeConfig  nodeConfigSafe      `json:"nodeConfig"`
+	NodeConfig  NodeConfigSafe      `json:"nodeConfig"`
 }
 
-type nodeConfigSafe struct {
+type NodeConfigSafe struct {
 	Interface   string `json:"interface"`
 	Port        int    `json:"port"`
 	WsInterface string `json:"wsInterface"`
 	WsPort      int    `json:"wsPort"`
 	MyHostname  string `json:"myHostname"`
+}
+
+type DashboardExecutionThreadResponse struct {
+	Epoch             structures.EpochDataHandler          `json:"epoch"`
+	Statistics        *structures.Statistics               `json:"statistics"`
+	EpochStatistics   *structures.Statistics               `json:"epochStatistics"`
+	ExecutionData     map[string]structures.ExecutionStats `json:"executionData"`
+	SequenceAlignment structures.AlignmentDataHandler      `json:"sequenceAlignment"`
+	NetworkParameters structures.NetworkParameters         `json:"networkParameters"`
+}
+
+type DashboardApprovementThreadResponse struct {
+	Epoch             structures.EpochDataHandler  `json:"epoch"`
+	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
+	CoreVersion       int                          `json:"coreVersion"`
 }
 
 func ServeDashboard(ctx *fasthttp.RequestCtx) {
@@ -44,13 +59,13 @@ func ServeDashboard(ctx *fasthttp.RequestCtx) {
 }
 
 func ServeDashboardOverview(ctx *fasthttp.RequestCtx) {
-	resp := dashboardOverviewResponse{
+	resp := DashboardOverviewResponse{
 		PublicKey:   globals.CONFIGURATION.PublicKey,
 		NetworkId:   globals.GENESIS.NetworkId,
 		CoreVersion: globals.CORE_MAJOR_VERSION,
 		Uptime:      time.Since(dashboardStartTime).Truncate(time.Second).String(),
 		Anchors:     globals.ANCHORS,
-		NodeConfig: nodeConfigSafe{
+		NodeConfig: NodeConfigSafe{
 			Interface:   globals.CONFIGURATION.Interface,
 			Port:        globals.CONFIGURATION.Port,
 			WsInterface: globals.CONFIGURATION.WebSocketInterface,
@@ -62,19 +77,10 @@ func ServeDashboardOverview(ctx *fasthttp.RequestCtx) {
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, resp)
 }
 
-type dashboardExecutionThreadResponse struct {
-	Epoch             structures.EpochDataHandler          `json:"epoch"`
-	Statistics        *structures.Statistics               `json:"statistics"`
-	EpochStatistics   *structures.Statistics               `json:"epochStatistics"`
-	ExecutionData     map[string]structures.ExecutionStats `json:"executionData"`
-	SequenceAlignment structures.AlignmentDataHandler      `json:"sequenceAlignment"`
-	NetworkParameters structures.NetworkParameters         `json:"networkParameters"`
-}
-
 func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	h := handlers.EXECUTION_THREAD_METADATA.Handler
-	resp := dashboardExecutionThreadResponse{
+	resp := DashboardExecutionThreadResponse{
 		Epoch:             h.EpochDataHandler,
 		Statistics:        h.Statistics,
 		EpochStatistics:   h.EpochStatistics,
@@ -87,16 +93,10 @@ func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, resp)
 }
 
-type dashboardApprovementThreadResponse struct {
-	Epoch             structures.EpochDataHandler  `json:"epoch"`
-	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
-	CoreVersion       int                          `json:"coreVersion"`
-}
-
 func ServeDashboardApprovementThread(ctx *fasthttp.RequestCtx) {
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 	h := handlers.APPROVEMENT_THREAD_METADATA.Handler
-	resp := dashboardApprovementThreadResponse{
+	resp := DashboardApprovementThreadResponse{
 		Epoch:             h.EpochDataHandler,
 		NetworkParameters: h.NetworkParameters,
 		CoreVersion:       h.CoreMajorVersion,

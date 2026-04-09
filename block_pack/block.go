@@ -77,6 +77,7 @@ func (block *Block) VerifySignature() bool {
 }
 
 func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *structures.EpochDataHandler) *Block {
+
 	blockID := strconv.Itoa(epochIndex) + ":" + blockCreator + ":" + strconv.Itoa(int(index))
 
 	blockAsBytes, err := databases.BLOCKS.Get([]byte(blockID), nil)

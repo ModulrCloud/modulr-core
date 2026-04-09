@@ -17,16 +17,16 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type delayedTransactionsSignRequest struct {
+type DelayedTransactionsSignRequest struct {
 	EpochIndex int `json:"epochIndex"`
 }
 
-type delayedTransactionsSignResponse struct {
+type DelayedTransactionsSignResponse struct {
 	Signature string `json:"signature"`
 }
 
 func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
-	var request delayedTransactionsSignRequest
+	var request DelayedTransactionsSignRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")
 		return
@@ -81,5 +81,5 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
 	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned)
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, delayedTransactionsSignResponse{Signature: signature})
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, DelayedTransactionsSignResponse{Signature: signature})
 }

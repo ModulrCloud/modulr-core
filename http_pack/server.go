@@ -15,29 +15,30 @@ import (
 func createRouter() fasthttp.RequestHandler {
 	r := router.New()
 
+	// Information about blocks, heights, etc.
 	r.GET("/block/{id}", routes.GetBlockById)
 	r.GET("/height/{absoluteHeightIndex}", routes.GetBlockByHeight)
 	r.GET("/last_height", routes.GetLastHeight)
-	r.GET("/live_stats", routes.GetLiveStats)
-	r.GET("/epoch_stats", routes.GetCurrentEpochStats)
-	r.GET("/epoch_stats/{epochIndex}", routes.GetEpochStatsByEpochIndex)
-
-	r.GET("/account/{accountId}", routes.GetAccountById)
-	r.GET("/validator/{validatorPubkey}", routes.GetValidatorByPubkey)
-
-	r.GET("/epoch_data/{epochIndex}", routes.GetEpochData)
-
 	r.GET("/aggregated_finalization_proof/{blockId}", routes.GetAggregatedFinalizationProof)
 	r.GET("/height_attestation/{height}", routes.GetHeightAttestation)
 	r.GET("/first_block_in_epoch/{epochId}", routes.GetFirstBlockInEpoch)
-	r.GET("/anchor_epoch_ack/{epochId}", routes.GetAnchorEpochAck)
+
+	// Information about epoch
+	r.GET("/epoch_data/{epochIndex}", routes.GetEpochData)
+	r.GET("/epoch_stats", routes.GetCurrentEpochStats)
+	r.GET("/epoch_stats/{epochIndex}", routes.GetEpochStatsByEpochIndex)
 	r.GET("/epoch_data_attestation/{epochId}", routes.GetEpochDataAttestation)
 
+	// Information about accounts and validators
+	r.GET("/account/{accountId}", routes.GetAccountById)
+	r.GET("/validator/{validatorPubkey}", routes.GetValidatorByPubkey)
+
+	// Transactions related API
 	r.GET("/transaction/{hash}", routes.GetTransactionByHash)
 	r.POST("/transaction", routes.AcceptTransaction)
 	r.POST("/delayed_transactions_signature", routes.SignDelayedTransactions)
 
-	// Recovery
+	// Information to help with recovery
 	r.GET("/recovery/last_finalized_height", routes.GetRecoveryLastFinalizedHeight)
 
 	// Dashboard
@@ -46,6 +47,10 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/dashboard/api/execution", routes.ServeDashboardExecutionThread)
 	r.GET("/dashboard/api/approvement", routes.ServeDashboardApprovementThread)
 	r.GET("/dashboard/api/leader_finalization", routes.ServeDashboardLeaderFinalization)
+
+	// Other
+	r.GET("/anchor_epoch_ack/{epochId}", routes.GetAnchorEpochAck)
+	r.GET("/live_stats", routes.GetLiveStats)
 
 	return r.Handler
 }
