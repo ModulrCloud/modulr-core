@@ -86,7 +86,7 @@ func GetLeaderFinalizationLiveCache(epochId int, leader string) (skipDataIndex i
 }
 
 func LeaderFinalizationThread() {
-	processingEpochIndex := loadFinalizationProgress()
+	processingEpochIndex := loadAlfpProgress()
 
 	for {
 		// If execution already advanced beyond our current ALFP progress,
@@ -98,7 +98,7 @@ func LeaderFinalizationThread() {
 		if execEpochId > processingEpochIndex {
 			currentEpoch := processingEpochIndex
 			processingEpochIndex = execEpochId
-			persistFinalizationProgress(processingEpochIndex)
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -113,10 +113,10 @@ func LeaderFinalizationThread() {
 
 		processingHandler := &snapshot.EpochDataHandler
 
-		if !weAreInEpochQuorum(processingHandler) {
+		if !iAmQuorumMember(processingHandler) {
 			currentEpoch := processingEpochIndex
 			processingEpochIndex++
-			persistFinalizationProgress(processingEpochIndex)
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -134,7 +134,7 @@ func LeaderFinalizationThread() {
 		if allLeaderFinalizationProofsCollected(processingHandler) {
 			currentEpoch := processingEpochIndex
 			processingEpochIndex++
-			persistFinalizationProgress(processingEpochIndex)
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 		}
 
@@ -205,7 +205,7 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 	return loaded
 }
 
-func loadFinalizationProgress() int {
+func loadAlfpProgress() int {
 	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
@@ -215,7 +215,7 @@ func loadFinalizationProgress() int {
 	return 0
 }
 
-func persistFinalizationProgress(epochId int) {
+func persistAlfpProgress(epochId int) {
 	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(constants.DBKeyAlfpProgress), []byte(strconv.Itoa(epochId)), nil)
 }
 
@@ -236,7 +236,7 @@ func cleanupLeaderFinalizationState(epochId int) {
 	ALFP_PROCESS_METADATA = nil
 }
 
-func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
+func iAmQuorumMember(epochHandler *structures.EpochDataHandler) bool {
 	for _, quorumMember := range epochHandler.Quorum {
 		if quorumMember == globals.CONFIGURATION.PublicKey {
 			return true
@@ -741,6 +741,7 @@ func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.Aggre
 	}
 }
 
+// In case we are not able to find or create ALFP - try to find it in network - maybe it's already created by other network member
 func requestLeaderFinalizationFromPoD(epochHandler *structures.EpochDataHandler, leaderPubKey string, cache *LeaderFinalizationCache) {
 	ALFP_GRABBING_MUTEX.Lock()
 	shouldRequest := time.Since(cache.LastPodFetch) > time.Second

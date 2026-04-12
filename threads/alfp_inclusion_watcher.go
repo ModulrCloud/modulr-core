@@ -129,7 +129,7 @@ func AlfpInclusionWatcherThread() {
 	var state *AlfpWatcherState
 
 	for {
-		epochId := loadFinalizationProgress()
+		epochId := loadAlfpProgress()
 
 		if epochId != lastEpochSeen || state == nil {
 			state = loadAlfpWatcherState(epochId)
