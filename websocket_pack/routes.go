@@ -327,13 +327,13 @@ func AcceptAggregatedAnchorEpochAckProof(parsedRequest WsAcceptAggregatedAnchorE
 }
 
 func persistAnchorEpochAck(proof *structures.AggregatedAnchorEpochAckProof) {
-	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(proof.EpochId))
+	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(proof.NextEpochId))
 	if raw, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 	}
 
 	anchorEpochAckMutex.Lock()
-	anchorEpochAckConfirmed[proof.EpochId] = true
+	anchorEpochAckConfirmed[proof.NextEpochId] = true
 	anchorEpochAckMutex.Unlock()
 }
 

@@ -110,7 +110,7 @@ func SendAggregatedAnchorEpochAckProofToPoD(proof structures.AggregatedAnchorEpo
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
 			return
 		}
-		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedAnchorEpochAckProof(proof.EpochId), reqBytes)
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedAnchorEpochAckProof(proof.NextEpochId), reqBytes)
 	}
 }
 

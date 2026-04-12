@@ -679,7 +679,7 @@ func storeAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochA
 	if proof == nil {
 		return
 	}
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, proof.EpochId))
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, proof.NextEpochId))
 	raw, err := json.Marshal(proof)
 	if err != nil {
 		return
