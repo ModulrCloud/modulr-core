@@ -864,7 +864,7 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 }
 
 func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochIndex int, batch *leveldb.Batch) error {
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", epochIndex+2)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", epochIndex+2)
 
 	cachedPayloads := make([]map[string]string, 0)
 
