@@ -291,6 +291,8 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 	return &proof
 }
 
+// In case we are able to find the info about last block by leader in the SequenceAlignmentData,
+// we can consider that network quorum has already generated the ALFP for this leader.
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -321,7 +323,7 @@ func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHand
 		}
 
 		// Fallback: if execution is on this epoch and alignment already confirmed, allow progress.
-		if executionMetadataMatches(epochHandler.Id) && leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
+		if leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
 			continue
 		}
 
@@ -330,13 +332,6 @@ func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHand
 	}
 
 	return true
-}
-
-func executionMetadataMatches(epochId int) bool {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	return handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id == epochId
 }
 
 func leaderTimeIsOut(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters, leaderIndex int) bool {
