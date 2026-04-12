@@ -102,51 +102,15 @@ func openQuorumConnectionsForLastMile(epochHandler *structures.EpochDataHandler)
 	}
 
 	LAST_MILE_QUORUM_WS_CONNS = make(map[string]*websocket.Conn)
-
-	quorumUrls := utils.GetQuorumUrlsAndPubkeys(epochHandler)
-
-	for _, node := range quorumUrls {
-		if node.Url == "" || node.PubKey == globals.CONFIGURATION.PublicKey {
-			continue
-		}
-
-		wsUrl := strings.Replace(node.Url, "http://", "ws://", 1)
-		wsUrl = strings.Replace(wsUrl, "https://", "wss://", 1)
-
-		conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
-		if err != nil {
-			continue
-		}
-
-		LAST_MILE_QUORUM_WS_CONNS[node.PubKey] = conn
-	}
-
 	LAST_MILE_QUORUM_GUARDS = utils.NewWebsocketGuards()
+	utils.OpenWebsocketConnectionsWithQuorum(epochHandler.Quorum, LAST_MILE_QUORUM_WS_CONNS, LAST_MILE_QUORUM_GUARDS)
 	LAST_MILE_QUORUM_WAITER = utils.NewQuorumWaiter(len(epochHandler.Quorum), LAST_MILE_QUORUM_GUARDS)
 }
 
 func openTemporaryQuorumConnections(epochHandler *structures.EpochDataHandler) (map[string]*websocket.Conn, *utils.QuorumWaiter) {
 	conns := make(map[string]*websocket.Conn)
-
-	quorumUrls := utils.GetQuorumUrlsAndPubkeys(epochHandler)
-
-	for _, node := range quorumUrls {
-		if node.Url == "" || node.PubKey == globals.CONFIGURATION.PublicKey {
-			continue
-		}
-
-		wsUrl := strings.Replace(node.Url, "http://", "ws://", 1)
-		wsUrl = strings.Replace(wsUrl, "https://", "wss://", 1)
-
-		conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
-		if err != nil {
-			continue
-		}
-
-		conns[node.PubKey] = conn
-	}
-
 	guards := utils.NewWebsocketGuards()
+	utils.OpenWebsocketConnectionsWithQuorum(epochHandler.Quorum, conns, guards)
 	waiter := utils.NewQuorumWaiter(len(epochHandler.Quorum), guards)
 
 	return conns, waiter
@@ -749,9 +713,14 @@ func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.Aggregate
 		return
 	}
 
-	quorumUrlsAndPubkeys := utils.GetQuorumUrlsAndPubkeys(nextEpochHandler)
-
-	for _, member := range quorumUrlsAndPubkeys {
+	for _, member := range nextEpochHandler.Quorum {
+		if member == globals.CONFIGURATION.PublicKey {
+			continue
+		}
+		validatorStorage := utils.GetValidatorFromApprovementThreadState(member)
+		if validatorStorage == nil || validatorStorage.WssValidatorUrl == "" {
+			continue
+		}
 		go func(wsUrl string) {
 			conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
 			if err != nil {
@@ -759,6 +728,6 @@ func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.Aggregate
 			}
 			defer conn.Close()
 			_ = conn.WriteMessage(websocket.TextMessage, message)
-		}(strings.Replace(member.Url, "http://", "ws://", 1) + "/ws")
+		}(validatorStorage.WssValidatorUrl)
 	}
 }
