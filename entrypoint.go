@@ -345,7 +345,7 @@ func setGenesisToState() error {
 
 	handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 
-	hashInput := constants.ZeroHash + globals.GENESIS.NetworkId + strconv.FormatUint(epochTimestamp, 10)
+	hashInput := constants.ZeroHash + globals.GENESIS.NetworkId
 
 	initEpochHash := utils.Blake3(hashInput)
 
