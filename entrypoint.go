@@ -72,6 +72,9 @@ func RunBlockchain() {
 	//✅ 10.Thread to make "last mile finalization" (important for recovery)
 	go threads.LastMileFinalizerThread()
 
+	//✅ 11.Thread to sequence blocks locally (writes height->blockId mappings for SignHeightProof)
+	go threads.HeightSequencerThread()
+
 	//___________________ RUN SERVERS - WEBSOCKET AND HTTP __________________
 
 	// Set the atomic flag to true

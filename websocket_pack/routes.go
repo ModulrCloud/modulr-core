@@ -419,8 +419,6 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 		return
 	}
 
-	// For epoch > 0, require an AggregatedAnchorEpochAckProof before signing any height proof.
-	// Check BEFORE acquiring the voter mutex so network fallbacks don't block signing.
 	if parsedRequest.EpochId > 0 && !isAnchorEpochAckAvailable(parsedRequest.EpochId) {
 		sendNotReady(connection)
 		return
@@ -429,94 +427,23 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	heightProofVoterMutex.Lock()
 	defer heightProofVoterMutex.Unlock()
 
-	// Verify the chain: for height > 0 a valid previous AggregatedHeightProof must be provided
-	if parsedRequest.AbsoluteHeight > 0 {
-		prev := parsedRequest.PreviousAggregatedHeightProof
-		if prev == nil || prev.AbsoluteHeight != parsedRequest.AbsoluteHeight-1 {
-			sendNotReady(connection)
-			return
-		}
-
-		prevEpochHandler := getEpochHandlerForLeaderFinalization(prev.EpochId)
-		if prevEpochHandler == nil || !utils.VerifyAggregatedHeightProof(prev, prevEpochHandler) {
-			sendNotReady(connection)
-			return
-		}
-	}
-
-	state := utils.LoadLastMileSequenceState(constants.DBKeyHeightProofVoterState)
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
-	expectedBlockId := ""
-	expectedHeightInEpoch := -1
-
-	if requestedHeight < state.NextHeight {
-		expectedBlockId = utils.LoadHeightBlockIdMapping(requestedHeight)
-		if h, ok := utils.LoadHeightInEpochMapping(requestedHeight); ok {
-			expectedHeightInEpoch = h
-		}
-	} else {
-		maxIterations := 1000
-
-		for i := 0; i < maxIterations && state.NextHeight <= requestedHeight; i++ {
-			epochHandler := getEpochHandlerForLeaderFinalization(state.EpochId)
-
-			if epochHandler == nil {
-				break
-			}
-
-			lastBlocksByLeaders := snapshotAlignmentDataForHeightVoter()
-			if lastBlocksByLeaders == nil {
-				lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
-			}
-
-			blockId := state.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
-
-			if blockId == "" {
-				if state.AllLeadersDone(epochHandler.LeadersSequence) {
-					state.AdvanceToNextEpoch()
-					continue
-				}
-				break
-			}
-
-			blockHash := getBlockHashForHeightVoter(blockId)
-			if blockHash == "" {
-				break
-			}
-
-			confirmed, _ := state.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
-			if !confirmed {
-				break
-			}
-
-			utils.StoreHeightBlockIdMapping(state.NextHeight, blockId)
-			utils.StoreHeightInEpochMapping(state.NextHeight, state.HeightInEpoch)
-
-			if state.NextHeight == requestedHeight {
-				expectedBlockId = blockId
-				expectedHeightInEpoch = state.HeightInEpoch
-			}
-
-			state.Advance()
-		}
-
-		utils.PersistLastMileSequenceState(constants.DBKeyHeightProofVoterState, state)
-	}
-
+	// Look up the pre-computed mapping written by HeightSequencerThread
+	expectedBlockId := utils.LoadHeightBlockIdMapping(requestedHeight)
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
 		sendNotReady(connection)
 		return
 	}
 
-	if expectedHeightInEpoch < 0 || expectedHeightInEpoch != parsedRequest.HeightInEpoch {
+	expectedHeightInEpoch, ok := utils.LoadHeightInEpochMapping(requestedHeight)
+	if !ok || expectedHeightInEpoch != parsedRequest.HeightInEpoch {
 		sendNotReady(connection)
 		return
 	}
 
-	storedBlockHash := getBlockHashForHeightVoter(parsedRequest.BlockId)
-
-	if storedBlockHash == "" || storedBlockHash != parsedRequest.BlockHash {
+	blockHash := getBlockHashForHeightVoter(parsedRequest.BlockId)
+	if blockHash == "" || blockHash != parsedRequest.BlockHash {
 		sendNotReady(connection)
 		return
 	}
@@ -536,7 +463,6 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	}
 
 	jsonResponse, err := json.Marshal(response)
-
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
 	}
@@ -579,25 +505,6 @@ func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connectio
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
 	}
-}
-
-func snapshotAlignmentDataForHeightVoter() map[string]structures.ExecutionStats {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
-
-	if data == nil {
-		return nil
-	}
-
-	snapshot := make(map[string]structures.ExecutionStats, len(data))
-
-	for k, v := range data {
-		snapshot[k] = v
-	}
-
-	return snapshot
 }
 
 func getBlockHashForHeightVoter(blockId string) string {

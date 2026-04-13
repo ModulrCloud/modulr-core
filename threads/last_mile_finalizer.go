@@ -37,8 +37,103 @@ var (
 	LAST_MILE_ANCHOR_WS_CONNS = make(map[string]*websocket.Conn)
 )
 
-func LastMileFinalizerThread() {
+// HeightSequencerThread runs on ALL quorum member nodes. It walks through
+// blocks in leader order (exactly like block_execution.go on main), verifies
+// each block via AFP / SequenceAlignmentData, and writes
+// LAST_MILE_HEIGHT_MAP:<height> => blockId into the local DB.
+//
+// This is the data source that SignHeightProof reads from when deciding
+// whether to sign a height proof request.
+func HeightSequencerThread() {
+	tracker := utils.LoadLastMileSequenceState(constants.DBKeyHeightProofVoterState)
 
+	for {
+		advanced := advanceLocalSequence(tracker)
+		if !advanced {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+}
+
+// advanceLocalSequence tries to move the tracker one step forward:
+// find the next block, verify it, and store the height mapping.
+// Returns true if progress was made (caller should retry immediately).
+func advanceLocalSequence(tracker *utils.LastMileSequenceState) bool {
+	epochHandler := getEpochHandlerForTracker(tracker.EpochId)
+	if epochHandler == nil {
+		return false
+	}
+
+	if tracker.LeaderIndex >= len(epochHandler.LeadersSequence) {
+		nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
+		if nextEpochHandler != nil {
+			tracker.AdvanceToNextEpoch()
+			utils.PersistLastMileSequenceState(constants.DBKeyHeightProofVoterState, tracker)
+			return true
+		}
+		return false
+	}
+
+	leader := epochHandler.LeadersSequence[tracker.LeaderIndex]
+	blockId := fmt.Sprintf("%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex)
+
+	blockHash := getBlockHashByBlockId(blockId)
+
+	if blockHash == "" {
+		lastBlocksByLeaders := snapshotLastBlocksByLeaders()
+		lastBlock, known := lastBlocksByLeaders[leader]
+
+		if known && lastBlock.Index < 0 {
+			tracker.LeaderIndex++
+			tracker.BlockIndex = 0
+			utils.PersistLastMileSequenceState(constants.DBKeyHeightProofVoterState, tracker)
+			return true
+		}
+		return false
+	}
+
+	isLastBlock := false
+	confirmed := false
+
+	lastBlocksByLeaders := snapshotLastBlocksByLeaders()
+	lastBlock, known := lastBlocksByLeaders[leader]
+
+	if known && lastBlock.Index == tracker.BlockIndex && lastBlock.Hash == blockHash {
+		confirmed = true
+		isLastBlock = true
+	}
+
+	if !confirmed {
+		nextBlockId := fmt.Sprintf("%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex+1)
+		if utils.HasLocalVerifiedAfp(nextBlockId, epochHandler) {
+			confirmed = true
+		}
+	}
+
+	if !confirmed {
+		return false
+	}
+
+	utils.StoreHeightBlockIdMapping(tracker.NextHeight, blockId)
+	utils.StoreHeightInEpochMapping(tracker.NextHeight, tracker.HeightInEpoch)
+
+	if isLastBlock {
+		tracker.LeaderIndex++
+		tracker.BlockIndex = 0
+	} else {
+		tracker.BlockIndex++
+	}
+	tracker.NextHeight++
+	tracker.HeightInEpoch++
+
+	utils.PersistLastMileSequenceState(constants.DBKeyHeightProofVoterState, tracker)
+	return true
+}
+
+// LastMileFinalizerThread runs only on selected finalizer nodes. It uses the
+// same sequencing logic (via its own tracker) to determine block order, then
+// collects AggregatedHeightProof signatures from the quorum.
+func LastMileFinalizerThread() {
 	lastProcessedEpoch := -1
 	quorumConnectionsReady := false
 	anchorConnectionsSent := false
@@ -136,42 +231,63 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		lastBlocksByLeaders, _ := snapshotAlignmentData()
-		if lastBlocksByLeaders == nil {
-			lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
+		// --- Block sequencing (mirrors block_execution.go from main) ---
+
+		if tracker.LeaderIndex >= len(epochHandler.LeadersSequence) {
+			nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
+			if nextEpochHandler != nil {
+				tracker.AdvanceToNextEpoch()
+				utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+				continue
+			}
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
 
-		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
+		leader := epochHandler.LeadersSequence[tracker.LeaderIndex]
+		blockId := fmt.Sprintf("%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex)
 
-		if blockId == "" {
-			if tracker.AllLeadersDone(epochHandler.LeadersSequence) {
-				nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
+		blockHash := getBlockHashByBlockId(blockId)
 
-				if nextEpochHandler != nil {
-					tracker.AdvanceToNextEpoch()
-					utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
-					continue
-				}
+		if blockHash == "" {
+			lastBlocksByLeaders := snapshotLastBlocksByLeaders()
+			lastBlock, known := lastBlocksByLeaders[leader]
+
+			if known && lastBlock.Index < 0 {
+				tracker.LeaderIndex++
+				tracker.BlockIndex = 0
+				utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+				continue
 			}
 
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		blockHash := getBlockHashByBlockId(blockId)
+		isLastBlock := false
+		confirmed := false
 
-		if blockHash == "" {
-			time.Sleep(200 * time.Millisecond)
-			continue
+		lastBlocksByLeaders := snapshotLastBlocksByLeaders()
+		lastBlock, known := lastBlocksByLeaders[leader]
+
+		if known && lastBlock.Index == tracker.BlockIndex && lastBlock.Hash == blockHash {
+			confirmed = true
+			isLastBlock = true
 		}
 
-		confirmed, _ := tracker.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
+		if !confirmed {
+			nextBlockId := fmt.Sprintf("%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex+1)
+			if utils.HasLocalVerifiedAfp(nextBlockId, epochHandler) {
+				confirmed = true
+			}
+		}
 
 		if !confirmed {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
+		// Collect the aggregated height proof from quorum
 		var previousProof *structures.AggregatedHeightProof
 		if tracker.NextHeight > 0 {
 			previousProof = LoadAggregatedHeightProof(int(tracker.NextHeight - 1))
@@ -202,7 +318,15 @@ func LastMileFinalizerThread() {
 				)
 			}
 
-			tracker.Advance()
+			if isLastBlock {
+				tracker.LeaderIndex++
+				tracker.BlockIndex = 0
+			} else {
+				tracker.BlockIndex++
+			}
+			tracker.NextHeight++
+			tracker.HeightInEpoch++
+
 			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
 
 			websocket_pack.SendAggregatedHeightProofToPoD(*proof)
@@ -376,22 +500,20 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 	return nil
 }
 
-func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
+func snapshotLastBlocksByLeaders() map[string]structures.ExecutionStats {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
-
 	if data == nil {
-		return nil, false
+		return make(map[string]structures.ExecutionStats)
 	}
 
 	cp := make(map[string]structures.ExecutionStats, len(data))
 	for k, v := range data {
 		cp[k] = v
 	}
-
-	return cp, true
+	return cp
 }
 
 func getBlockHashByBlockId(blockId string) string {
