@@ -25,6 +25,14 @@ var httpClient = &http.Client{Timeout: 2 * time.Second}
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
+var heightProofVoterMutex sync.Mutex
+
+var (
+	anchorEpochAckMutex      sync.RWMutex
+	anchorEpochAckConfirmed  = make(map[int]bool)
+	anchorAckLastPullAttempt sync.Map
+)
+
 func sendNotReady(connection *gws.Conn) {
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
 }
@@ -307,14 +315,6 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 	}
 }
 
-var heightProofVoterMutex sync.Mutex
-
-var (
-	anchorEpochAckMutex      sync.RWMutex
-	anchorEpochAckConfirmed  = make(map[int]bool)
-	anchorAckLastPullAttempt sync.Map
-)
-
 func AcceptAggregatedAnchorEpochAckProof(parsedRequest WsAcceptAggregatedAnchorEpochAckProofRequest, connection *gws.Conn) {
 	proof := &parsedRequest.Proof
 	if !utils.VerifyAggregatedAnchorEpochAckProof(proof) {
@@ -523,7 +523,7 @@ func getBlockHashForHeightVoter(blockId string) string {
 	return block.GetHash()
 }
 
-func GetBlockWithProof(parsedRequest WsBlockWithAfpRequest, connection *gws.Conn) {
+func GetBlockWithAfp(parsedRequest WsBlockWithAfpRequest, connection *gws.Conn) {
 	if blockBytes, err := databases.BLOCKS.Get([]byte(parsedRequest.BlockId), nil); err == nil {
 		var block block_pack.Block
 

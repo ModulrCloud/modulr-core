@@ -70,7 +70,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 			return
 		}
 
-		GetBlockWithProof(req, connection)
+		GetBlockWithAfp(req, connection)
 
 	case constants.WsRouteSignHeightProof:
 
