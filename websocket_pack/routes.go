@@ -429,7 +429,7 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
-	// Look up the pre-computed mapping written by HeightSequencerThread
+	// Look up the pre-computed mapping written by LastMileFinalizerThread
 	expectedBlockId := utils.LoadHeightBlockIdMapping(requestedHeight)
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
 		sendNotReady(connection)

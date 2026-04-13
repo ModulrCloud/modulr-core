@@ -66,7 +66,6 @@ const (
 	DBKeyPrefixAlfp                            = "ALFP:"
 
 	DBKeyAlfpProgress             = "ALFP_PROGRESS"
-	DBKeyHeightProofVoterState    = "HEIGHT_PROOF_VOTER_STATE"
 	DBKeyLastMileFinalizerTracker = "LAST_MILE_FINALIZER_TRACKER"
 )
 
