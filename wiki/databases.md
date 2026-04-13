@@ -92,7 +92,7 @@ All voting/finalization-related data: proofs grabber state, ALFPs, height attest
 | `ALFP:{epochId}:{leader}` | `AggregatedLeaderFinalizationProof` JSON | `leader_finalization.go` | Locally stored ALFP |
 | `ALFP_PROGRESS` | Epoch id string | `leader_finalization.go` | Tracks which epoch the ALFP process has reached |
 | `ALFP_WATCHER_STATE:{epochId}` | `AlfpWatcherState` JSON | `alfp_inclusion_watcher.go` | Tracks ALFP → anchor block inclusion progress |
-| `ALFP_INCLUDED:{epochId}:{leader}:{index}` | `AlfpInclusionMarker` JSON | `alfp_inclusion.go` | Marks that a specific ALFP was included in an anchor block |
+| `ALFP_INCLUDED:{epochId}:{leader}` | one-byte marker | `alfp_inclusion.go` | Marks that at least one valid ALFP for this leader was included in an accepted anchor block |
 | `HEIGHT_ATTESTATION:{height}` | `HeightAttestation` JSON | `last_mile_finalizer.go`, `block_execution.go` | Quorum-signed height → blockId mapping proof |
 | `EPOCH_DATA_ATTESTATION:{epochId}` | `EpochDataAttestation` JSON | `last_mile_finalizer.go`, `block_execution.go` | Quorum-signed next epoch data — ET uses this for cryptographic epoch transition verification |
 | `HEIGHT_ATTESTATION_VOTER_STATE` | JSON state | `last_mile_finalizer.go` | Tracks which heights have been voted on |

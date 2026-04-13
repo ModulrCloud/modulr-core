@@ -37,6 +37,203 @@ var (
 	LAST_MILE_ANCHOR_WS_CONNS = make(map[string]*websocket.Conn)
 )
 
+func LastMileFinalizerThread() {
+
+	lastProcessedEpoch := -1
+	quorumConnectionsReady := false
+	anchorConnectionsSent := false
+	lastRotationEpoch := -1
+	lastFirstBlockEpochId := -1
+
+	tracker := utils.LoadLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker)
+
+	if getFirstBlockDataFromDB(tracker.EpochId) != nil {
+		lastFirstBlockEpochId = tracker.EpochId
+	}
+
+	for {
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+		epochSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+
+		if epochSnapshot.Id != lastProcessedEpoch {
+			lastProcessedEpoch = epochSnapshot.Id
+			quorumConnectionsReady = false
+			anchorConnectionsSent = false
+
+			selected := selectLastMileFinalizersForEpoch(&epochSnapshot)
+
+			if len(selected) > 0 {
+				utils.LogWithTime(
+					fmt.Sprintf("Last mile finalizer: epoch %d => selected %d from quorum %v", epochSnapshot.Id, len(selected), selected),
+					utils.CYAN_COLOR,
+				)
+			}
+		}
+
+		if !iAmLastMileFinalizer(&epochSnapshot) {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		// On epoch change, collect AggregatedEpochRotationProof from *previous* epoch's quorum
+		// and deliver to anchors + PoD. Must happen before opening connections to the new quorum.
+		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
+			prevEpochId := epochSnapshot.Id - 1
+			prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
+
+			if prevEpochHandler != nil {
+				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
+
+				epochRotationProof := tryCollectAggregatedEpochRotationProofWithConns(
+					prevEpochId, epochSnapshot.Id,
+					prevEpochHandler, tmpConns, tmpWaiter,
+				)
+
+				closeTemporaryQuorumConnections(tmpConns)
+
+				if epochRotationProof != nil {
+					if !anchorConnectionsSent {
+						openAnchorConnectionsForLastMile()
+						anchorConnectionsSent = true
+					}
+
+					ackProof := deliverAggregatedEpochRotationProofToAnchors(epochRotationProof)
+					websocket_pack.SendAggregatedEpochRotationProofToPoD(*epochRotationProof)
+					storeAggregatedEpochRotationProof(epochRotationProof)
+
+					if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
+						storeAggregatedAnchorEpochAckProof(ackProof)
+						websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
+
+						nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
+						deliverAggregatedAnchorEpochAckProofToNewQuorum(ackProof, nextEpochHandler)
+
+						utils.LogWithTime(
+							fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+							utils.DEEP_GREEN_COLOR,
+						)
+					}
+
+					lastRotationEpoch = prevEpochId
+					utils.LogWithTime(
+						fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+						utils.DEEP_GREEN_COLOR,
+					)
+				}
+			}
+		}
+
+		if !quorumConnectionsReady {
+			openQuorumConnectionsForLastMileFinalizer(&epochSnapshot)
+			quorumConnectionsReady = true
+		}
+
+		epochHandler := getEpochHandlerForTracker(tracker.EpochId)
+
+		if epochHandler == nil {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		lastBlocksByLeaders, _ := snapshotAlignmentData()
+		if lastBlocksByLeaders == nil {
+			lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
+		}
+
+		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
+
+		if blockId == "" {
+			if tracker.AllLeadersDone(epochHandler.LeadersSequence) {
+				nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
+
+				if nextEpochHandler != nil {
+					tracker.AdvanceToNextEpoch()
+					utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+					continue
+				}
+			}
+
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		blockHash := getBlockHashByBlockId(blockId)
+
+		if blockHash == "" {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		confirmed, _ := tracker.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
+
+		if !confirmed {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		var previousProof *structures.AggregatedHeightProof
+		if tracker.NextHeight > 0 {
+			previousProof = LoadAggregatedHeightProof(int(tracker.NextHeight - 1))
+			if previousProof == nil {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+		}
+
+		proof := tryCollectAggregatedHeightProof(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousProof)
+
+		if proof != nil {
+			storeAggregatedHeightProof(proof)
+
+			if proof.HeightInEpoch == 0 && proof.EpochId != lastFirstBlockEpochId {
+				storeFirstBlockAggregatedHeightProof(proof)
+				parts := strings.Split(blockId, ":")
+				if len(parts) == 3 {
+					_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
+						FirstBlockCreator: parts[1],
+						FirstBlockHash:    blockHash,
+					})
+				}
+				lastFirstBlockEpochId = proof.EpochId
+				utils.LogWithTime(
+					fmt.Sprintf("First core block in epoch %d detected (HeightInEpoch=0): creator=%s, hash=%s...", proof.EpochId, parts[1], utils.ShortHash(blockHash)),
+					utils.GREEN_COLOR,
+				)
+			}
+
+			tracker.Advance()
+			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+
+			websocket_pack.SendAggregatedHeightProofToPoD(*proof)
+
+			utils.LogWithTime(
+				fmt.Sprintf("Aggregated height proof collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, utils.ShortHash(blockHash)),
+				utils.DEEP_GREEN_COLOR,
+			)
+
+			continue
+		}
+
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func hashHexToUint64(hashHex string) uint64 {
+
+	if len(hashHex) < 16 {
+		return 0
+	}
+
+	b, err := hex.DecodeString(hashHex[:16])
+
+	if err != nil {
+		return 0
+	}
+
+	return binary.BigEndian.Uint64(b)
+}
+
 func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler) []string {
 	quorum := epochHandler.Quorum
 
@@ -58,7 +255,7 @@ func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler)
 
 	for i := 0; i < count; i++ {
 		hashHex := utils.Blake3(seed + "_" + strconv.Itoa(i))
-		r := hashHexToUint64ForLastMile(hashHex) % uint64(len(quorum)-i)
+		r := hashHexToUint64(hashHex) % uint64(len(quorum)-i)
 		j := i + int(r)
 		indices[i], indices[j] = indices[j], indices[i]
 	}
@@ -71,27 +268,14 @@ func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler)
 	return result
 }
 
-func hashHexToUint64ForLastMile(hashHex string) uint64 {
-	if len(hashHex) < 16 {
-		return 0
-	}
+func iAmLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
 
-	b, err := hex.DecodeString(hashHex[:16])
-
-	if err != nil {
-		return 0
-	}
-
-	return binary.BigEndian.Uint64(b)
-}
-
-func weAreLastMileFinalizer(epochHandler *structures.EpochDataHandler) bool {
 	selected := selectLastMileFinalizersForEpoch(epochHandler)
 
 	return slices.Contains(selected, globals.CONFIGURATION.PublicKey)
 }
 
-func openQuorumConnectionsForLastMile(epochHandler *structures.EpochDataHandler) {
+func openQuorumConnectionsForLastMileFinalizer(epochHandler *structures.EpochDataHandler) {
 	LAST_MILE_MUTEX.Lock()
 	defer LAST_MILE_MUTEX.Unlock()
 
@@ -210,188 +394,7 @@ func snapshotAlignmentData() (map[string]structures.ExecutionStats, bool) {
 	return cp, true
 }
 
-func LastMileFinalizerThread() {
-	lastProcessedEpoch := -1
-	quorumConnectionsReady := false
-	anchorConnectionsSent := false
-	lastRotationEpoch := -1
-	lastFirstBlockEpochId := -1
-
-	tracker := utils.LoadLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker)
-
-	if getFirstBlockDataFromDB(tracker.EpochId) != nil {
-		lastFirstBlockEpochId = tracker.EpochId
-	}
-
-	for {
-		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
-		epochSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
-		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
-		if epochSnapshot.Id != lastProcessedEpoch {
-			lastProcessedEpoch = epochSnapshot.Id
-			quorumConnectionsReady = false
-			anchorConnectionsSent = false
-
-			selected := selectLastMileFinalizersForEpoch(&epochSnapshot)
-
-			if len(selected) > 0 {
-				utils.LogWithTime(
-					fmt.Sprintf("Last mile finalizer: epoch %d => selected %d from quorum %v", epochSnapshot.Id, len(selected), selected),
-					utils.CYAN_COLOR,
-				)
-			}
-		}
-
-		if !weAreLastMileFinalizer(&epochSnapshot) {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		// On epoch change, collect AggregatedEpochRotationProof from *previous* epoch's quorum
-		// and deliver to anchors + PoD. Must happen before opening connections to the new quorum.
-		if epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
-			prevEpochId := epochSnapshot.Id - 1
-			prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
-
-			if prevEpochHandler != nil {
-				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
-
-				epochRotationProof := tryCollectAggregatedEpochRotationProofWithConns(
-					prevEpochId, epochSnapshot.Id,
-					prevEpochHandler, tmpConns, tmpWaiter,
-				)
-
-				closeTemporaryQuorumConnections(tmpConns)
-
-				if epochRotationProof != nil {
-					if !anchorConnectionsSent {
-						openAnchorConnectionsForLastMile()
-						anchorConnectionsSent = true
-					}
-
-					ackProof := deliverAggregatedEpochRotationProofToAnchors(epochRotationProof)
-					websocket_pack.SendAggregatedEpochRotationProofToPoD(*epochRotationProof)
-					storeAggregatedEpochRotationProof(epochRotationProof)
-
-					if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
-						storeAggregatedAnchorEpochAckProof(ackProof)
-						websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
-
-						nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
-						deliverAggregatedAnchorEpochAckProofToNewQuorum(ackProof, nextEpochHandler)
-
-						utils.LogWithTime(
-							fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
-							utils.DEEP_GREEN_COLOR,
-						)
-					}
-
-					lastRotationEpoch = prevEpochId
-					utils.LogWithTime(
-						fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
-						utils.DEEP_GREEN_COLOR,
-					)
-				}
-			}
-		}
-
-		if !quorumConnectionsReady {
-			openQuorumConnectionsForLastMile(&epochSnapshot)
-			quorumConnectionsReady = true
-		}
-
-		epochHandler := getEpochHandlerForTracker(tracker.EpochId)
-
-		if epochHandler == nil {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		lastBlocksByLeaders, _ := snapshotAlignmentData()
-		if lastBlocksByLeaders == nil {
-			lastBlocksByLeaders = make(map[string]structures.ExecutionStats)
-		}
-
-		blockId := tracker.CurrentBlockId(epochHandler.LeadersSequence, lastBlocksByLeaders)
-
-		if blockId == "" {
-			if tracker.AllLeadersDone(epochHandler.LeadersSequence) {
-				nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
-
-				if nextEpochHandler != nil {
-					tracker.AdvanceToNextEpoch()
-					utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
-					continue
-				}
-			}
-
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		blockHash := getBlockHashById(blockId)
-
-		if blockHash == "" {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		confirmed, _ := tracker.IsBlockConfirmed(epochHandler.LeadersSequence, lastBlocksByLeaders, blockHash, epochHandler)
-
-		if !confirmed {
-			time.Sleep(200 * time.Millisecond)
-			continue
-		}
-
-		var previousProof *structures.AggregatedHeightProof
-		if tracker.NextHeight > 0 {
-			previousProof = LoadAggregatedHeightProof(int(tracker.NextHeight - 1))
-			if previousProof == nil {
-				time.Sleep(200 * time.Millisecond)
-				continue
-			}
-		}
-
-		proof := tryCollectAggregatedHeightProof(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousProof)
-
-		if proof != nil {
-			storeAggregatedHeightProof(proof)
-
-			if proof.HeightInEpoch == 0 && proof.EpochId != lastFirstBlockEpochId {
-				storeFirstBlockAggregatedHeightProof(proof)
-				parts := strings.Split(blockId, ":")
-				if len(parts) == 3 {
-					_ = storeDataAboutFirstBlockInEpoch(proof.EpochId, &FirstBlockData{
-						FirstBlockCreator: parts[1],
-						FirstBlockHash:    blockHash,
-					})
-				}
-				lastFirstBlockEpochId = proof.EpochId
-				utils.LogWithTime(
-					fmt.Sprintf("First core block in epoch %d detected (HeightInEpoch=0): creator=%s, hash=%s...", proof.EpochId, parts[1], utils.ShortHash(blockHash)),
-					utils.GREEN_COLOR,
-				)
-			}
-
-			tracker.Advance()
-			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
-
-			websocket_pack.SendAggregatedHeightProofToPoD(*proof)
-
-			utils.LogWithTime(
-				fmt.Sprintf("Aggregated height proof collected for height %d => %s (hash: %s...)", proof.AbsoluteHeight, blockId, utils.ShortHash(blockHash)),
-				utils.DEEP_GREEN_COLOR,
-			)
-
-			continue
-		}
-
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
-func getBlockHashById(blockId string) string {
+func getBlockHashByBlockId(blockId string) string {
 	raw, err := databases.BLOCKS.Get([]byte(blockId), nil)
 	if err != nil {
 		return ""

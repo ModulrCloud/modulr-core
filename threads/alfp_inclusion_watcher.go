@@ -233,12 +233,7 @@ func AlfpInclusionWatcherThread() {
 			if !utils.VerifyAggregatedLeaderFinalizationProof(&proof, epochHandler) {
 				continue
 			}
-			marker := utils.AlfpInclusionMarker{
-				Hash:    proof.VotingStat.Hash,
-				BlockId: blockID,
-				Anchor:  anchor.Pubkey,
-			}
-			utils.StoreAlfpIncluded(marker, epochId, proof.Leader, proof.VotingStat.Index)
+			utils.StoreAlfpIncluded(epochId, proof.Leader)
 		}
 
 		// Advance scan cursor.

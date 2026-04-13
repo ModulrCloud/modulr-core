@@ -127,7 +127,7 @@ func LeaderFinalizationThread() {
 
 		networkParams := snapshot.NetworkParameters
 
-		for _, leaderIndex := range leadersReadyForAlfp(processingHandler, &networkParams) {
+		for _, leaderIndex := range getLeadersWithNoFoundAlfp(processingHandler, &networkParams) {
 			tryCollectLeaderFinalizationProofs(processingHandler, leaderIndex, majority, state)
 		}
 
@@ -246,7 +246,7 @@ func iAmQuorumMember(epochHandler *structures.EpochDataHandler) bool {
 	return false
 }
 
-func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters) []int {
+func getLeadersWithNoFoundAlfp(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters) []int {
 	ready := make([]int, 0)
 
 	for idx := range epochHandler.LeadersSequence {
@@ -270,7 +270,7 @@ func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParam
 	return ready
 }
 
-func leaderHasAlfp(epochId int, leader string) bool {
+func haveInfoAboutAlfpLocally(epochId int, leader string) bool {
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
 	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	return err == nil
@@ -352,7 +352,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 
 	cache := ensureLeaderFinalizationCache(state, epochHandler.Id, leaderPubKey)
 
-	if leaderHasAlfp(epochHandler.Id, leaderPubKey) || state.Waiter == nil {
+	if haveInfoAboutAlfpLocally(epochHandler.Id, leaderPubKey) || state.Waiter == nil {
 		if aggregated := loadAggregatedLeaderFinalizationProof(epochHandler.Id, leaderPubKey); aggregated != nil && !utils.HasAnyAlfpIncluded(epochHandler.Id, leaderPubKey) && shouldBroadcastLeaderFinalization(cache) {
 			markLeaderFinalizationBroadcast(cache)
 			sendAggregatedLeaderFinalizationProofToAnchors(aggregated)
