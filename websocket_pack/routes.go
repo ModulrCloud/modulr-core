@@ -26,12 +26,6 @@ var httpClient = &http.Client{Timeout: 2 * time.Second}
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
-var (
-	anchorEpochAckMutex      sync.RWMutex
-	anchorEpochAckConfirmed  = make(map[int]bool)
-	anchorAckLastPullAttempt sync.Map
-)
-
 func sendNotReady(connection *gws.Conn) {
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
 }
@@ -367,28 +361,14 @@ func persistAnchorEpochAck(proof *structures.AggregatedAnchorEpochAckProof) {
 	if raw, err := json.Marshal(proof); err == nil {
 		_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 	}
-
-	anchorEpochAckMutex.Lock()
-	anchorEpochAckConfirmed[proof.NextEpochId] = true
-	anchorEpochAckMutex.Unlock()
 }
 
 func isAnchorEpochAckAvailable(epochId int) bool {
-	anchorEpochAckMutex.RLock()
-	if anchorEpochAckConfirmed[epochId] {
-		anchorEpochAckMutex.RUnlock()
-		return true
-	}
-	anchorEpochAckMutex.RUnlock()
-
 	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(epochId))
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
 	if err == nil && len(raw) > 0 {
 		var proof structures.AggregatedAnchorEpochAckProof
 		if json.Unmarshal(raw, &proof) == nil && utils.VerifyAggregatedAnchorEpochAckProof(&proof) {
-			anchorEpochAckMutex.Lock()
-			anchorEpochAckConfirmed[epochId] = true
-			anchorEpochAckMutex.Unlock()
 			return true
 		}
 	}
@@ -397,14 +377,6 @@ func isAnchorEpochAckAvailable(epochId int) bool {
 }
 
 func tryPullAnchorEpochAck(epochId int) bool {
-	now := time.Now()
-	if lastAttempt, ok := anchorAckLastPullAttempt.Load(epochId); ok {
-		if now.Sub(lastAttempt.(time.Time)) < 3*time.Second {
-			return false
-		}
-	}
-	anchorAckLastPullAttempt.Store(epochId, now)
-
 	if proof := GetAggregatedAnchorEpochAckProofFromPoD(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
 		persistAnchorEpochAck(proof)
 		return true
