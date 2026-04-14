@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
@@ -310,8 +311,8 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 		req.Header.SetMethod(fasthttp.MethodPost)
 		req.SetBody(ctx.PostBody())
 
-		if err := fasthttp.Do(req, resp); err != nil {
-			helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Impossible to redirect to current leader")
+		if err := fasthttp.DoTimeout(req, resp, 2*time.Second); err != nil {
+			helpers.WriteErr(ctx, fasthttp.StatusGatewayTimeout, "Current leader did not respond in time")
 			return
 		}
 

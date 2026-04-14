@@ -26,6 +26,11 @@ var httpClient = &http.Client{Timeout: 2 * time.Second}
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
+var (
+	anchorEpochAckFetchInFlight sync.Map
+	anchorEpochAckLastAttempt   sync.Map
+)
+
 func sendNotReady(connection *gws.Conn) {
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
 }
@@ -373,21 +378,43 @@ func isAnchorEpochAckAvailable(epochId int) bool {
 		}
 	}
 
-	return tryPullAnchorEpochAck(epochId)
+	return false
 }
 
-func tryPullAnchorEpochAck(epochId int) bool {
+func scheduleAnchorEpochAckFetch(epochId int) {
+	if _, inFlight := anchorEpochAckFetchInFlight.LoadOrStore(epochId, struct{}{}); inFlight {
+		return
+	}
+
+	now := time.Now()
+	if lastAttempt, ok := anchorEpochAckLastAttempt.Load(epochId); ok {
+		if now.Sub(lastAttempt.(time.Time)) < 2*time.Second {
+			anchorEpochAckFetchInFlight.Delete(epochId)
+			return
+		}
+	}
+
+	anchorEpochAckLastAttempt.Store(epochId, now)
+
+	go func() {
+		defer anchorEpochAckFetchInFlight.Delete(epochId)
+
+		if proof := tryPullAnchorEpochAck(epochId); proof != nil {
+			persistAnchorEpochAck(proof)
+		}
+	}()
+}
+
+func tryPullAnchorEpochAck(epochId int) *structures.AggregatedAnchorEpochAckProof {
 	if proof := GetAggregatedAnchorEpochAckProofFromPoD(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
-		persistAnchorEpochAck(proof)
-		return true
+		return proof
 	}
 
 	if proof := fetchAnchorEpochAckFromHTTP(epochId); proof != nil && utils.VerifyAggregatedAnchorEpochAckProof(proof) {
-		persistAnchorEpochAck(proof)
-		return true
+		return proof
 	}
 
-	return false
+	return nil
 }
 
 func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochAckProof {
@@ -429,6 +456,7 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	}
 
 	if parsedRequest.EpochId > 0 && !isAnchorEpochAckAvailable(parsedRequest.EpochId) {
+		scheduleAnchorEpochAckFetch(parsedRequest.EpochId)
 		logHeightProofReturn("anchor_epoch_ack_missing", parsedRequest, fmt.Sprintf("ack for epoch %d is not available yet", parsedRequest.EpochId))
 		sendNotReady(connection)
 		return
