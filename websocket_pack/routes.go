@@ -61,11 +61,14 @@ func logEpochRotationProofReturn(reason string, request WsEpochRotationProofRequ
 		fmt.Sprintf("sign_epoch_rotation_proof:return:%s:%d:%d", reason, request.EpochId, request.NextEpochId),
 		2*time.Second,
 		fmt.Sprintf(
-			"SignEpochRotationProof return [%s] epoch=%d nextEpoch=%d epochDataHash=%s details=%s",
+			"SignEpochRotationProof return [%s] epoch=%d nextEpoch=%d epochDataHash=%s finishedOnHeight=%d finishedOnBlockId=%s finishedOnHash=%s details=%s",
 			reason,
 			request.EpochId,
 			request.NextEpochId,
 			utils.ShortHash(request.EpochDataHash),
+			request.FinishedOnHeight,
+			request.FinishedOnBlockId,
+			utils.ShortHash(request.FinishedOnHash),
 			details,
 		),
 		utils.YELLOW_COLOR,
@@ -533,12 +536,55 @@ func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connectio
 	epochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.EpochId)
 	if epochHandler == nil {
 		logEpochRotationProofReturn("epoch_handler_missing", parsedRequest, fmt.Sprintf("no epoch handler snapshot for epoch %d", parsedRequest.EpochId))
+		sendNotReady(connection)
+		return
+	}
+
+	if !utils.HasLocallySequencedFullEpoch(parsedRequest.EpochId) {
+		logEpochRotationProofReturn(
+			"local_last_mile_epoch_not_completed",
+			parsedRequest,
+			fmt.Sprintf("local absolute height mapping for epoch %d is not finished yet", parsedRequest.EpochId),
+		)
+		sendNotReady(connection)
+		return
+	}
+
+	localBoundary := utils.LoadLastMileEpochBoundary(parsedRequest.EpochId)
+	if localBoundary == nil {
+		logEpochRotationProofReturn(
+			"local_epoch_boundary_missing",
+			parsedRequest,
+			fmt.Sprintf("missing durable last-mile boundary for epoch %d", parsedRequest.EpochId),
+		)
+		sendNotReady(connection)
+		return
+	}
+
+	if localBoundary.FinishedOnHeight != parsedRequest.FinishedOnHeight ||
+		localBoundary.FinishedOnBlockId != parsedRequest.FinishedOnBlockId ||
+		localBoundary.FinishedOnHash != parsedRequest.FinishedOnHash {
+		logEpochRotationProofReturn(
+			"epoch_boundary_mismatch",
+			parsedRequest,
+			fmt.Sprintf(
+				"localHeight=%d requestedHeight=%d localBlockId=%s requestedBlockId=%s localHash=%s requestedHash=%s",
+				localBoundary.FinishedOnHeight,
+				parsedRequest.FinishedOnHeight,
+				localBoundary.FinishedOnBlockId,
+				parsedRequest.FinishedOnBlockId,
+				utils.ShortHash(localBoundary.FinishedOnHash),
+				utils.ShortHash(parsedRequest.FinishedOnHash),
+			),
+		)
+		sendNotReady(connection)
 		return
 	}
 
 	localEpochData := utils.LoadNextEpochData(parsedRequest.NextEpochId)
 	if localEpochData == nil {
 		logEpochRotationProofReturn("next_epoch_data_missing", parsedRequest, fmt.Sprintf("local next epoch data for epoch %d not found", parsedRequest.NextEpochId))
+		sendNotReady(connection)
 		return
 	}
 
@@ -549,15 +595,18 @@ func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connectio
 			parsedRequest,
 			fmt.Sprintf("localHash=%s requestedHash=%s", utils.ShortHash(localHash), utils.ShortHash(parsedRequest.EpochDataHash)),
 		)
+		sendNotReady(connection)
 		return
 	}
 
-	dataToSign := strings.Join([]string{
-		constants.SigningPrefixEpochRotationProof,
-		strconv.Itoa(parsedRequest.EpochId),
-		strconv.Itoa(parsedRequest.NextEpochId),
+	dataToSign := utils.BuildEpochRotationProofSigningPayload(
+		parsedRequest.EpochId,
+		parsedRequest.NextEpochId,
 		parsedRequest.EpochDataHash,
-	}, ":")
+		parsedRequest.FinishedOnHeight,
+		parsedRequest.FinishedOnBlockId,
+		parsedRequest.FinishedOnHash,
+	)
 
 	response := WsEpochRotationProofResponse{
 		Voter: globals.CONFIGURATION.PublicKey,

@@ -165,8 +165,31 @@ func ComputeEpochDataHash(data *structures.NextEpochDataHandler) string {
 	return Blake3(string(raw))
 }
 
+func BuildEpochRotationProofSigningPayload(
+	epochId int,
+	nextEpochId int,
+	epochDataHash string,
+	finishedOnHeight int64,
+	finishedOnBlockId string,
+	finishedOnHash string,
+) string {
+	return strings.Join([]string{
+		constants.SigningPrefixEpochRotationProof,
+		strconv.Itoa(epochId),
+		strconv.Itoa(nextEpochId),
+		epochDataHash,
+		strconv.FormatInt(finishedOnHeight, 10),
+		finishedOnBlockId,
+		finishedOnHash,
+	}, ":")
+}
+
 func VerifyAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotationProof, epochHandler *structures.EpochDataHandler) bool {
 	if proof == nil || epochHandler == nil {
+		return false
+	}
+
+	if proof.NextEpochId != proof.EpochId+1 || proof.FinishedOnHeight < -1 || proof.FinishedOnHash == "" {
 		return false
 	}
 
@@ -182,12 +205,14 @@ func VerifyAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotatio
 		quorumMap[pk] = true
 	}
 
-	dataToVerify := strings.Join([]string{
-		constants.SigningPrefixEpochRotationProof,
-		strconv.Itoa(proof.EpochId),
-		strconv.Itoa(proof.NextEpochId),
+	dataToVerify := BuildEpochRotationProofSigningPayload(
+		proof.EpochId,
+		proof.NextEpochId,
 		proof.EpochDataHash,
-	}, ":")
+		proof.FinishedOnHeight,
+		proof.FinishedOnBlockId,
+		proof.FinishedOnHash,
+	)
 
 	okSignatures := 0
 	seen := make(map[string]bool)

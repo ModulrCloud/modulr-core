@@ -117,10 +117,13 @@ type WsAggregatedHeightProofGetResponse struct {
 // WsEpochRotationProofRequest is sent by the last-mile finalizer to request a single
 // epoch-rotation-proof signature from a quorum member.
 type WsEpochRotationProofRequest struct {
-	Route         string `json:"route"`
-	EpochId       int    `json:"epochId"`
-	NextEpochId   int    `json:"nextEpochId"`
-	EpochDataHash string `json:"epochDataHash"`
+	Route             string `json:"route"`
+	EpochId           int    `json:"epochId"`
+	NextEpochId       int    `json:"nextEpochId"`
+	EpochDataHash     string `json:"epochDataHash"`
+	FinishedOnHeight  int64  `json:"finishedOnHeight"`
+	FinishedOnBlockId string `json:"finishedOnBlockId"`
+	FinishedOnHash    string `json:"finishedOnHash"`
 }
 
 type WsEpochRotationProofResponse struct {

@@ -81,46 +81,48 @@ func LastMileFinalizerThread() {
 		// --- Finalizer-only: epoch rotation proof collection ---
 		if isFinalizer && epochSnapshot.Id > 0 && lastRotationEpoch < epochSnapshot.Id-1 {
 			prevEpochId := epochSnapshot.Id - 1
-			prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
+			if utils.HasLocallySequencedFullEpoch(prevEpochId) {
+				prevEpochHandler := getEpochHandlerForTracker(prevEpochId)
 
-			if prevEpochHandler != nil {
-				tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
+				if prevEpochHandler != nil {
+					tmpConns, tmpWaiter := openTemporaryQuorumConnections(prevEpochHandler)
 
-				epochRotationProof := tryCollectAggregatedEpochRotationProofWithConns(
-					prevEpochId, epochSnapshot.Id,
-					prevEpochHandler, tmpConns, tmpWaiter,
-				)
+					epochRotationProof := tryCollectAggregatedEpochRotationProofWithConns(
+						prevEpochId, epochSnapshot.Id,
+						prevEpochHandler, tmpConns, tmpWaiter,
+					)
 
-				closeTemporaryQuorumConnections(tmpConns)
+					closeTemporaryQuorumConnections(tmpConns)
 
-				if epochRotationProof != nil {
-					if !anchorConnectionsSent {
-						openAnchorConnectionsForLastMile()
-						anchorConnectionsSent = true
-					}
+					if epochRotationProof != nil {
+						if !anchorConnectionsSent {
+							openAnchorConnectionsForLastMile()
+							anchorConnectionsSent = true
+						}
 
-					ackProof := deliverAggregatedEpochRotationProofToAnchors(epochRotationProof)
-					websocket_pack.SendAggregatedEpochRotationProofToPoD(*epochRotationProof)
-					storeAggregatedEpochRotationProof(epochRotationProof)
+						ackProof := deliverAggregatedEpochRotationProofToAnchors(epochRotationProof)
+						websocket_pack.SendAggregatedEpochRotationProofToPoD(*epochRotationProof)
+						storeAggregatedEpochRotationProof(epochRotationProof)
 
-					if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
-						storeAggregatedAnchorEpochAckProof(ackProof)
-						websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
+						if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
+							storeAggregatedAnchorEpochAckProof(ackProof)
+							websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
 
-						nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
-						deliverAggregatedAnchorEpochAckProofToNewQuorum(ackProof, nextEpochHandler)
+							nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
+							deliverAggregatedAnchorEpochAckProofToNewQuorum(ackProof, nextEpochHandler)
 
+							utils.LogWithTime(
+								fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+								utils.DEEP_GREEN_COLOR,
+							)
+						}
+
+						lastRotationEpoch = prevEpochId
 						utils.LogWithTime(
-							fmt.Sprintf("Aggregated anchor epoch ack proof collected and delivered for epoch %d->%d", prevEpochId, epochSnapshot.Id),
+							fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
 							utils.DEEP_GREEN_COLOR,
 						)
 					}
-
-					lastRotationEpoch = prevEpochId
-					utils.LogWithTime(
-						fmt.Sprintf("Aggregated epoch rotation proof sent for epoch %d->%d", prevEpochId, epochSnapshot.Id),
-						utils.DEEP_GREEN_COLOR,
-					)
 				}
 			}
 		}
@@ -129,6 +131,13 @@ func LastMileFinalizerThread() {
 		if isFinalizer && !quorumConnectionsReady {
 			openQuorumConnectionsForLastMileFinalizer(&epochSnapshot)
 			quorumConnectionsReady = true
+		}
+
+		if tracker.EpochId < epochSnapshot.Id {
+			if syncedTracker, synced := syncLastMileTrackerToCurrentEpochStart(tracker, &epochSnapshot); synced {
+				tracker = syncedTracker
+				continue
+			}
 		}
 
 		// --- Block sequencing (ALL nodes, mirrors block_execution.go from main) ---
@@ -141,10 +150,34 @@ func LastMileFinalizerThread() {
 		}
 
 		if tracker.LeaderIndex >= len(epochHandler.LeadersSequence) {
+			completedBoundary := buildCompletedEpochBoundaryFromTracker(tracker, tracker.EpochId)
+			if completedBoundary == nil {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+
+			if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, tracker, completedBoundary); err != nil {
+				utils.LogWithTime(
+					fmt.Sprintf("Last mile sequencer: failed to persist completed epoch boundary for epoch %d: %v", tracker.EpochId, err),
+					utils.RED_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+
 			nextEpochHandler := getEpochHandlerForTracker(tracker.EpochId + 1)
 			if nextEpochHandler != nil {
-				tracker.AdvanceToNextEpoch()
-				utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+				nextTracker := *tracker
+				nextTracker.AdvanceToNextEpoch()
+				if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, &nextTracker, nil); err != nil {
+					utils.LogWithTime(
+						fmt.Sprintf("Last mile sequencer: failed to persist tracker advance to epoch %d: %v", nextTracker.EpochId, err),
+						utils.RED_COLOR,
+					)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+				tracker = &nextTracker
 				continue
 			}
 			time.Sleep(200 * time.Millisecond)
@@ -168,9 +201,18 @@ func LastMileFinalizerThread() {
 				),
 				utils.YELLOW_COLOR,
 			)
-			tracker.LeaderIndex++
-			tracker.BlockIndex = 0
-			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+			nextTracker := *tracker
+			nextTracker.LeaderIndex++
+			nextTracker.BlockIndex = 0
+			if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, &nextTracker, nil); err != nil {
+				utils.LogWithTime(
+					fmt.Sprintf("Last mile sequencer: failed to persist non-canonical skip for %s: %v", blockId, err),
+					utils.RED_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			tracker = &nextTracker
 			continue
 		}
 
@@ -180,9 +222,18 @@ func LastMileFinalizerThread() {
 			nextEpochVisible := getEpochHandlerForTracker(tracker.EpochId+1) != nil
 
 			if known && lastBlock.Index < 0 {
-				tracker.LeaderIndex++
-				tracker.BlockIndex = 0
-				utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+				nextTracker := *tracker
+				nextTracker.LeaderIndex++
+				nextTracker.BlockIndex = 0
+				if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, &nextTracker, nil); err != nil {
+					utils.LogWithTime(
+						fmt.Sprintf("Last mile sequencer: failed to persist empty-leader skip for epoch %d leader %s: %v", tracker.EpochId, leader, err),
+						utils.RED_COLOR,
+					)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+				tracker = &nextTracker
 				continue
 			}
 
@@ -242,22 +293,41 @@ func LastMileFinalizerThread() {
 			continue
 		}
 
-		// Write height mappings (ALL nodes — this is what SignHeightProof reads)
-		utils.StoreHeightBlockIdMapping(tracker.NextHeight, blockId)
-		utils.StoreHeightInEpochMapping(tracker.NextHeight, tracker.HeightInEpoch)
+		currentHeight := tracker.NextHeight
+		currentHeightInEpoch := tracker.HeightInEpoch
+
+		// Persist mappings atomically with the current tracker checkpoint so the
+		// height-voter never observes a half-written local sequencing state.
+		if isFinalizer {
+			currentTrackerCheckpoint := *tracker
+			if err := utils.PersistLastMileMappingsAndState(
+				constants.DBKeyLastMileFinalizerTracker,
+				currentHeight,
+				blockId,
+				currentHeightInEpoch,
+				&currentTrackerCheckpoint,
+			); err != nil {
+				utils.LogWithTime(
+					fmt.Sprintf("Last mile sequencer: failed to persist local height mapping for %s at height %d: %v", blockId, currentHeight, err),
+					utils.RED_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+		}
 
 		// --- Finalizer-only: collect AggregatedHeightProof before advancing ---
 		if isFinalizer {
 			var previousProof *structures.AggregatedHeightProof
-			if tracker.NextHeight > 0 {
-				previousProof = LoadAggregatedHeightProof(int(tracker.NextHeight - 1))
+			if currentHeight > 0 {
+				previousProof = LoadAggregatedHeightProof(int(currentHeight - 1))
 				if previousProof == nil {
 					time.Sleep(200 * time.Millisecond)
 					continue
 				}
 			}
 
-			proof := tryCollectAggregatedHeightProof(int(tracker.NextHeight), blockId, blockHash, tracker.EpochId, tracker.HeightInEpoch, epochHandler, previousProof)
+			proof := tryCollectAggregatedHeightProof(int(currentHeight), blockId, blockHash, tracker.EpochId, currentHeightInEpoch, epochHandler, previousProof)
 			if proof == nil {
 				time.Sleep(200 * time.Millisecond)
 				continue
@@ -290,16 +360,50 @@ func LastMileFinalizerThread() {
 		}
 
 		// Advance tracker (ALL nodes — finalizers reach here only after successful proof collection)
+		nextTracker := *tracker
 		if isLastBlock {
-			tracker.LeaderIndex++
-			tracker.BlockIndex = 0
+			nextTracker.LeaderIndex++
+			nextTracker.BlockIndex = 0
 		} else {
-			tracker.BlockIndex++
+			nextTracker.BlockIndex++
 		}
-		tracker.NextHeight++
-		tracker.HeightInEpoch++
+		nextTracker.NextHeight = currentHeight + 1
+		nextTracker.HeightInEpoch = currentHeightInEpoch + 1
 
-		utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+		var completedBoundary *structures.LastMileEpochBoundary
+		if nextTracker.LeaderIndex >= len(epochHandler.LeadersSequence) {
+			completedBoundary = newLastMileEpochBoundary(epochHandler.Id, currentHeight, blockId, blockHash)
+		}
+
+		if isFinalizer {
+			if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, &nextTracker, completedBoundary); err != nil {
+				utils.LogWithTime(
+					fmt.Sprintf("Last mile sequencer: failed to persist tracker advance after height %d: %v", currentHeight, err),
+					utils.RED_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			tracker = &nextTracker
+			continue
+		}
+
+		if err := utils.PersistLastMileMappingsAndStateTransition(
+			constants.DBKeyLastMileFinalizerTracker,
+			currentHeight,
+			blockId,
+			currentHeightInEpoch,
+			&nextTracker,
+			completedBoundary,
+		); err != nil {
+			utils.LogWithTime(
+				fmt.Sprintf("Last mile sequencer: failed to persist local sequencing progress for %s at height %d: %v", blockId, currentHeight, err),
+				utils.RED_COLOR,
+			)
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		tracker = &nextTracker
 	}
 }
 
@@ -490,6 +594,114 @@ func getBlockHashByBlockId(blockId string) string {
 	return ""
 }
 
+func newLastMileEpochBoundary(epochId int, finishedOnHeight int64, finishedOnBlockId, finishedOnHash string) *structures.LastMileEpochBoundary {
+	if finishedOnHash == "" {
+		finishedOnHash = constants.ZeroHash
+	}
+
+	return &structures.LastMileEpochBoundary{
+		EpochId:           epochId,
+		FinishedOnHeight:  finishedOnHeight,
+		FinishedOnBlockId: finishedOnBlockId,
+		FinishedOnHash:    finishedOnHash,
+	}
+}
+
+func buildCompletedEpochBoundaryFromTracker(tracker *utils.LastMileSequenceState, epochId int) *structures.LastMileEpochBoundary {
+	if tracker == nil {
+		return nil
+	}
+
+	finishedOnHeight := tracker.NextHeight - 1
+	if finishedOnHeight < 0 {
+		return newLastMileEpochBoundary(epochId, -1, "", constants.ZeroHash)
+	}
+
+	finishedOnBlockId := utils.LoadHeightBlockIdMapping(finishedOnHeight)
+	if finishedOnBlockId == "" {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("last_mile:boundary_missing_block_id:%d", epochId),
+			2*time.Second,
+			fmt.Sprintf("Last mile sequencer: missing blockId mapping for completed epoch %d at height %d", epochId, finishedOnHeight),
+			utils.YELLOW_COLOR,
+		)
+		return nil
+	}
+
+	finishedOnHash := getBlockHashByBlockId(finishedOnBlockId)
+	if finishedOnHash == "" {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("last_mile:boundary_missing_hash:%d:%d", epochId, finishedOnHeight),
+			2*time.Second,
+			fmt.Sprintf("Last mile sequencer: missing block hash for completed epoch %d at height %d blockId=%s", epochId, finishedOnHeight, finishedOnBlockId),
+			utils.YELLOW_COLOR,
+		)
+		return nil
+	}
+
+	return newLastMileEpochBoundary(epochId, finishedOnHeight, finishedOnBlockId, finishedOnHash)
+}
+
+func syncLastMileTrackerToCurrentEpochStart(
+	tracker *utils.LastMileSequenceState,
+	currentEpochHandler *structures.EpochDataHandler,
+) (*utils.LastMileSequenceState, bool) {
+	if tracker == nil || currentEpochHandler == nil || currentEpochHandler.Id <= 0 || tracker.EpochId >= currentEpochHandler.Id {
+		return nil, false
+	}
+
+	proof := fetchVerifiedAggregatedEpochRotationProof(currentEpochHandler.Id - 1)
+	if proof == nil || proof.NextEpochId != currentEpochHandler.Id {
+		return nil, false
+	}
+
+	nextHeight := proof.FinishedOnHeight + 1
+	if nextHeight < tracker.NextHeight {
+		utils.LogWithTimeThrottled(
+			fmt.Sprintf("last_mile:catchup_regression:%d:%d", tracker.EpochId, currentEpochHandler.Id),
+			2*time.Second,
+			fmt.Sprintf(
+				"Last mile sequencer: refusing tracker fast-forward to epoch %d because proof boundary height %d would regress local nextHeight %d",
+				currentEpochHandler.Id,
+				proof.FinishedOnHeight,
+				tracker.NextHeight,
+			),
+			utils.YELLOW_COLOR,
+		)
+		return nil, false
+	}
+
+	nextTracker := &utils.LastMileSequenceState{
+		EpochId:       currentEpochHandler.Id,
+		LeaderIndex:   0,
+		BlockIndex:    0,
+		NextHeight:    nextHeight,
+		HeightInEpoch: 0,
+	}
+
+	if err := utils.PersistLastMileStateTransition(constants.DBKeyLastMileFinalizerTracker, nextTracker, nil); err != nil {
+		utils.LogWithTime(
+			fmt.Sprintf("Last mile sequencer: failed to persist catch-up tracker sync to epoch %d: %v", currentEpochHandler.Id, err),
+			utils.RED_COLOR,
+		)
+		return nil, false
+	}
+
+	utils.LogWithTime(
+		fmt.Sprintf(
+			"Last mile sequencer: fast-forwarded tracker from epoch %d to epoch %d using rotation proof boundary height=%d blockId=%s hash=%s",
+			tracker.EpochId,
+			currentEpochHandler.Id,
+			proof.FinishedOnHeight,
+			proof.FinishedOnBlockId,
+			utils.ShortHash(proof.FinishedOnHash),
+		),
+		utils.CYAN_COLOR,
+	)
+
+	return nextTracker, true
+}
+
 func tryCollectAggregatedHeightProof(absoluteHeight int, blockId, blockHash string, epochId int, heightInEpoch int, epochHandler *structures.EpochDataHandler, previousProof *structures.AggregatedHeightProof) *structures.AggregatedHeightProof {
 	majority := utils.GetQuorumMajority(epochHandler)
 
@@ -600,12 +812,19 @@ func tryCollectAggregatedEpochRotationProofWithConns(
 	}
 
 	majority := utils.GetQuorumMajority(prevEpochHandler)
+	boundary := utils.LoadLastMileEpochBoundary(epochId)
+	if boundary == nil {
+		return nil
+	}
 
 	request := websocket_pack.WsEpochRotationProofRequest{
-		Route:         constants.WsRouteSignEpochRotationProof,
-		EpochId:       epochId,
-		NextEpochId:   nextEpochId,
-		EpochDataHash: epochDataHash,
+		Route:             constants.WsRouteSignEpochRotationProof,
+		EpochId:           epochId,
+		NextEpochId:       nextEpochId,
+		EpochDataHash:     epochDataHash,
+		FinishedOnHeight:  boundary.FinishedOnHeight,
+		FinishedOnBlockId: boundary.FinishedOnBlockId,
+		FinishedOnHash:    boundary.FinishedOnHash,
 	}
 
 	message, err := json.Marshal(request)
@@ -616,12 +835,14 @@ func tryCollectAggregatedEpochRotationProofWithConns(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	dataToVerify := strings.Join([]string{
-		constants.SigningPrefixEpochRotationProof,
-		strconv.Itoa(epochId),
-		strconv.Itoa(nextEpochId),
+	dataToVerify := utils.BuildEpochRotationProofSigningPayload(
+		epochId,
+		nextEpochId,
 		epochDataHash,
-	}, ":")
+		boundary.FinishedOnHeight,
+		boundary.FinishedOnBlockId,
+		boundary.FinishedOnHash,
+	)
 
 	validateProof := func(id string, raw []byte) bool {
 		var response websocket_pack.WsEpochRotationProofResponse
@@ -652,11 +873,14 @@ func tryCollectAggregatedEpochRotationProofWithConns(
 	}
 
 	return &structures.AggregatedEpochRotationProof{
-		EpochId:       epochId,
-		NextEpochId:   nextEpochId,
-		EpochData:     *localEpochData,
-		EpochDataHash: epochDataHash,
-		Proofs:        proofs,
+		EpochId:           epochId,
+		NextEpochId:       nextEpochId,
+		EpochData:         *localEpochData,
+		EpochDataHash:     epochDataHash,
+		FinishedOnHeight:  boundary.FinishedOnHeight,
+		FinishedOnBlockId: boundary.FinishedOnBlockId,
+		FinishedOnHash:    boundary.FinishedOnHash,
+		Proofs:            proofs,
 	}
 }
 

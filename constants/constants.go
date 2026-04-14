@@ -58,6 +58,9 @@ const (
 	DBKeyPrefixFirstBlockData               = "FIRST_BLOCK_DATA:"
 	DBKeyPrefixAggregatedHeightProof        = "HEIGHT_PROOF:"
 	DBKeyPrefixLastMileHeightMap            = "LAST_MILE_HEIGHT_MAP:"
+	DBKeyPrefixHeightInEpochMap             = "HEIGHT_IN_EPOCH_MAP:"
+	DBKeyPrefixLastMileEpochComplete        = "LAST_MILE_EPOCH_COMPLETE:"
+	DBKeyPrefixLastMileEpochBoundary        = "LAST_MILE_EPOCH_BOUNDARY:"
 	DBKeyPrefixAfp                          = "AFP:"
 	DBKeyPrefixAggregatedEpochRotationProof = "EPOCH_ROTATION_PROOF:"
 
