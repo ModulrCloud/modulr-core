@@ -26,8 +26,6 @@ var httpClient = &http.Client{Timeout: 2 * time.Second}
 // Only one block creator can request proof for block at a choosen period of time T
 var BLOCK_CREATOR_REQUEST_MUTEX = sync.Mutex{}
 
-var heightProofVoterMutex sync.Mutex
-
 var (
 	anchorEpochAckMutex      sync.RWMutex
 	anchorEpochAckConfirmed  = make(map[int]bool)
@@ -463,9 +461,6 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 		sendNotReady(connection)
 		return
 	}
-
-	heightProofVoterMutex.Lock()
-	defer heightProofVoterMutex.Unlock()
 
 	requestedHeight := int64(parsedRequest.AbsoluteHeight)
 
