@@ -153,12 +153,31 @@ func LastMileFinalizerThread() {
 
 		leader := epochHandler.LeadersSequence[tracker.LeaderIndex]
 		blockId := fmt.Sprintf("%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex)
+		lastBlocksByLeaders := snapshotLastBlocksByLeaders()
+		lastBlock, known := lastBlocksByLeaders[leader]
+
+		// If alignment already proved that this leader ended earlier, we may have
+		// locally produced/fetched extra blocks for the same leader that are not
+		// part of the canonical sequence. Skip them and move to the next leader.
+		if known && tracker.BlockIndex > lastBlock.Index {
+			utils.LogWithTime(
+				fmt.Sprintf(
+					"Last mile sequencer: skipping non-canonical block position %s because aligned last index for leader is %d",
+					blockId,
+					lastBlock.Index,
+				),
+				utils.YELLOW_COLOR,
+			)
+			tracker.LeaderIndex++
+			tracker.BlockIndex = 0
+			utils.PersistLastMileSequenceState(constants.DBKeyLastMileFinalizerTracker, tracker)
+			continue
+		}
 
 		blockHash := getBlockHashByBlockId(blockId)
 
 		if blockHash == "" {
-			lastBlocksByLeaders := snapshotLastBlocksByLeaders()
-			lastBlock, known := lastBlocksByLeaders[leader]
+			nextEpochVisible := getEpochHandlerForTracker(tracker.EpochId+1) != nil
 
 			if known && lastBlock.Index < 0 {
 				tracker.LeaderIndex++
@@ -167,6 +186,35 @@ func LastMileFinalizerThread() {
 				continue
 			}
 
+			alignmentIndex := -999
+			alignmentHash := ""
+			if known {
+				alignmentIndex = lastBlock.Index
+				alignmentHash = lastBlock.Hash
+			}
+
+			utils.LogWithTimeThrottled(
+				fmt.Sprintf("last_mile:missing_block:%d:%s:%d", tracker.EpochId, leader, tracker.BlockIndex),
+				2*time.Second,
+				fmt.Sprintf(
+					"Last mile sequencer waiting for block body: trackerEpoch=%d currentEpoch=%d nextHeight=%d heightInEpoch=%d leaderIndex=%d/%d leader=%s blockIndex=%d blockId=%s alignmentKnown=%t alignmentIndex=%d alignmentHash=%s nextEpochVisible=%t",
+					tracker.EpochId,
+					epochSnapshot.Id,
+					tracker.NextHeight,
+					tracker.HeightInEpoch,
+					tracker.LeaderIndex,
+					len(epochHandler.LeadersSequence)-1,
+					leader,
+					tracker.BlockIndex,
+					blockId,
+					known,
+					alignmentIndex,
+					utils.ShortHash(alignmentHash),
+					nextEpochVisible,
+				),
+				utils.YELLOW_COLOR,
+			)
+
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -174,8 +222,8 @@ func LastMileFinalizerThread() {
 		isLastBlock := false
 		confirmed := false
 
-		lastBlocksByLeaders := snapshotLastBlocksByLeaders()
-		lastBlock, known := lastBlocksByLeaders[leader]
+		lastBlocksByLeaders = snapshotLastBlocksByLeaders()
+		lastBlock, known = lastBlocksByLeaders[leader]
 
 		if known && lastBlock.Index == tracker.BlockIndex && lastBlock.Hash == blockHash {
 			confirmed = true

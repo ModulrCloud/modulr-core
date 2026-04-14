@@ -2,6 +2,7 @@ package websocket_pack
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,6 +36,40 @@ var (
 
 func sendNotReady(connection *gws.Conn) {
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
+}
+
+func logHeightProofReturn(reason string, request WsHeightProofRequest, details string) {
+	utils.LogWithTimeThrottled(
+		fmt.Sprintf("sign_height_proof:return:%s:%d:%s", reason, request.AbsoluteHeight, request.BlockId),
+		2*time.Second,
+		fmt.Sprintf(
+			"SignHeightProof return [%s] height=%d epoch=%d heightInEpoch=%d blockId=%s hash=%s details=%s",
+			reason,
+			request.AbsoluteHeight,
+			request.EpochId,
+			request.HeightInEpoch,
+			request.BlockId,
+			utils.ShortHash(request.BlockHash),
+			details,
+		),
+		utils.YELLOW_COLOR,
+	)
+}
+
+func logEpochRotationProofReturn(reason string, request WsEpochRotationProofRequest, details string) {
+	utils.LogWithTimeThrottled(
+		fmt.Sprintf("sign_epoch_rotation_proof:return:%s:%d:%d", reason, request.EpochId, request.NextEpochId),
+		2*time.Second,
+		fmt.Sprintf(
+			"SignEpochRotationProof return [%s] epoch=%d nextEpoch=%d epochDataHash=%s details=%s",
+			reason,
+			request.EpochId,
+			request.NextEpochId,
+			utils.ShortHash(request.EpochDataHash),
+			details,
+		),
+		utils.YELLOW_COLOR,
+	)
 }
 
 func getEpochHandlerForLeaderFinalization(epochIndex int) *structures.EpochDataHandler {
@@ -415,11 +450,13 @@ func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochA
 
 func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		logHeightProofReturn("flood_prevention_disabled", parsedRequest, "route is temporarily blocked")
 		sendNotReady(connection)
 		return
 	}
 
 	if parsedRequest.EpochId > 0 && !isAnchorEpochAckAvailable(parsedRequest.EpochId) {
+		logHeightProofReturn("anchor_epoch_ack_missing", parsedRequest, fmt.Sprintf("ack for epoch %d is not available yet", parsedRequest.EpochId))
 		sendNotReady(connection)
 		return
 	}
@@ -432,18 +469,33 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	// Look up the pre-computed mapping written by LastMileFinalizerThread
 	expectedBlockId := utils.LoadHeightBlockIdMapping(requestedHeight)
 	if expectedBlockId == "" || expectedBlockId != parsedRequest.BlockId {
+		logHeightProofReturn(
+			"expected_block_id_mismatch",
+			parsedRequest,
+			fmt.Sprintf("expectedBlockId=%s requestedBlockId=%s", expectedBlockId, parsedRequest.BlockId),
+		)
 		sendNotReady(connection)
 		return
 	}
 
 	expectedHeightInEpoch, ok := utils.LoadHeightInEpochMapping(requestedHeight)
 	if !ok || expectedHeightInEpoch != parsedRequest.HeightInEpoch {
+		logHeightProofReturn(
+			"height_in_epoch_mismatch",
+			parsedRequest,
+			fmt.Sprintf("mappingFound=%t expectedHeightInEpoch=%d requestedHeightInEpoch=%d", ok, expectedHeightInEpoch, parsedRequest.HeightInEpoch),
+		)
 		sendNotReady(connection)
 		return
 	}
 
 	blockHash := getBlockHashForHeightVoter(parsedRequest.BlockId)
 	if blockHash == "" || blockHash != parsedRequest.BlockHash {
+		logHeightProofReturn(
+			"block_hash_mismatch",
+			parsedRequest,
+			fmt.Sprintf("localBlockHash=%s requestedBlockHash=%s", utils.ShortHash(blockHash), utils.ShortHash(parsedRequest.BlockHash)),
+		)
 		sendNotReady(connection)
 		return
 	}
@@ -465,27 +517,38 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	jsonResponse, err := json.Marshal(response)
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
+		return
 	}
+
+	logHeightProofReturn("marshal_response_failed", parsedRequest, err.Error())
 }
 
 func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
+		logEpochRotationProofReturn("flood_prevention_disabled", parsedRequest, "route is temporarily blocked")
 		sendNotReady(connection)
 		return
 	}
 
 	epochHandler := getEpochHandlerForLeaderFinalization(parsedRequest.EpochId)
 	if epochHandler == nil {
+		logEpochRotationProofReturn("epoch_handler_missing", parsedRequest, fmt.Sprintf("no epoch handler snapshot for epoch %d", parsedRequest.EpochId))
 		return
 	}
 
 	localEpochData := utils.LoadNextEpochData(parsedRequest.NextEpochId)
 	if localEpochData == nil {
+		logEpochRotationProofReturn("next_epoch_data_missing", parsedRequest, fmt.Sprintf("local next epoch data for epoch %d not found", parsedRequest.NextEpochId))
 		return
 	}
 
 	localHash := utils.ComputeEpochDataHash(localEpochData)
 	if localHash != parsedRequest.EpochDataHash {
+		logEpochRotationProofReturn(
+			"epoch_data_hash_mismatch",
+			parsedRequest,
+			fmt.Sprintf("localHash=%s requestedHash=%s", utils.ShortHash(localHash), utils.ShortHash(parsedRequest.EpochDataHash)),
+		)
 		return
 	}
 
@@ -504,7 +567,10 @@ func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connectio
 	jsonResponse, err := json.Marshal(response)
 	if err == nil {
 		connection.WriteMessage(gws.OpcodeText, jsonResponse)
+		return
 	}
+
+	logEpochRotationProofReturn("marshal_response_failed", parsedRequest, err.Error())
 }
 
 func getBlockHashForHeightVoter(blockId string) string {
