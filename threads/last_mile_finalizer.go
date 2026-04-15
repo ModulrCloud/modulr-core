@@ -996,19 +996,6 @@ func storeAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochA
 	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 }
 
-func LoadAggregatedAnchorEpochAckProof(epochId int) *structures.AggregatedAnchorEpochAckProof {
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
-	if err != nil {
-		return nil
-	}
-	var proof structures.AggregatedAnchorEpochAckProof
-	if json.Unmarshal(raw, &proof) != nil {
-		return nil
-	}
-	return &proof
-}
-
 func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.AggregatedAnchorEpochAckProof, nextEpochHandler *structures.EpochDataHandler) {
 	if proof == nil || nextEpochHandler == nil {
 		return

@@ -61,12 +61,6 @@ func LoadLastMileSequenceState(dbKey string) *LastMileSequenceState {
 	return &state
 }
 
-func PersistLastMileSequenceState(dbKey string, state *LastMileSequenceState) {
-	if raw, err := json.Marshal(state); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(dbKey), raw, nil)
-	}
-}
-
 func appendLastMileSequenceState(batch *leveldb.Batch, dbKey string, state *LastMileSequenceState) error {
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -161,16 +155,6 @@ func HasLocallySequencedFullEpoch(epochId int) bool {
 	return LoadLastMileEpochBoundary(epochId) != nil
 }
 
-func PersistLastMileEpochBoundary(boundary *structures.LastMileEpochBoundary) error {
-	batch := new(leveldb.Batch)
-
-	if err := appendLastMileEpochBoundary(batch, boundary); err != nil {
-		return err
-	}
-
-	return databases.FINALIZATION_VOTING_STATS.Write(batch, nil)
-}
-
 func LoadLastMileEpochBoundary(epochId int) *structures.LastMileEpochBoundary {
 	key := fmt.Sprintf(constants.DBKeyPrefixLastMileEpochBoundary+"%d", epochId)
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
@@ -186,11 +170,6 @@ func LoadLastMileEpochBoundary(epochId int) *structures.LastMileEpochBoundary {
 	return &boundary
 }
 
-func StoreHeightBlockIdMapping(height int64, blockId string) {
-	key := fmt.Sprintf(constants.DBKeyPrefixLastMileHeightMap+"%d", height)
-	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(key), []byte(blockId), nil)
-}
-
 func LoadHeightBlockIdMapping(height int64) string {
 	key := fmt.Sprintf(constants.DBKeyPrefixLastMileHeightMap+"%d", height)
 	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
@@ -198,11 +177,6 @@ func LoadHeightBlockIdMapping(height int64) string {
 		return ""
 	}
 	return string(raw)
-}
-
-func StoreHeightInEpochMapping(height int64, heightInEpoch int) {
-	key := fmt.Sprintf("%s%d", constants.DBKeyPrefixHeightInEpochMap, height)
-	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(key), []byte(fmt.Sprintf("%d", heightInEpoch)), nil)
 }
 
 func LoadHeightInEpochMapping(height int64) (int, bool) {

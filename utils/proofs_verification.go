@@ -11,7 +11,6 @@ import (
 
 	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
-	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/structures"
 )
@@ -261,75 +260,6 @@ func VerifyAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpoch
 	}
 
 	return okSignatures >= majority
-}
-
-func GetVerifiedAggregatedFinalizationProofByBlockId(blockID string, epochHandler *structures.EpochDataHandler) *structures.AggregatedFinalizationProof {
-	localAfpAsBytes, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockID), nil)
-
-	if err == nil {
-		var localAfpParsed structures.AggregatedFinalizationProof
-
-		err = json.Unmarshal(localAfpAsBytes, &localAfpParsed)
-
-		if err != nil {
-			return nil
-		}
-
-		return &localAfpParsed
-	}
-
-	quorum := GetQuorumUrlsAndPubkeys(epochHandler)
-
-	resultChan := make(chan *structures.AggregatedFinalizationProof, len(quorum))
-
-	var wg sync.WaitGroup
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-
-	defer cancel()
-
-	for _, node := range quorum {
-		wg.Add(1)
-
-		go func(endpoint string) {
-			defer wg.Done()
-
-			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/aggregated_finalization_proof/"+blockID, nil)
-			if err != nil {
-				return
-			}
-
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				return
-			}
-			defer resp.Body.Close()
-
-			var afp structures.AggregatedFinalizationProof
-
-			if json.NewDecoder(resp.Body).Decode(&afp) == nil && VerifyAggregatedFinalizationProof(&afp, epochHandler) {
-				// send the first valid result and immediately cancel all other requests
-				select {
-				case resultChan <- &afp:
-					cancel() // stop all remaining goroutines and HTTP requests
-				default:
-				}
-			}
-		}(node.Url)
-	}
-
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	for res := range resultChan {
-		if res != nil {
-			return res
-		}
-	}
-
-	return nil
 }
 
 // GetVerifiedAnchorsAggregatedFinalizationProofByBlockId fetches an aggregated finalization proof for an anchor block
