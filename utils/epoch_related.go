@@ -18,11 +18,6 @@ type CurrentLeaderData struct {
 	Url        string
 }
 
-type ValidatorData struct {
-	ValidatorPubKey string
-	TotalStake      uint64
-}
-
 func GetCurrentLeader() CurrentLeaderData {
 	// Snapshot leader data under RLock, then release lock before calling validator getter.
 	// This avoids a potential lock-upgrade deadlock, because GetValidatorFromApprovementThreadState
@@ -119,7 +114,7 @@ func GetCurrentEpochQuorum(epochHandler *structures.EpochDataHandler, quorumSize
 
 	for i := 0; i < quorumSize && totalStakeSum > 0; i++ {
 		hashHex := Blake3(hashOfMetadataFromEpoch + "_" + strconv.Itoa(i))
-		r := hashHexToUint64(hashHex) % totalStakeSum
+		r := HashHexToUint64(hashHex) % totalStakeSum
 
 		idx := tree.FindByWeight(r)
 		quorum = append(quorum, pubkeys[idx])
@@ -152,7 +147,7 @@ func SetLeadersSequence(epochHandler *structures.EpochDataHandler, epochSeed str
 
 	for i := 0; i < len(pubkeys) && totalStakeSum > 0; i++ {
 		hashHex := Blake3(hashOfMetadataFromOldEpoch + "_" + strconv.Itoa(i))
-		r := hashHexToUint64(hashHex) % totalStakeSum
+		r := HashHexToUint64(hashHex) % totalStakeSum
 
 		idx := tree.FindByWeight(r)
 		epochHandler.LeadersSequence = append(epochHandler.LeadersSequence, pubkeys[idx])

@@ -83,6 +83,23 @@ func Blake3(data string) string {
 	return hex.EncodeToString(blake3Hash[:])
 }
 
+// HashHexToUint64 converts the first 8 bytes (16 hex chars) of a hex string
+// into a big-endian uint64. Returns 0 if the input is too short or invalid.
+func HashHexToUint64(hashHex string) uint64 {
+	if len(hashHex) < 16 {
+		return 0
+	}
+	b, err := hex.DecodeString(hashHex[:16])
+	if err != nil {
+		return 0
+	}
+	var r uint64
+	for _, by := range b {
+		r = (r << 8) | uint64(by)
+	}
+	return r
+}
+
 func GetUTCTimestampInMilliSeconds() int64 {
 	return time.Now().UTC().UnixMilli()
 }

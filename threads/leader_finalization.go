@@ -413,7 +413,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 			}
 
 			// Verify signature
-			dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(cacheSnapshot.Index), cacheSnapshot.Hash, epochFullID}, ":")
+			dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, leaderPubKey, strconv.Itoa(cacheSnapshot.Index), cacheSnapshot.Hash, epochFullID}, ":")
 			return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
 
 		case "UPGRADE":
@@ -526,7 +526,7 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 	skipData := cache.SkipData
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(skipData.Index), skipData.Hash, epochFullID}, ":")
+	dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, leaderPubKey, strconv.Itoa(skipData.Index), skipData.Hash, epochFullID}, ":")
 
 	quorumMap := make(map[string]bool)
 	for _, pk := range epochHandler.Quorum {

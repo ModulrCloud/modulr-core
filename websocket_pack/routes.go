@@ -318,13 +318,14 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 				dataToSignForLeaderFinalization := ""
 
 				if parsedRequest.SkipData.Index == -1 {
-					dataToSignForLeaderFinalization = "LEADER_FINALIZATION_PROOF:" + leaderToFinalize
 
+					dataToSignForLeaderFinalization = constants.SigningPrefixLeaderFinalization + leaderToFinalize
 					dataToSignForLeaderFinalization += ":-1:" + constants.ZeroHash + ":"
-
 					dataToSignForLeaderFinalization += epochFullID
+
 				} else if parsedRequest.SkipData.Index >= 0 {
-					dataToSignForLeaderFinalization = "LEADER_FINALIZATION_PROOF:" + leaderToFinalize +
+
+					dataToSignForLeaderFinalization = constants.SigningPrefixLeaderFinalization + leaderToFinalize +
 						":" + strconv.Itoa(propSkipData.Index) +
 						":" + propSkipData.Hash +
 						":" + epochFullID

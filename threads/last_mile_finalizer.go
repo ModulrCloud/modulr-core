@@ -3,8 +3,6 @@ package threads
 
 import (
 	"context"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -407,21 +405,6 @@ func LastMileFinalizerThread() {
 	}
 }
 
-func hashHexToUint64(hashHex string) uint64 {
-
-	if len(hashHex) < 16 {
-		return 0
-	}
-
-	b, err := hex.DecodeString(hashHex[:16])
-
-	if err != nil {
-		return 0
-	}
-
-	return binary.BigEndian.Uint64(b)
-}
-
 func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler) []string {
 	quorum := epochHandler.Quorum
 
@@ -443,7 +426,7 @@ func selectLastMileFinalizersForEpoch(epochHandler *structures.EpochDataHandler)
 
 	for i := 0; i < count; i++ {
 		hashHex := utils.Blake3(seed + "_" + strconv.Itoa(i))
-		r := hashHexToUint64(hashHex) % uint64(len(quorum)-i)
+		r := utils.HashHexToUint64(hashHex) % uint64(len(quorum)-i)
 		j := i + int(r)
 		indices[i], indices[j] = indices[j], indices[i]
 	}
