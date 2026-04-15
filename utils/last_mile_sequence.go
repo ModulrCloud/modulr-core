@@ -80,11 +80,6 @@ func appendHeightMappings(batch *leveldb.Batch, height int64, blockId string, he
 	batch.Put([]byte(heightInEpochKey), []byte(fmt.Sprintf("%d", heightInEpoch)))
 }
 
-func appendEpochSequencedMarker(batch *leveldb.Batch, epochId int) {
-	key := fmt.Sprintf(constants.DBKeyPrefixLastMileEpochComplete+"%d", epochId)
-	batch.Put([]byte(key), []byte{1})
-}
-
 func appendLastMileEpochBoundary(batch *leveldb.Batch, boundary *structures.LastMileEpochBoundary) error {
 	if boundary == nil {
 		return nil
@@ -97,7 +92,6 @@ func appendLastMileEpochBoundary(batch *leveldb.Batch, boundary *structures.Last
 
 	key := fmt.Sprintf(constants.DBKeyPrefixLastMileEpochBoundary+"%d", boundary.EpochId)
 	batch.Put([]byte(key), raw)
-	appendEpochSequencedMarker(batch, boundary.EpochId)
 
 	return nil
 }
@@ -190,4 +184,16 @@ func LoadHeightInEpochMapping(height int64) (int, bool) {
 		return 0, false
 	}
 	return val, true
+}
+
+func StoreAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) {
+	if proof == nil {
+		return
+	}
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, proof.NextEpochId))
+	raw, err := json.Marshal(proof)
+	if err != nil {
+		return
+	}
+	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 }

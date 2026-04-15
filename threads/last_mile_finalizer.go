@@ -103,7 +103,7 @@ func LastMileFinalizerThread() {
 						storeAggregatedEpochRotationProof(epochRotationProof)
 
 						if ackProof != nil && utils.VerifyAggregatedAnchorEpochAckProof(ackProof) {
-							storeAggregatedAnchorEpochAckProof(ackProof)
+							utils.StoreAggregatedAnchorEpochAckProof(ackProof)
 							websocket_pack.SendAggregatedAnchorEpochAckProofToPoD(*ackProof)
 
 							nextEpochHandler := getEpochHandlerForTracker(epochSnapshot.Id)
@@ -965,18 +965,6 @@ func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEp
 		EpochDataHash: proof.EpochDataHash,
 		Proofs:        proofs,
 	}
-}
-
-func storeAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochAckProof) {
-	if proof == nil {
-		return
-	}
-	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, proof.NextEpochId))
-	raw, err := json.Marshal(proof)
-	if err != nil {
-		return
-	}
-	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
 }
 
 func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.AggregatedAnchorEpochAckProof, nextEpochHandler *structures.EpochDataHandler) {

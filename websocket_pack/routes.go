@@ -358,15 +358,8 @@ func AcceptAggregatedAnchorEpochAckProof(parsedRequest WsAcceptAggregatedAnchorE
 		return
 	}
 
-	persistAnchorEpochAck(proof)
+	utils.StoreAggregatedAnchorEpochAckProof(proof)
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"OK"}`))
-}
-
-func persistAnchorEpochAck(proof *structures.AggregatedAnchorEpochAckProof) {
-	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(proof.NextEpochId))
-	if raw, err := json.Marshal(proof); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
-	}
 }
 
 func isAnchorEpochAckAvailable(epochId int) bool {
@@ -401,7 +394,7 @@ func scheduleAnchorEpochAckFetch(epochId int) {
 		defer anchorEpochAckFetchInFlight.Delete(epochId)
 
 		if proof := tryPullAnchorEpochAck(epochId); proof != nil {
-			persistAnchorEpochAck(proof)
+			utils.StoreAggregatedAnchorEpochAckProof(proof)
 		}
 	}()
 }
