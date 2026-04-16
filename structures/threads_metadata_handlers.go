@@ -22,8 +22,7 @@ type ExecutionThreadMetadataHandler struct {
 	// EpochStatistics tracks metrics within the current epoch (reset on epoch rotation).
 	EpochStatistics *Statistics `json:"epochStatistics,omitempty"`
 
-	ExecutionData         map[string]ExecutionStats `json:"executionData"` // PUBKEY => {index:int, hash:""}
-	SequenceAlignmentData AlignmentDataHandler      `json:"currentEpochAlignmentData"`
+	SequenceAlignmentData AlignmentDataHandler `json:"currentEpochAlignmentData"`
 
 	AccountsCache           map[string]*Account          `json:"-"`
 	ValidatorsStoragesCache map[string]*ValidatorStorage `json:"-"`

@@ -48,7 +48,6 @@ var EXECUTION_THREAD_METADATA = struct {
 		CoreMajorVersion:        -1,
 		AccountsCache:           make(map[string]*structures.Account),
 		ValidatorsStoragesCache: make(map[string]*structures.ValidatorStorage),
-		ExecutionData:           make(map[string]structures.ExecutionStats),
 		SequenceAlignmentData: structures.AlignmentDataHandler{
 			CurrentAnchorAssumption:         0,
 			CurrentAnchorBlockIndexObserved: -1,

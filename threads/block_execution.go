@@ -611,17 +611,6 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
 	currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
 
-	expectedPrevHash := epochHandlerRef.ExecutionData[block.Creator].Hash
-	if expectedPrevHash != block.PrevHash {
-		utils.LogWithTimeThrottled(
-			"exec:prev_hash_mismatch:"+currentBlockId,
-			2*time.Second,
-			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, utils.ShortHash(expectedPrevHash), utils.ShortHash(block.PrevHash)),
-			utils.YELLOW_COLOR,
-		)
-		return nil, "", false
-	}
-
 	// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
 	// while keeping the read caches bounded via LRU.
 	utils.ResetExecTouchedSets()
@@ -707,11 +696,6 @@ func persistTouchedState(stateBatch *leveldb.Batch) {
 
 func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) string {
 	blockHash := block.GetHash()
-
-	blockCreatorData := epochHandlerRef.ExecutionData[block.Creator]
-	blockCreatorData.Index = block.Index
-	blockCreatorData.Hash = blockHash
-	epochHandlerRef.ExecutionData[block.Creator] = blockCreatorData
 
 	epochHandlerRef.Statistics.LastHeight++
 	epochHandlerRef.Statistics.LastBlockHash = blockHash
@@ -940,12 +924,6 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 		// Nullify values for the upcoming epoch
 
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
-
-		handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData = make(map[string]structures.ExecutionStats)
-
-		for _, validatorPubkey := range handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.LeadersSequence {
-			handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[validatorPubkey] = structures.NewExecutionStatsTemplate()
-		}
 
 		// Finally, clean & nullify sequence data
 

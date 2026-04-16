@@ -1,10 +1,6 @@
 package structures
 
-import (
-	"encoding/json"
-
-	"github.com/modulrcloud/modulr-core/constants"
-)
+import "encoding/json"
 
 type QuorumMemberData struct {
 	PubKey, Url string
@@ -51,9 +47,3 @@ type ExecutionStats struct {
 	Hash  string
 }
 
-func NewExecutionStatsTemplate() ExecutionStats {
-	return ExecutionStats{
-		Index: -1,
-		Hash:  constants.ZeroHash,
-	}
-}

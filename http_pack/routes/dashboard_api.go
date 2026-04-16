@@ -32,12 +32,11 @@ type NodeConfigSafe struct {
 }
 
 type DashboardExecutionThreadResponse struct {
-	Epoch             structures.EpochDataHandler          `json:"epoch"`
-	Statistics        *structures.Statistics               `json:"statistics"`
-	EpochStatistics   *structures.Statistics               `json:"epochStatistics"`
-	ExecutionData     map[string]structures.ExecutionStats `json:"executionData"`
-	SequenceAlignment structures.AlignmentDataHandler      `json:"sequenceAlignment"`
-	NetworkParameters structures.NetworkParameters         `json:"networkParameters"`
+	Epoch             structures.EpochDataHandler     `json:"epoch"`
+	Statistics        *structures.Statistics           `json:"statistics"`
+	EpochStatistics   *structures.Statistics           `json:"epochStatistics"`
+	SequenceAlignment structures.AlignmentDataHandler  `json:"sequenceAlignment"`
+	NetworkParameters structures.NetworkParameters     `json:"networkParameters"`
 }
 
 type DashboardApprovementThreadResponse struct {
@@ -84,7 +83,6 @@ func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 		Epoch:             h.EpochDataHandler,
 		Statistics:        h.Statistics,
 		EpochStatistics:   h.EpochStatistics,
-		ExecutionData:     h.ExecutionData,
 		SequenceAlignment: h.SequenceAlignmentData,
 		NetworkParameters: h.NetworkParameters,
 	}
