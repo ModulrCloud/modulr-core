@@ -442,7 +442,7 @@ func fetchAnchorEpochAckFromHTTP(epochId int) *structures.AggregatedAnchorEpochA
 	return nil
 }
 
-func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
+func GetHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		logHeightProofReturn("flood_prevention_disabled", parsedRequest, "route is temporarily blocked")
 		sendNotReady(connection)
@@ -515,7 +515,7 @@ func SignHeightProof(parsedRequest WsHeightProofRequest, connection *gws.Conn) {
 	logHeightProofReturn("marshal_response_failed", parsedRequest, err.Error())
 }
 
-func SignEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connection *gws.Conn) {
+func GetEpochRotationProof(parsedRequest WsEpochRotationProofRequest, connection *gws.Conn) {
 	if !globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Load() {
 		logEpochRotationProofReturn("flood_prevention_disabled", parsedRequest, "route is temporarily blocked")
 		sendNotReady(connection)

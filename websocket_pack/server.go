@@ -81,7 +81,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 			return
 		}
 
-		SignHeightProof(req, connection)
+		GetHeightProof(req, connection)
 
 	case constants.WsRouteAcceptAggregatedAnchorEpochAckProof:
 		var req WsAcceptAggregatedAnchorEpochAckProofRequest
@@ -97,7 +97,7 @@ func (h *Handler) OnMessage(connection *gws.Conn, message *gws.Message) {
 			connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"invalid_epoch_rotation_proof_request"}`))
 			return
 		}
-		SignEpochRotationProof(req, connection)
+		GetEpochRotationProof(req, connection)
 
 	default:
 		connection.WriteMessage(gws.OpcodeText, []byte(`{"error":"unknown_type"}`))

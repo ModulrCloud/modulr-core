@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -34,4 +36,17 @@ func LogWithTimeThrottled(key string, every time.Duration, msg, msgColor string)
 	THROTTLED_LOGS_MUTEX.Unlock()
 
 	LogWithTime(msg, msgColor)
+}
+
+func LogWithTime(msg, msgColor string) {
+	logWithTimestamp(msg, msgColor, DEEP_GREEN_COLOR)
+}
+
+func LogWithTimeAlt(msg, msgColor string) {
+	logWithTimestamp(msg, msgColor, DEEP_YELLOW)
+}
+
+func logWithTimestamp(msg, msgColor, timestampColor string) {
+	formattedDate := time.Now().Format("02 January 2006 at 03:04:05 PM")
+	fmt.Printf(timestampColor+"[%s]"+MAGENTA_COLOR+"(pid:%d)"+msgColor+"  %s\n"+RESET_COLOR, formattedDate, os.Getpid(), msg)
 }

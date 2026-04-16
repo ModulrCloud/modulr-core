@@ -39,6 +39,12 @@ const (
 	READ_WRITE_DEADLINE = 2 * time.Second // timeout for read/write operations for POD (point of distribution)
 )
 
+var (
+	POD_CLIENT         = NewPodClient("PoD", openWebsocketConnectionWithPoD)
+	POD_BULK_CLIENT    = NewPodClient("PoD-Bulk", openWebsocketConnectionWithPoD)
+	ANCHORS_POD_CLIENT = NewPodClient("Anchors-PoD", openWebsocketConnectionWithAnchorsPoD)
+)
+
 // PodClient manages a single persistent websocket connection to a PoD endpoint
 // with automatic reconnection, retries, and serialized request/response access.
 type PodClient struct {
@@ -127,12 +133,6 @@ func (pc *PodClient) Send(msg []byte) ([]byte, error) {
 	)
 	return nil, fmt.Errorf("failed to send %s message after %d attempts", pc.name, MAX_RETRIES)
 }
-
-var (
-	POD_CLIENT         = NewPodClient("PoD", openWebsocketConnectionWithPoD)
-	POD_BULK_CLIENT    = NewPodClient("PoD-Bulk", openWebsocketConnectionWithPoD)
-	ANCHORS_POD_CLIENT = NewPodClient("Anchors-PoD", openWebsocketConnectionWithAnchorsPoD)
-)
 
 type WebsocketGuards struct {
 	ConnMu *sync.RWMutex
