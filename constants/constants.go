@@ -69,6 +69,7 @@ const (
 
 	DBKeyAlfpProgress             = "ALFP_PROGRESS"
 	DBKeyLastMileFinalizerTracker = "LAST_MILE_FINALIZER_TRACKER"
+	DBKeyChainCursor              = "CHAIN_CURSOR"
 )
 
 // Signing prefixes (used as salts for cryptographic signatures).

@@ -10,6 +10,10 @@ import (
 
 var GENERATION_THREAD_METADATA structures.GenerationThreadMetadataHandler
 
+// CHAIN_CURSOR maps local chain coordinates (used by consensus/proofs) to absolute
+// positions in STATE. Loaded once on startup from STATE DB; default {0,0} means no offset.
+var CHAIN_CURSOR structures.ChainCursor
+
 var APPROVEMENT_THREAD_METADATA = struct {
 	RWMutex sync.RWMutex
 	Handler structures.ApprovementThreadMetadataHandler

@@ -150,6 +150,14 @@ func prepareBlockchain() error {
 	databases.APPROVEMENT_THREAD_METADATA = utils.OpenDb("APPROVEMENT_THREAD_METADATA")
 	databases.FINALIZATION_VOTING_STATS = utils.OpenDb("FINALIZATION_VOTING_STATS")
 
+	// Load CHAIN_CURSOR (offset mapping for network restarts; defaults to {0,0})
+	if cursorRaw, err := databases.STATE.Get([]byte(constants.DBKeyChainCursor), nil); err == nil {
+		var cursor structures.ChainCursor
+		if err := json.Unmarshal(cursorRaw, &cursor); err == nil {
+			handlers.CHAIN_CURSOR = cursor
+		}
+	}
+
 	// Load GT - Generation Thread handler
 	if data, err := databases.BLOCKS.Get([]byte(constants.DBKeyGenerationThreadMetadata), nil); err == nil {
 		var gtHandler structures.GenerationThreadMetadataHandler
@@ -401,8 +409,9 @@ func setGenesisToState() error {
 	// so it becomes visible atomically with the rest of the genesis bootstrap data.
 	approvementThreadBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
 
-	// Durable epoch data for API/Explorer is stored in STATE.
-	execThreadBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
+	// Durable epoch data for API/Explorer is stored in STATE using absolute epoch ID.
+	absoluteEpochId := currentEpochDataHandler.Id + handlers.CHAIN_CURSOR.EpochOffset
+	execThreadBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(absoluteEpochId)), jsonedCurrentEpochDataHandler)
 
 	// Commit changes
 	if err := databases.APPROVEMENT_THREAD_METADATA.Write(approvementThreadBatch, nil); err != nil {

@@ -708,7 +708,7 @@ func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, b
 	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
 	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
-	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
+	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(epochHandlerRef.Statistics.LastHeight))), []byte(currentBlockId))
 
 	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
 		stateBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
@@ -892,7 +892,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			finishingEpochStats = &structures.Statistics{LastHeight: -1}
 		}
 		if rawStats, err := json.Marshal(finishingEpochStats); err == nil {
-			dbBatch.Put([]byte(constants.DBKeyPrefixEpochStats+strconv.Itoa(currentEpochIndex)), rawStats)
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochStats+strconv.Itoa(toAbsoluteEpochId(currentEpochIndex))), rawStats)
 		}
 
 		// Prepare epoch handler for next epoch
@@ -911,7 +911,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			NetworkParameters: handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters,
 		}
 		if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
-			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochIndex)), nextValBytes)
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(toAbsoluteEpochId(nextEpochIndex))), nextValBytes)
 		}
 
 		// Exec delayed txs here
