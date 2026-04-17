@@ -50,8 +50,8 @@ func BlockExecutionThread() {
 	for {
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 		var nextHeight int64
-		if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
-			nextHeight = handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.LastHeight + 1
+		if handlers.CHAIN_CURSOR.Statistics != nil {
+			nextHeight = handlers.CHAIN_CURSOR.Statistics.LastHeight + 1
 		}
 		currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
@@ -230,7 +230,7 @@ func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.Epoch
 	}
 
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	epochDuration := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.EpochDuration
+	epochDuration := handlers.CHAIN_CURSOR.NetworkParameters.EpochDuration
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	return &structures.EpochDataHandler{
@@ -601,8 +601,8 @@ func executeBlock(block *block_pack.Block) {
 func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool) {
 	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
 
-	if epochHandlerRef.Statistics == nil {
-		epochHandlerRef.Statistics = &structures.Statistics{LastHeight: -1}
+	if handlers.CHAIN_CURSOR.Statistics == nil {
+		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{LastHeight: -1}
 	}
 	if epochHandlerRef.EpochStatistics == nil {
 		epochHandlerRef.EpochStatistics = &structures.Statistics{LastHeight: -1}
@@ -644,11 +644,11 @@ func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatc
 			delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
 		}
 
-		epochHandlerRef.Statistics.TotalTransactions++
+		handlers.CHAIN_CURSOR.Statistics.TotalTransactions++
 		epochHandlerRef.EpochStatistics.TotalTransactions++
 
 		if success {
-			epochHandlerRef.Statistics.SuccessfulTransactions++
+			handlers.CHAIN_CURSOR.Statistics.SuccessfulTransactions++
 			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
 		}
 
@@ -697,18 +697,18 @@ func persistTouchedState(stateBatch *leveldb.Batch) {
 func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) string {
 	blockHash := block.GetHash()
 
-	epochHandlerRef.Statistics.LastHeight++
-	epochHandlerRef.Statistics.LastBlockHash = blockHash
-	epochHandlerRef.Statistics.TotalFees += blockFees
-	epochHandlerRef.Statistics.BlocksGenerated++
+	handlers.CHAIN_CURSOR.Statistics.LastHeight++
+	handlers.CHAIN_CURSOR.Statistics.LastBlockHash = blockHash
+	handlers.CHAIN_CURSOR.Statistics.TotalFees += blockFees
+	handlers.CHAIN_CURSOR.Statistics.BlocksGenerated++
 
 	epochHandlerRef.EpochStatistics.TotalFees += blockFees
 	epochHandlerRef.EpochStatistics.BlocksGenerated++
 
-	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
+	epochHandlerRef.EpochStatistics.LastHeight = handlers.CHAIN_CURSOR.Statistics.LastHeight
 	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
 
-	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(epochHandlerRef.Statistics.LastHeight))), []byte(currentBlockId))
+	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(handlers.CHAIN_CURSOR.Statistics.LastHeight))), []byte(currentBlockId))
 
 	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
 		stateBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
@@ -716,7 +716,9 @@ func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, b
 		panic("Impossible to store updated execution thread version to atomic batch")
 	}
 
-	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight)
+	persistChainCursor(stateBatch)
+
+	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, handlers.CHAIN_CURSOR.Statistics.LastHeight)
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {
@@ -900,7 +902,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			Id:                 nextEpochIndex,
 			Hash:               nextEpochData.NextEpochHash,
 			ValidatorsRegistry: nextEpochData.NextEpochValidatorsRegistry,
-			StartTimestamp:     epochHandler.StartTimestamp + uint64(handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.EpochDuration),
+			StartTimestamp:     epochHandler.StartTimestamp + uint64(handlers.CHAIN_CURSOR.NetworkParameters.EpochDuration),
 			Quorum:             nextEpochData.NextEpochQuorum,
 			LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
 		}
@@ -908,7 +910,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 		// Durable epoch data for API/Explorer is stored in STATE.
 		nextSnapshot := structures.EpochDataSnapshot{
 			EpochDataHandler:  *templateForNextEpoch,
-			NetworkParameters: handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters,
+			NetworkParameters: handlers.CHAIN_CURSOR.NetworkParameters,
 		}
 		if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
 			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(toAbsoluteEpochId(nextEpochIndex))), nextValBytes)
@@ -962,13 +964,15 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			panic("Impossible to store updated execution thread version to atomic batch")
 		}
 
+		persistChainCursor(dbBatch)
+
 		if err := databases.STATE.Write(dbBatch, nil); err != nil {
 			panic("Impossible to modify the state when epoch finished")
 		}
 
 		// Version check once new epoch started
 
-		if utils.IsMyCoreVersionOld(&handlers.EXECUTION_THREAD_METADATA.Handler) {
+		if handlers.CHAIN_CURSOR.CoreMajorVersion > globals.CORE_MAJOR_VERSION {
 			utils.LogWithTime("New version detected on EXECUTION_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 			utils.GracefulShutdown()

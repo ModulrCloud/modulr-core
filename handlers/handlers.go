@@ -10,9 +10,14 @@ import (
 
 var GENERATION_THREAD_METADATA structures.GenerationThreadMetadataHandler
 
-// CHAIN_CURSOR maps local chain coordinates (used by consensus/proofs) to absolute
-// positions in STATE. Loaded once on startup from STATE DB; default {0,0} means no offset.
-var CHAIN_CURSOR structures.ChainCursor
+// CHAIN_CURSOR is the permanent state descriptor stored in STATE DB.
+// It holds offset mapping for network restarts (HeightOffset, EpochOffset) and
+// permanent world-state metadata (CoreMajorVersion, Statistics, NetworkParameters).
+// Loaded on startup; default zero-value means fresh chain with no offsets.
+var CHAIN_CURSOR = structures.ChainCursor{
+	CoreMajorVersion: -1,
+	Statistics:       &structures.Statistics{LastHeight: -1},
+}
 
 var APPROVEMENT_THREAD_METADATA = struct {
 	RWMutex sync.RWMutex
@@ -49,7 +54,6 @@ var EXECUTION_THREAD_METADATA = struct {
 	ValidatorsTouched  map[string]*structures.ValidatorStorage
 }{
 	Handler: structures.ExecutionThreadMetadataHandler{
-		CoreMajorVersion:        -1,
 		AccountsCache:           make(map[string]*structures.Account),
 		ValidatorsStoragesCache: make(map[string]*structures.ValidatorStorage),
 		SequenceAlignmentData: structures.AlignmentDataHandler{
@@ -59,7 +63,6 @@ var EXECUTION_THREAD_METADATA = struct {
 			LastBlocksByLeaders:             make(map[string]structures.ExecutionStats),
 			LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
 		},
-		Statistics:      &structures.Statistics{LastHeight: -1},
 		EpochStatistics: &structures.Statistics{LastHeight: -1},
 	},
 	AccountsCacheMax:   constants.DefaultAccountsCacheMax,

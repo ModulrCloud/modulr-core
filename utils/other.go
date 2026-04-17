@@ -91,12 +91,12 @@ func GetUTCTimestampInMilliSeconds() int64 {
 	return time.Now().UTC().UnixMilli()
 }
 
-func IsMyCoreVersionOld(thread structures.LogicalThread) bool {
-	return thread.GetCoreMajorVersion() > globals.CORE_MAJOR_VERSION
+func IsMyCoreVersionOld(handler *structures.ApprovementThreadMetadataHandler) bool {
+	return handler.CoreMajorVersion > globals.CORE_MAJOR_VERSION
 }
 
-func EpochStillFresh(thread structures.LogicalThread) bool {
-	return (thread.GetEpochHandler().StartTimestamp + uint64(thread.GetNetworkParams().EpochDuration)) > uint64(GetUTCTimestampInMilliSeconds())
+func EpochStillFresh(handler *structures.ApprovementThreadMetadataHandler) bool {
+	return (handler.EpochDataHandler.StartTimestamp + uint64(handler.NetworkParameters.EpochDuration)) > uint64(GetUTCTimestampInMilliSeconds())
 }
 
 func SignalAboutEpochRotationExists(epochIndex int) bool {

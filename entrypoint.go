@@ -204,23 +204,24 @@ func prepareBlockchain() error {
 			etHandler.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
 		}
 
-		if etHandler.Statistics == nil {
-			etHandler.Statistics = &structures.Statistics{LastHeight: -1}
-		}
 		if etHandler.EpochStatistics == nil {
 			etHandler.EpochStatistics = &structures.Statistics{LastHeight: -1}
-		}
-		if etHandler.Statistics.AccountsNumber == 0 {
-			etHandler.Statistics.AccountsNumber = utils.CountStateAccounts()
-		}
-		if etHandler.Statistics.StakingDelta == 0 {
-			etHandler.Statistics.StakingDelta = int64(utils.SumTotalStakedFromState())
 		}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler = etHandler
 	}
 
-	if handlers.EXECUTION_THREAD_METADATA.Handler.CoreMajorVersion == -1 {
+	// Backfill CHAIN_CURSOR statistics if missing (e.g. first run after accounts were created)
+	if handlers.CHAIN_CURSOR.Statistics != nil {
+		if handlers.CHAIN_CURSOR.Statistics.AccountsNumber == 0 {
+			handlers.CHAIN_CURSOR.Statistics.AccountsNumber = utils.CountStateAccounts()
+		}
+		if handlers.CHAIN_CURSOR.Statistics.StakingDelta == 0 {
+			handlers.CHAIN_CURSOR.Statistics.StakingDelta = int64(utils.SumTotalStakedFromState())
+		}
+	}
+
+	if handlers.CHAIN_CURSOR.CoreMajorVersion == -1 {
 		if err := setGenesisToState(); err != nil {
 			return fmt.Errorf("write genesis to state: %w", err)
 		}
@@ -338,19 +339,20 @@ func setGenesisToState() error {
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
 
-	handlers.EXECUTION_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
-	if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics == nil {
-		handlers.EXECUTION_THREAD_METADATA.Handler.Statistics = &structures.Statistics{LastHeight: -1}
+	// Permanent fields go into ChainCursor
+	handlers.CHAIN_CURSOR.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
+	if handlers.CHAIN_CURSOR.Statistics == nil {
+		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{LastHeight: -1}
 	}
 	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics == nil {
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 	}
-	handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.AccountsNumber = genesisAccountsCount
-	handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.StakingDelta = int64(genesisTotalStaked)
+	handlers.CHAIN_CURSOR.Statistics.AccountsNumber = genesisAccountsCount
+	handlers.CHAIN_CURSOR.Statistics.StakingDelta = int64(genesisTotalStaked)
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 
-	handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
+	handlers.CHAIN_CURSOR.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 
 	hashInput := constants.ZeroHash + globals.GENESIS.NetworkId
 
@@ -380,7 +382,7 @@ func setGenesisToState() error {
 
 	epochHandlerForApprovementThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForApprovementThread, handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
-	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
+	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, handlers.CHAIN_CURSOR.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
 	// Now set the block generators for epoch pseudorandomly and in deterministic way
 
@@ -412,6 +414,11 @@ func setGenesisToState() error {
 	// Durable epoch data for API/Explorer is stored in STATE using absolute epoch ID.
 	absoluteEpochId := currentEpochDataHandler.Id + handlers.CHAIN_CURSOR.EpochOffset
 	execThreadBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(absoluteEpochId)), jsonedCurrentEpochDataHandler)
+
+	// Persist ChainCursor (permanent state) in the same atomic batch.
+	if cursorBytes, err := json.Marshal(handlers.CHAIN_CURSOR); err == nil {
+		execThreadBatch.Put([]byte(constants.DBKeyChainCursor), cursorBytes)
+	}
 
 	// Commit changes
 	if err := databases.APPROVEMENT_THREAD_METADATA.Write(approvementThreadBatch, nil); err != nil {

@@ -33,10 +33,10 @@ type NodeConfigSafe struct {
 
 type DashboardExecutionThreadResponse struct {
 	Epoch             structures.EpochDataHandler     `json:"epoch"`
-	Statistics        *structures.Statistics           `json:"statistics"`
-	EpochStatistics   *structures.Statistics           `json:"epochStatistics"`
-	SequenceAlignment structures.AlignmentDataHandler  `json:"sequenceAlignment"`
-	NetworkParameters structures.NetworkParameters     `json:"networkParameters"`
+	Statistics        *structures.Statistics          `json:"statistics"`
+	EpochStatistics   *structures.Statistics          `json:"epochStatistics"`
+	SequenceAlignment structures.AlignmentDataHandler `json:"sequenceAlignment"`
+	NetworkParameters structures.NetworkParameters    `json:"networkParameters"`
 }
 
 type DashboardApprovementThreadResponse struct {
@@ -81,10 +81,10 @@ func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 	h := handlers.EXECUTION_THREAD_METADATA.Handler
 	resp := DashboardExecutionThreadResponse{
 		Epoch:             h.EpochDataHandler,
-		Statistics:        h.Statistics,
+		Statistics:        handlers.CHAIN_CURSOR.Statistics,
 		EpochStatistics:   h.EpochStatistics,
 		SequenceAlignment: h.SequenceAlignmentData,
-		NetworkParameters: h.NetworkParameters,
+		NetworkParameters: handlers.CHAIN_CURSOR.NetworkParameters,
 	}
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 

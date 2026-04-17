@@ -1,11 +1,5 @@
 package structures
 
-type LogicalThread interface {
-	GetCoreMajorVersion() int
-	GetNetworkParams() NetworkParameters
-	GetEpochHandler() EpochDataHandler
-}
-
 type ApprovementThreadMetadataHandler struct {
 	CoreMajorVersion        int                          `json:"coreMajorVersion"`
 	NetworkParameters       NetworkParameters            `json:"networkParameters"`
@@ -14,11 +8,8 @@ type ApprovementThreadMetadataHandler struct {
 }
 
 type ExecutionThreadMetadataHandler struct {
-	CoreMajorVersion  int               `json:"coreMajorVersion"`
-	NetworkParameters NetworkParameters `json:"networkParameters"`
-	EpochDataHandler  EpochDataHandler  `json:"epoch"`
+	EpochDataHandler EpochDataHandler `json:"epoch"`
 
-	Statistics *Statistics `json:"statistics,omitempty"`
 	// EpochStatistics tracks metrics within the current epoch (reset on epoch rotation).
 	EpochStatistics *Statistics `json:"epochStatistics,omitempty"`
 
@@ -26,30 +17,6 @@ type ExecutionThreadMetadataHandler struct {
 
 	AccountsCache           map[string]*Account          `json:"-"`
 	ValidatorsStoragesCache map[string]*ValidatorStorage `json:"-"`
-}
-
-func (handler *ApprovementThreadMetadataHandler) GetCoreMajorVersion() int {
-	return handler.CoreMajorVersion
-}
-
-func (handler *ExecutionThreadMetadataHandler) GetCoreMajorVersion() int {
-	return handler.CoreMajorVersion
-}
-
-func (handler *ApprovementThreadMetadataHandler) GetNetworkParams() NetworkParameters {
-	return handler.NetworkParameters
-}
-
-func (handler *ApprovementThreadMetadataHandler) GetEpochHandler() EpochDataHandler {
-	return handler.EpochDataHandler
-}
-
-func (handler *ExecutionThreadMetadataHandler) GetNetworkParams() NetworkParameters {
-	return handler.NetworkParameters
-}
-
-func (handler *ExecutionThreadMetadataHandler) GetEpochHandler() EpochDataHandler {
-	return handler.EpochDataHandler
 }
 
 type GenerationThreadMetadataHandler struct {

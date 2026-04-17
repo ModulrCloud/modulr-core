@@ -33,7 +33,7 @@ type LiveStatsResponse struct {
 
 func GetLastHeight(ctx *fasthttp.RequestCtx) {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
+	statistics := handlers.CHAIN_CURSOR.Statistics
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	if statistics == nil || statistics.LastHeight < 0 {
@@ -46,9 +46,9 @@ func GetLastHeight(ctx *fasthttp.RequestCtx) {
 
 func GetLiveStats(ctx *fasthttp.RequestCtx) {
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
+	statistics := handlers.CHAIN_CURSOR.Statistics
 	epochStatistics := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	networkParameters := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters
+	networkParameters := handlers.CHAIN_CURSOR.NetworkParameters
 	epoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
