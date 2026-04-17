@@ -548,8 +548,8 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 }
 
 func snapshotLastBlocksByLeaders() map[string]structures.ExecutionStats {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RLock()
+	defer handlers.STATE_MUTEX.RUnlock()
 
 	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
 	if data == nil {

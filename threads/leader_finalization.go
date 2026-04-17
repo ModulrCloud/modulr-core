@@ -91,9 +91,9 @@ func LeaderFinalizationThread() {
 	for {
 		// If execution already advanced beyond our current ALFP progress,
 		// there is no point processing older epochs here. Fast-forward.
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		handlers.STATE_MUTEX.RLock()
 		execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.STATE_MUTEX.RUnlock()
 
 		if execEpochId > processingEpochIndex {
 			currentEpoch := processingEpochIndex
@@ -294,8 +294,8 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 // In case we are able to find the info about last block by leader in the SequenceAlignmentData,
 // we can consider that network quorum has already generated the ALFP for this leader.
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RLock()
+	defer handlers.STATE_MUTEX.RUnlock()
 
 	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
 		return false
@@ -308,9 +308,9 @@ func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
 func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHandler) bool {
 	// If execution already advanced beyond this epoch, it means ET has all the data it needs for it.
 	// No point to keep ALFP thread blocked on older epoch.
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	if execEpochId > epochHandler.Id {
 		return true

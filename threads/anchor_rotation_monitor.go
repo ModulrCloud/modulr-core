@@ -28,8 +28,8 @@ type executionThreadMetadataSnapshot struct {
 }
 
 func takeExecutionThreadMetadataSnapshot(anchorIndex int) executionThreadMetadataSnapshot {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RLock()
+	defer handlers.STATE_MUTEX.RUnlock()
 
 	handler := handlers.EXECUTION_THREAD_METADATA.Handler
 	_, exists := handler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex]
@@ -45,13 +45,13 @@ func AnchorRotationMonitorThread() {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for {
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		handlers.STATE_MUTEX.RLock()
 
 		anchorIndex := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption
 
 		epochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.STATE_MUTEX.RUnlock()
 
 		checkSequenceAlignmentData(anchorIndex, &epochHandler, client)
 
@@ -97,8 +97,8 @@ func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochD
 		return
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+	handlers.STATE_MUTEX.Lock()
+	defer handlers.STATE_MUTEX.Unlock()
 
 	currentHandler := &handlers.EXECUTION_THREAD_METADATA.Handler
 	if currentHandler.EpochDataHandler.Id != metadataSnapshot.EpochID ||

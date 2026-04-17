@@ -77,7 +77,7 @@ func ServeDashboardOverview(ctx *fasthttp.RequestCtx) {
 }
 
 func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	h := handlers.EXECUTION_THREAD_METADATA.Handler
 	resp := DashboardExecutionThreadResponse{
 		Epoch:             h.EpochDataHandler,
@@ -86,7 +86,7 @@ func ServeDashboardExecutionThread(ctx *fasthttp.RequestCtx) {
 		SequenceAlignment: h.SequenceAlignmentData,
 		NetworkParameters: handlers.CHAIN_CURSOR.NetworkParameters,
 	}
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, resp)
 }

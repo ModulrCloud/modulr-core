@@ -32,7 +32,7 @@ type SequenceAlignmentDataResponse struct {
 
 func SequenceAlignmentThread() {
 	for {
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		handlers.STATE_MUTEX.RLock()
 
 		epochSnapshot := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
 		alignmentSnapshot := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData
@@ -40,17 +40,17 @@ func SequenceAlignmentThread() {
 		currentAnchorBlockPointerObserved := alignmentSnapshot.CurrentAnchorBlockIndexObserved
 		infoAboutAnchorLastBlock, infoAboutAnchorLastBlockExists := alignmentSnapshot.LastBlocksByAnchors[currentAnchorIndex]
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.STATE_MUTEX.RUnlock()
 
 		if infoAboutAnchorLastBlockExists && infoAboutAnchorLastBlock.Index == currentAnchorBlockPointerObserved {
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			handlers.STATE_MUTEX.Lock()
 			if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id == epochSnapshot.Id &&
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption == currentAnchorIndex &&
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorBlockIndexObserved == currentAnchorBlockPointerObserved {
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption++
 				handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorBlockIndexObserved = -1
 			}
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			handlers.STATE_MUTEX.Unlock()
 			continue
 		}
 
@@ -84,11 +84,11 @@ func SequenceAlignmentThread() {
 		afpValid := response.Afp != nil && utils.VerifyAggregatedFinalizationProofForAnchorBlock(response.Afp, &epochSnapshot)
 		responseBlockHash := response.Block.GetHash()
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+		handlers.STATE_MUTEX.Lock()
 
 		if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochSnapshot.Id ||
 			handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption != currentAnchorIndex {
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			handlers.STATE_MUTEX.Unlock()
 			continue
 		}
 
@@ -99,7 +99,7 @@ func SequenceAlignmentThread() {
 		currentBlockMatchesAnchor := infoAboutAnchorLastBlockExists && infoAboutAnchorLastBlock.Index == observedIndex && responseBlockHash == infoAboutAnchorLastBlock.Hash
 
 		if !currentBlockMatchesAnchor && !afpValid {
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			handlers.STATE_MUTEX.Unlock()
 			continue
 		}
 
@@ -121,6 +121,6 @@ func SequenceAlignmentThread() {
 
 		alignmentData.CurrentAnchorBlockIndexObserved++
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		handlers.STATE_MUTEX.Unlock()
 	}
 }

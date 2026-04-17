@@ -48,13 +48,13 @@ var (
 
 func BlockExecutionThread() {
 	for {
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		handlers.STATE_MUTEX.RLock()
 		var nextHeight int64
 		if handlers.CHAIN_CURSOR.Statistics != nil {
 			nextHeight = handlers.CHAIN_CURSOR.Statistics.LastHeight + 1
 		}
 		currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.STATE_MUTEX.RUnlock()
 
 		heightProof, block := fetchAggregatedHeightProofAndBlock(int(nextHeight))
 		if heightProof == nil {
@@ -81,13 +81,13 @@ func BlockExecutionThread() {
 				continue
 			}
 
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			handlers.STATE_MUTEX.Lock()
 			setupNextEpochFromRotationProof(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler, &epochRotationProof.EpochData)
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+			handlers.STATE_MUTEX.Unlock()
 
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+			handlers.STATE_MUTEX.RLock()
 			currentEpochId = handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+			handlers.STATE_MUTEX.RUnlock()
 
 			if heightProof.EpochId != currentEpochId {
 				utils.LogWithTimeThrottled(
@@ -155,9 +155,9 @@ func fetchAggregatedHeightProofAndBlock(absoluteHeight int) (*structures.Aggrega
 		}
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
@@ -186,9 +186,9 @@ func fetchVerifiedAggregatedHeightProof(absoluteHeight int) *structures.Aggregat
 		}
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
@@ -229,9 +229,9 @@ func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.Epoch
 		return nil
 	}
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	epochDuration := handlers.CHAIN_CURSOR.NetworkParameters.EpochDuration
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	return &structures.EpochDataHandler{
 		Id:                 currentEpochHandler.Id + 1,
@@ -294,9 +294,9 @@ func fetchBlockForExecution(blockId string) *block_pack.Block {
 
 	epochHandler := getEpochHandlerForTracker(epochIndex)
 	if epochHandler == nil {
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		handlers.STATE_MUTEX.RLock()
 		currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.STATE_MUTEX.RUnlock()
 
 		if epochIndex == currentEpochHandler.Id+1 {
 			epochRotationProof := fetchVerifiedAggregatedEpochRotationProof(currentEpochHandler.Id)
@@ -581,9 +581,9 @@ func nextBlockId(blockId string) string {
 }
 
 func executeBlock(block *block_pack.Block) {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+	handlers.STATE_MUTEX.Lock()
 	stateBatch, logMsg, ok := buildExecutionBatch(block)
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+	handlers.STATE_MUTEX.Unlock()
 
 	if !ok {
 		return
@@ -597,7 +597,7 @@ func executeBlock(block *block_pack.Block) {
 }
 
 // buildExecutionBatch mutates in-memory state and builds a LevelDB batch.
-// Caller MUST hold handlers.EXECUTION_THREAD_METADATA.RWMutex in write mode.
+// Caller MUST hold handlers.STATE_MUTEX in write mode.
 func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool) {
 	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
 

@@ -186,8 +186,8 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 }
 
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RLock()
+	defer handlers.STATE_MUTEX.RUnlock()
 
 	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
 		return false

@@ -73,10 +73,10 @@ func GetAggregatedEpochRotationProof(ctx *fasthttp.RequestCtx) {
 }
 
 func GetCurrentEpochStats(ctx *fasthttp.RequestCtx) {
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	epochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 	stats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	if stats == nil {
 		stats = &structures.Statistics{LastHeight: -1}
@@ -100,10 +100,10 @@ func GetEpochStatsByEpochIndex(ctx *fasthttp.RequestCtx) {
 	}
 
 	// If requested epoch is the current one, serve from memory (live, not yet snapshotted).
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	handlers.STATE_MUTEX.RLock()
 	currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
 	currentStats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+	handlers.STATE_MUTEX.RUnlock()
 
 	if epochIndex == currentEpochId {
 		if currentStats == nil {
