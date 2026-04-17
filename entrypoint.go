@@ -221,7 +221,9 @@ func prepareBlockchain() error {
 		}
 	}
 
-	if handlers.CHAIN_CURSOR.CoreMajorVersion == -1 {
+	// Genesis init is needed when EXECUTION_THREAD_METADATA is absent from STATE.
+	// This covers both first-ever launch AND network restart (where ET is deleted but CHAIN_CURSOR is preserved).
+	if _, etErr := databases.STATE.Get([]byte(constants.DBKeyExecutionThreadMetadata), nil); etErr != nil {
 		if err := setGenesisToState(); err != nil {
 			return fmt.Errorf("write genesis to state: %w", err)
 		}
@@ -298,6 +300,10 @@ func setGenesisToState() error {
 	var genesisTotalStaked uint64 = 0
 
 	for accountPubkey, accountData := range globals.GENESIS.State {
+		if _, err := databases.STATE.Get([]byte(accountPubkey), nil); err == nil {
+			continue
+		}
+
 		serialized, err := json.Marshal(accountData)
 
 		if err != nil {
@@ -313,46 +319,50 @@ func setGenesisToState() error {
 		genesisTotalStaked += validatorStorage.TotalStaked
 
 		validatorPubkey := validatorStorage.Pubkey
+		stateKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
-		serializedStorage, err := json.Marshal(validatorStorage)
+		if _, err := databases.STATE.Get([]byte(stateKey), nil); err != nil {
+			serializedStorage, err := json.Marshal(validatorStorage)
 
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
+
+			approvementThreadBatch.Put([]byte(stateKey), serializedStorage)
+			execThreadBatch.Put([]byte(stateKey), serializedStorage)
 		}
-
-		approvementThreadBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), serializedStorage)
-
-		execThreadBatch.Put([]byte(constants.DBKeyPrefixValidatorStorage+validatorPubkey), serializedStorage)
 
 		// Populate in-memory caches so helper functions (quorum/leader selection) can read validator stake/urls
 		// before the DB batch is committed.
-		key := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 		vsCopy := validatorStorage
-		utils.PutApprovementValidatorCache(key, &vsCopy)
-		utils.PutExecValidatorCache(key, &vsCopy)
+		utils.PutApprovementValidatorCache(stateKey, &vsCopy)
+		utils.PutExecValidatorCache(stateKey, &vsCopy)
 
 		validatorsRegistryForEpochHandler = append(validatorsRegistryForEpochHandler, validatorPubkey)
 
 		validatorsRegistryForEpochHandler2 = append(validatorsRegistryForEpochHandler2, validatorPubkey)
-
 	}
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
 
-	// Permanent fields go into ChainCursor
-	handlers.CHAIN_CURSOR.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
-	if handlers.CHAIN_CURSOR.Statistics == nil {
-		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{LastHeight: -1}
-	}
 	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics == nil {
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 	}
-	handlers.CHAIN_CURSOR.Statistics.AccountsNumber = genesisAccountsCount
-	handlers.CHAIN_CURSOR.Statistics.StakingDelta = int64(genesisTotalStaked)
+
+	isFirstLaunch := handlers.CHAIN_CURSOR.CoreMajorVersion == -1
+
+	handlers.CHAIN_CURSOR.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
+
+	if isFirstLaunch {
+		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{
+			LastHeight:     -1,
+			AccountsNumber: genesisAccountsCount,
+			StakingDelta:   int64(genesisTotalStaked),
+		}
+		handlers.CHAIN_CURSOR.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
+	}
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
-
-	handlers.CHAIN_CURSOR.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 
 	hashInput := constants.ZeroHash + globals.GENESIS.NetworkId
 
