@@ -57,11 +57,11 @@ func resolveContext(context string) (threadContext, bool) {
 			putValidatorCache:    utils.PutExecValidatorCache,
 			markValidatorTouched: utils.MarkExecValidatorTouched,
 			touchValidatorCache:  utils.TouchExecValidatorCache,
-			networkParams:        handlers.CHAIN_CURSOR.NetworkParameters,
-			validatorsRegistry:   &handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry,
+			networkParams:        handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkParameters,
+			validatorsRegistry:   &handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.ValidatorsRegistry,
 			onStakeDelta: func(delta int64) {
-				handlers.CHAIN_CURSOR.Statistics.StakingDelta += delta
-				handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.StakingDelta += delta
+				handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.StakingDelta += delta
+				handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics.StakingDelta += delta
 			},
 			onUnstakeRefund: func(unstaker string, amount uint64) {
 				unstakerAccount := utils.GetAccountFromExecThreadState(unstaker)

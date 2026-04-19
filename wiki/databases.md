@@ -23,30 +23,16 @@ Permanent chain state — accounts, validators, transaction receipts, block inde
 
 | Key | Value | Written by | Notes |
 |-----|-------|-----------|-------|
-| `ET` | `ExecutionThreadMetadataHandler` JSON | `block_execution.go` | Execution thread metadata (epoch handler, execution data, sequence alignment, statistics) |
+| `CHAIN_CURSOR` | `ChainCursor` JSON | `block_execution.go`, `entrypoint.go` | The single source of truth for execution-thread state: offsets (HeightOffset, EpochOffset), NetworkId, CoreMajorVersion, NetworkParameters, EpochDataHandler, Statistics, EpochStatistics |
 | `BLOCK_INDEX:{height}` | `blockId` string | `block_execution.go` | Absolute height → blockId mapping |
 | `TX:{hash}` | Transaction receipt JSON (block location) | `block_execution.go` | Transaction receipt / location for explorers and SDK |
-| `EPOCH_STATS:{epochId}` | `EpochStatistics` JSON | `block_execution.go` (`setupNextEpochOnExecutionThread`) | Per-epoch statistics snapshot, written at epoch boundary |
-| `VALIDATOR_STORAGE:{pubkey}` | Validator JSON | `block_execution.go` (via `persistTouchedState`) | Validator data (stake, metadata) — ET copy |
+| `EPOCH_STATS:{epochId}` | `EpochStatistics` JSON | `block_execution.go` (`setupNextEpochFromRotationProof`) | Per-epoch statistics snapshot, written at epoch boundary using absolute epoch id |
+| `EPOCH_DATA:{epochId}` | `EpochDataSnapshot` JSON | `block_execution.go`, `entrypoint.go` | Durable epoch snapshot for API/Explorer, keyed by absolute epoch id |
+| `VALIDATOR_STORAGE:{pubkey}` | Validator JSON | `block_execution.go` (via `persistTouchedState`) | Validator data (stake, metadata) |
 | `{accountPubkey}` | Account JSON (balance, nonce, etc.) | `block_execution.go` (via `persistTouchedState`) | Account state |
 | `DELAYED_TRANSACTIONS:{epochId}` | `[]map[string]string` JSON | `block_execution.go` (`addDelayedTransactionsToBatch`) | Delayed tx payloads queued for `epochId` (actually targets epoch+2) |
 
-**Recovery**: **Preserved**. This is the permanent state. However, `ET` key contains ephemeral data mixed with permanent data (see "ET metadata split" below).
-
-### ET metadata split concern
-
-The `ET` key stores `ExecutionThreadMetadataHandler` which contains:
-
-- **Permanent** (must survive recovery):
-  - `Statistics.LastHeight` — the global absolute height counter
-  - `Statistics.TotalTxsCount` — total transactions processed
-
-- **Ephemeral** (can be wiped, rebuilt from fresh genesis):
-  - `EpochDataHandler` — current epoch state (id, hash, quorum, leaders, etc.)
-  - `ExecutionData` — per-leader execution progress `{index, hash}`
-  - `SequenceAlignmentData` — leader ordering / ALFP-derived alignment
-  - `EpochStatistics` — in-progress epoch stats accumulator
-  - `NextEpochDataHandler` — pre-computed next epoch info
+**Recovery**: **Preserved**. STATE holds the permanent world state. On a network restart, the operator wipes `CHAIN_CURSOR.EpochDataHandler` (its `Hash == ""` is the genesis-init sentinel) while keeping `Statistics`, `NetworkParameters`, `HeightOffset`, `EpochOffset`, accounts and validators intact.
 
 ---
 
@@ -108,28 +94,30 @@ All voting/finalization-related data: proofs grabber state, ALFPs, height attest
 ## Visual Summary
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                        RECOVERY ACTION                           │
-├──────────────────────┬───────────────────────────────────────────┤
-│  BLOCKS              │  WIPE                                     │
-│  STATE               │  PRESERVE (but clean ET ephemeral fields) │
-│  EPOCH_DATA          │  WIPE                                     │
-│  APPROVEMENT_THREAD_ │  WIPE                                     │
-│  METADATA            │                                           │
-│  FINALIZATION_       │  WIPE                                     │
-│  VOTING_STATS        │                                           │
-└──────────────────────┴───────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                          RECOVERY ACTION                             │
+├──────────────────────┬───────────────────────────────────────────────┤
+│  BLOCKS              │  WIPE                                         │
+│  STATE               │  PRESERVE (reset CHAIN_CURSOR.EpochDataHandler│
+│                      │  and bump HeightOffset / EpochOffset)         │
+│  EPOCH_DATA          │  WIPE                                         │
+│  APPROVEMENT_THREAD_ │  WIPE                                         │
+│  METADATA            │                                               │
+│  FINALIZATION_       │  WIPE                                         │
+│  THREAD_METADATA     │                                               │
+└──────────────────────┴───────────────────────────────────────────────┘
 ```
 
 ### Keys to KEEP in STATE during recovery:
 
-- `BLOCK_INDEX:{height}` — historical height mappings
+- `BLOCK_INDEX:{height}` — historical height mappings (use absolute height)
 - `TX:{hash}` — transaction receipts
-- `EPOCH_STATS:{epochId}` — historical epoch statistics
+- `EPOCH_STATS:{epochId}` — historical epoch statistics (use absolute epoch id)
+- `EPOCH_DATA:{epochId}` — historical epoch snapshots (use absolute epoch id)
 - `VALIDATOR_STORAGE:{pubkey}` — latest validator state
 - `{accountPubkey}` — latest account balances
+- `CHAIN_CURSOR` — preserve `Statistics`, `NetworkParameters`, `HeightOffset`, `EpochOffset`; reset `EpochDataHandler` (Hash == "") and `EpochStatistics`; bump offsets and overwrite `NetworkId` / `CoreMajorVersion` from the new genesis
 
 ### Keys to REMOVE or RESET in STATE during recovery:
 
-- `ET` — must be rebuilt with fresh epoch data but preserving `Statistics.LastHeight`
 - `DELAYED_TRANSACTIONS:{epochId}` — stale delayed tx queues from pre-crash epochs

@@ -45,11 +45,11 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 		acc := &structures.Account{}
 		PutExecAccountCache(accountId, acc)
 		MarkExecAccountTouched(accountId, acc)
-		if handlers.CHAIN_CURSOR.Statistics != nil {
-			handlers.CHAIN_CURSOR.Statistics.AccountsNumber++
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.AccountsNumber++
 		}
-		if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics != nil {
-			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.AccountsNumber++
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics.AccountsNumber++
 		}
 		return acc
 	}

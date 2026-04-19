@@ -41,7 +41,6 @@ const (
 
 // Common DB key fragments/prefixes.
 const (
-	DBKeyExecutionThreadMetadata   = "EXECUTION_THREAD_METADATA"
 	DBKeyApprovementThreadMetadata = "APPROVEMENT_THREAD_METADATA"
 	DBKeyGenerationThreadMetadata  = "GENERATION_THREAD_METADATA"
 	DBKeyFinalizerThreadMetadata   = "FINALIZER_THREAD_METADATA"

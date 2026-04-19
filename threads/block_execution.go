@@ -48,13 +48,13 @@ var (
 
 func BlockExecutionThread() {
 	for {
-		handlers.STATE_MUTEX.RLock()
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
 		var nextHeight int64
-		if handlers.CHAIN_CURSOR.Statistics != nil {
-			nextHeight = handlers.CHAIN_CURSOR.Statistics.LastHeight + 1
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics != nil {
+			nextHeight = handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.LastHeight + 1
 		}
-		currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.STATE_MUTEX.RUnlock()
+		currentEpochId := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 		heightProof, block := fetchAggregatedHeightProofAndBlock(int(nextHeight))
 		if heightProof == nil {
@@ -81,13 +81,13 @@ func BlockExecutionThread() {
 				continue
 			}
 
-			handlers.STATE_MUTEX.Lock()
-			setupNextEpochFromRotationProof(&handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler, &epochRotationProof.EpochData)
-			handlers.STATE_MUTEX.Unlock()
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			setupNextEpochFromRotationProof(&handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler, &epochRotationProof.EpochData)
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
-			handlers.STATE_MUTEX.RLock()
-			currentEpochId = handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-			handlers.STATE_MUTEX.RUnlock()
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+			currentEpochId = handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 			if heightProof.EpochId != currentEpochId {
 				utils.LogWithTimeThrottled(
@@ -155,9 +155,9 @@ func fetchAggregatedHeightProofAndBlock(absoluteHeight int) (*structures.Aggrega
 		}
 	}
 
-	handlers.STATE_MUTEX.RLock()
-	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.STATE_MUTEX.RUnlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
@@ -186,9 +186,9 @@ func fetchVerifiedAggregatedHeightProof(absoluteHeight int) *structures.Aggregat
 		}
 	}
 
-	handlers.STATE_MUTEX.RLock()
-	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-	handlers.STATE_MUTEX.RUnlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
 	if httpProof != nil {
@@ -229,9 +229,9 @@ func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.Epoch
 		return nil
 	}
 
-	handlers.STATE_MUTEX.RLock()
-	epochDuration := handlers.CHAIN_CURSOR.NetworkParameters.EpochDuration
-	handlers.STATE_MUTEX.RUnlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	epochDuration := handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkParameters.EpochDuration
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	return &structures.EpochDataHandler{
 		Id:                 currentEpochHandler.Id + 1,
@@ -294,9 +294,9 @@ func fetchBlockForExecution(blockId string) *block_pack.Block {
 
 	epochHandler := getEpochHandlerForTracker(epochIndex)
 	if epochHandler == nil {
-		handlers.STATE_MUTEX.RLock()
-		currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
-		handlers.STATE_MUTEX.RUnlock()
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 		if epochIndex == currentEpochHandler.Id+1 {
 			epochRotationProof := fetchVerifiedAggregatedEpochRotationProof(currentEpochHandler.Id)
@@ -585,18 +585,18 @@ func executeBlock(block *block_pack.Block) {
 	// Block.GetHash() already mixes in globals.GENESIS.NetworkId, so a foreign block would fail
 	// signature verification — but this explicit check makes a runtime drift loud and obvious
 	// instead of surfacing as "invalid signature".
-	if handlers.CHAIN_CURSOR.NetworkId != globals.GENESIS.NetworkId {
+	if handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId != globals.GENESIS.NetworkId {
 		utils.LogWithTime(fmt.Sprintf(
 			"FATAL: NetworkId drift during execution: cursor=%q genesis=%q",
-			handlers.CHAIN_CURSOR.NetworkId, globals.GENESIS.NetworkId,
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId, globals.GENESIS.NetworkId,
 		), utils.RED_COLOR)
 		utils.GracefulShutdown()
 		return
 	}
 
-	handlers.STATE_MUTEX.Lock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
 	stateBatch, logMsg, ok := buildExecutionBatch(block)
-	handlers.STATE_MUTEX.Unlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
 	if !ok {
 		return
@@ -610,18 +610,18 @@ func executeBlock(block *block_pack.Block) {
 }
 
 // buildExecutionBatch mutates in-memory state and builds a LevelDB batch.
-// Caller MUST hold handlers.STATE_MUTEX in write mode.
+// Caller MUST hold handlers.EXECUTION_THREAD_METADATA.RWMutex in write mode.
 func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool) {
-	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
+	cursor := &handlers.EXECUTION_THREAD_METADATA.ChainCursor
 
-	if handlers.CHAIN_CURSOR.Statistics == nil {
-		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{LastHeight: -1}
+	if cursor.Statistics == nil {
+		cursor.Statistics = &structures.Statistics{LastHeight: -1}
 	}
-	if epochHandlerRef.EpochStatistics == nil {
-		epochHandlerRef.EpochStatistics = &structures.Statistics{LastHeight: -1}
+	if cursor.EpochStatistics == nil {
+		cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
 	}
 
-	currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
+	currentEpochIndex := cursor.EpochDataHandler.Id
 	currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
 
 	// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
@@ -632,7 +632,7 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	stateBatch := new(leveldb.Batch)
 
 	// 1. Process all transactions in the block
-	blockFees := applyTransactions(block, currentBlockId, stateBatch, epochHandlerRef)
+	blockFees := applyTransactions(block, currentBlockId, stateBatch, cursor)
 
 	// 2. Distribute fees
 	sendFeesToValidatorAccount(block.Creator, blockFees)
@@ -640,13 +640,13 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	// 3. Persist touched state (accounts and validators)
 	persistTouchedState(stateBatch)
 
-	// 4. Update execution statistics and save ET metadata
-	logMsg := updateExecutionStatistics(block, currentBlockId, blockFees, stateBatch, epochHandlerRef)
+	// 4. Update execution statistics and persist ChainCursor
+	logMsg := updateExecutionStatistics(block, currentBlockId, blockFees, stateBatch, cursor)
 
 	return stateBatch, logMsg, true
 }
 
-func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) uint64 {
+func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatch *leveldb.Batch, cursor *structures.ChainCursor) uint64 {
 	blockFees := uint64(0)
 	delayedTxPayloadsForBatch := make([]map[string]string, 0)
 
@@ -657,12 +657,12 @@ func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatc
 			delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
 		}
 
-		handlers.CHAIN_CURSOR.Statistics.TotalTransactions++
-		epochHandlerRef.EpochStatistics.TotalTransactions++
+		cursor.Statistics.TotalTransactions++
+		cursor.EpochStatistics.TotalTransactions++
 
 		if success {
-			handlers.CHAIN_CURSOR.Statistics.SuccessfulTransactions++
-			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
+			cursor.Statistics.SuccessfulTransactions++
+			cursor.EpochStatistics.SuccessfulTransactions++
 		}
 
 		blockFees += fee
@@ -680,7 +680,7 @@ func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatc
 	}
 
 	if len(delayedTxPayloadsForBatch) > 0 {
-		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, epochHandlerRef.EpochDataHandler.Id, stateBatch); err != nil {
+		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, cursor.EpochDataHandler.Id, stateBatch); err != nil {
 			panic("Impossible to add delayed transactions to atomic batch")
 		}
 	}
@@ -707,31 +707,25 @@ func persistTouchedState(stateBatch *leveldb.Batch) {
 	}
 }
 
-func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, epochHandlerRef *structures.ExecutionThreadMetadataHandler) string {
+func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, cursor *structures.ChainCursor) string {
 	blockHash := block.GetHash()
 
-	handlers.CHAIN_CURSOR.Statistics.LastHeight++
-	handlers.CHAIN_CURSOR.Statistics.LastBlockHash = blockHash
-	handlers.CHAIN_CURSOR.Statistics.TotalFees += blockFees
-	handlers.CHAIN_CURSOR.Statistics.BlocksGenerated++
+	cursor.Statistics.LastHeight++
+	cursor.Statistics.LastBlockHash = blockHash
+	cursor.Statistics.TotalFees += blockFees
+	cursor.Statistics.BlocksGenerated++
 
-	epochHandlerRef.EpochStatistics.TotalFees += blockFees
-	epochHandlerRef.EpochStatistics.BlocksGenerated++
+	cursor.EpochStatistics.TotalFees += blockFees
+	cursor.EpochStatistics.BlocksGenerated++
 
-	epochHandlerRef.EpochStatistics.LastHeight = handlers.CHAIN_CURSOR.Statistics.LastHeight
-	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
+	cursor.EpochStatistics.LastHeight = cursor.Statistics.LastHeight
+	cursor.EpochStatistics.LastBlockHash = blockHash
 
-	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(handlers.CHAIN_CURSOR.Statistics.LastHeight))), []byte(currentBlockId))
-
-	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
-		stateBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
-	} else {
-		panic("Impossible to store updated execution thread version to atomic batch")
-	}
+	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(cursor.Statistics.LastHeight))), []byte(currentBlockId))
 
 	persistChainCursor(stateBatch)
 
-	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, handlers.CHAIN_CURSOR.Statistics.LastHeight)
+	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, cursor.Statistics.LastHeight)
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {
@@ -895,14 +889,16 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 	nextEpochIndex := currentEpochIndex + 1
 
 	if nextEpochData != nil {
+		cursor := &handlers.EXECUTION_THREAD_METADATA.ChainCursor
+
 		// Reset touched sets before executing delayed txs for next epoch so we only persist what they touch.
 		utils.ResetExecTouchedSets()
 
 		dbBatch := new(leveldb.Batch)
 
 		// Persist per-epoch statistics snapshot for the finishing epoch into STATE.
-		// This allows HTTP API to query historical epoch statistics without bloating the ET payload.
-		finishingEpochStats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
+		// This allows HTTP API to query historical epoch statistics without bloating the cursor payload.
+		finishingEpochStats := cursor.EpochStatistics
 		if finishingEpochStats == nil {
 			finishingEpochStats = &structures.Statistics{LastHeight: -1}
 		}
@@ -915,7 +911,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			Id:                 nextEpochIndex,
 			Hash:               nextEpochData.NextEpochHash,
 			ValidatorsRegistry: nextEpochData.NextEpochValidatorsRegistry,
-			StartTimestamp:     epochHandler.StartTimestamp + uint64(handlers.CHAIN_CURSOR.NetworkParameters.EpochDuration),
+			StartTimestamp:     epochHandler.StartTimestamp + uint64(cursor.NetworkParameters.EpochDuration),
 			Quorum:             nextEpochData.NextEpochQuorum,
 			LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
 		}
@@ -923,7 +919,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 		// Durable epoch data for API/Explorer is stored in STATE.
 		nextSnapshot := structures.EpochDataSnapshot{
 			EpochDataHandler:  *templateForNextEpoch,
-			NetworkParameters: handlers.CHAIN_CURSOR.NetworkParameters,
+			NetworkParameters: cursor.NetworkParameters,
 		}
 		if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
 			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(toAbsoluteEpochId(nextEpochIndex))), nextValBytes)
@@ -934,11 +930,11 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = *templateForNextEpoch
+		cursor.EpochDataHandler = *templateForNextEpoch
 
 		// Nullify values for the upcoming epoch
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
+		cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
 
 		// SequenceAlignmentData lives in FINALIZER_THREAD_METADATA now and is reset
 		// by last_mile_finalizer.go when the finalizer epoch rotates. Block execution
@@ -963,12 +959,6 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			}
 		}
 
-		if execThreadRawBytes, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.Handler); err == nil {
-			dbBatch.Put([]byte(constants.DBKeyExecutionThreadMetadata), execThreadRawBytes)
-		} else {
-			panic("Impossible to store updated execution thread version to atomic batch")
-		}
-
 		persistChainCursor(dbBatch)
 
 		if err := databases.STATE.Write(dbBatch, nil); err != nil {
@@ -977,7 +967,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 
 		// Version check once new epoch started
 
-		if handlers.CHAIN_CURSOR.CoreMajorVersion > globals.CORE_MAJOR_VERSION {
+		if cursor.CoreMajorVersion > globals.CORE_MAJOR_VERSION {
 			utils.LogWithTime("New version detected on EXECUTION_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 			utils.GracefulShutdown()
@@ -992,7 +982,7 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 	}
 }
 
-// State Executor: manages the permanent world-state layer in STATE DB.
+// State Executor helpers: manage the permanent world-state layer in STATE DB.
 //
 // block_execution.go operates in local coordinates (0-based heights and epoch IDs
 // that match the consensus layer's HEIGHT_PROOF and EPOCH_ROTATION_PROOF numbering).
@@ -1001,21 +991,21 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 // ChainCursor offsets to produce absolute keys that survive network restarts.
 // With default cursor {0, 0} the absolute values equal the local ones.
 //
-// ChainCursor is the single source of truth for permanent fields (CoreMajorVersion,
-// Statistics, NetworkParameters). It is persisted atomically in the same LevelDB batch
-// as other STATE writes.
+// ChainCursor is the single source of truth for ALL execution-thread state. It is
+// persisted atomically in the same LevelDB batch as other STATE writes under the
+// DBKeyChainCursor key.
 
 func toAbsoluteHeight(localHeight int64) int64 {
-	return localHeight + handlers.CHAIN_CURSOR.HeightOffset
+	return localHeight + handlers.EXECUTION_THREAD_METADATA.ChainCursor.HeightOffset
 }
 
 func toAbsoluteEpochId(localEpochId int) int {
-	return localEpochId + handlers.CHAIN_CURSOR.EpochOffset
+	return localEpochId + handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochOffset
 }
 
 // persistChainCursor serializes the current ChainCursor and appends it to the batch.
 func persistChainCursor(batch *leveldb.Batch) {
-	if data, err := json.Marshal(handlers.CHAIN_CURSOR); err == nil {
+	if data, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.ChainCursor); err == nil {
 		batch.Put([]byte(constants.DBKeyChainCursor), data)
 	}
 }

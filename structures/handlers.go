@@ -6,13 +6,6 @@ type ApprovementThreadMetadataHandler struct {
 	EpochDataHandler  EpochDataHandler  `json:"epoch"`
 }
 
-type ExecutionThreadMetadataHandler struct {
-	EpochDataHandler EpochDataHandler `json:"epoch"`
-
-	// EpochStatistics tracks metrics within the current epoch (reset on epoch rotation).
-	EpochStatistics *Statistics `json:"epochStatistics,omitempty"`
-}
-
 type GenerationThreadMetadataHandler struct {
 	EpochFullId string `json:"epochFullId"`
 	PrevHash    string `json:"prevHash"`
@@ -52,8 +45,8 @@ type NextEpochDataHandler struct {
 
 // FinalizerThreadMetadataHandler holds state used by the consensus/sequencing threads
 // (last_mile_finalizer, sequence_alignment, anchor_rotation_monitor, alfp_inclusion_watcher,
-// leader_finalization). It is intentionally decoupled from ExecutionThreadMetadataHandler so
-// that block sequencing/finalization is not bound to block execution speed.
+// leader_finalization). It is intentionally decoupled from the execution thread (ChainCursor)
+// so that block sequencing/finalization is not bound to block execution speed.
 //
 // Persisted as a single key (constants.DBKeyFinalizerThreadMetadata) in
 // databases.FINALIZATION_THREAD_METADATA.

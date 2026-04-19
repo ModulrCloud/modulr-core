@@ -73,10 +73,10 @@ func GetAggregatedEpochRotationProof(ctx *fasthttp.RequestCtx) {
 }
 
 func GetCurrentEpochStats(ctx *fasthttp.RequestCtx) {
-	handlers.STATE_MUTEX.RLock()
-	epochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-	stats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	handlers.STATE_MUTEX.RUnlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	epochId := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
+	stats := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	if stats == nil {
 		stats = &structures.Statistics{LastHeight: -1}
@@ -100,10 +100,10 @@ func GetEpochStatsByEpochIndex(ctx *fasthttp.RequestCtx) {
 	}
 
 	// If requested epoch is the current one, serve from memory (live, not yet snapshotted).
-	handlers.STATE_MUTEX.RLock()
-	currentEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-	currentStats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	handlers.STATE_MUTEX.RUnlock()
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochId := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
+	currentStats := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	if epochIndex == currentEpochId {
 		if currentStats == nil {

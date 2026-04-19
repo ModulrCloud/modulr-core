@@ -150,22 +150,30 @@ func prepareBlockchain() error {
 	databases.APPROVEMENT_THREAD_METADATA = utils.OpenDb("APPROVEMENT_THREAD_METADATA")
 	databases.FINALIZATION_THREAD_METADATA = utils.OpenDb("FINALIZATION_THREAD_METADATA")
 
-	// Load CHAIN_CURSOR (offset mapping for network restarts; defaults to {0,0})
+	// Load ChainCursor (single source of truth for execution-thread state).
+	// Default zero-value (CoreMajorVersion=-1, EpochDataHandler.Hash="") means fresh chain
+	// and triggers genesis init below.
 	if cursorRaw, err := databases.STATE.Get([]byte(constants.DBKeyChainCursor), nil); err == nil {
 		var cursor structures.ChainCursor
 		if err := json.Unmarshal(cursorRaw, &cursor); err == nil {
-			handlers.CHAIN_CURSOR = cursor
+			if cursor.Statistics == nil {
+				cursor.Statistics = &structures.Statistics{LastHeight: -1}
+			}
+			if cursor.EpochStatistics == nil {
+				cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
+			}
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor = cursor
 		}
 	}
 
 	// Defensive check: chaindata must belong to the same network iteration as the loaded genesis.
 	// Empty NetworkId means clean install (no cursor in STATE) — setGenesisToState() will populate it.
-	if handlers.CHAIN_CURSOR.NetworkId != "" &&
-		handlers.CHAIN_CURSOR.NetworkId != globals.GENESIS.NetworkId {
+	if handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId != "" &&
+		handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId != globals.GENESIS.NetworkId {
 		return fmt.Errorf(
 			"network id mismatch: chaindata belongs to %q but loaded genesis is %q — "+
 				"wrong genesis file or chaindata directory",
-			handlers.CHAIN_CURSOR.NetworkId, globals.GENESIS.NetworkId,
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId, globals.GENESIS.NetworkId,
 		)
 	}
 
@@ -196,20 +204,6 @@ func prepareBlockchain() error {
 		handlers.APPROVEMENT_THREAD_METADATA.Handler = atHandler
 	}
 
-	if data, err := databases.STATE.Get([]byte(constants.DBKeyExecutionThreadMetadata), nil); err == nil {
-		var etHandler structures.ExecutionThreadMetadataHandler
-
-		if err := json.Unmarshal(data, &etHandler); err != nil {
-			return fmt.Errorf("unmarshal EXECUTION_THREAD metadata: %w", err)
-		}
-
-		if etHandler.EpochStatistics == nil {
-			etHandler.EpochStatistics = &structures.Statistics{LastHeight: -1}
-		}
-
-		handlers.EXECUTION_THREAD_METADATA.Handler = etHandler
-	}
-
 	// Load FINALIZER_THREAD_METADATA (consensus/sequencing state, separate from execution).
 	if data, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(constants.DBKeyFinalizerThreadMetadata), nil); err == nil {
 		var fHandler structures.FinalizerThreadMetadataHandler
@@ -228,19 +222,22 @@ func prepareBlockchain() error {
 		handlers.FINALIZER_THREAD_METADATA.Handler = fHandler
 	}
 
-	// Backfill CHAIN_CURSOR statistics if missing (e.g. first run after accounts were created)
-	if handlers.CHAIN_CURSOR.Statistics != nil {
-		if handlers.CHAIN_CURSOR.Statistics.AccountsNumber == 0 {
-			handlers.CHAIN_CURSOR.Statistics.AccountsNumber = utils.CountStateAccounts()
+	// Backfill ChainCursor statistics if missing (e.g. first run after accounts were created)
+	if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics != nil {
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.AccountsNumber == 0 {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.AccountsNumber = utils.CountStateAccounts()
 		}
-		if handlers.CHAIN_CURSOR.Statistics.StakingDelta == 0 {
-			handlers.CHAIN_CURSOR.Statistics.StakingDelta = int64(utils.SumTotalStakedFromState())
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.StakingDelta == 0 {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.StakingDelta = int64(utils.SumTotalStakedFromState())
 		}
 	}
 
-	// Genesis init is needed when EXECUTION_THREAD_METADATA is absent from STATE.
-	// This covers both first-ever launch AND network restart (where ET is deleted but CHAIN_CURSOR is preserved).
-	if _, etErr := databases.STATE.Get([]byte(constants.DBKeyExecutionThreadMetadata), nil); etErr != nil {
+	// Genesis init is needed when ChainCursor.EpochDataHandler has never been written
+	// (Hash == "" sentinel). This covers:
+	//   1) first-ever launch (no CHAIN_CURSOR key in STATE),
+	//   2) network restart (operator wiped ChainCursor.EpochDataHandler to bootstrap a new
+	//      genesis on top of preserved accounts/validators/offsets).
+	if handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Hash == "" {
 		if err := setGenesisToState(); err != nil {
 			return fmt.Errorf("write genesis to state: %w", err)
 		}
@@ -251,12 +248,6 @@ func prepareBlockchain() error {
 			return fmt.Errorf("marshal APPROVEMENT_THREAD metadata: %w", err)
 		}
 
-		serializedExecutionThread, err := json.Marshal(handlers.EXECUTION_THREAD_METADATA.Handler)
-
-		if err != nil {
-			return fmt.Errorf("marshal EXECUTION_THREAD metadata: %w", err)
-		}
-
 		serializedFinalizerThread, err := json.Marshal(handlers.FINALIZER_THREAD_METADATA.Handler)
 
 		if err != nil {
@@ -265,10 +256,6 @@ func prepareBlockchain() error {
 
 		if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyApprovementThreadMetadata), serializedApprovementThread, nil); err != nil {
 			return fmt.Errorf("save APPROVEMENT_THREAD metadata: %w", err)
-		}
-
-		if err := databases.STATE.Put([]byte(constants.DBKeyExecutionThreadMetadata), serializedExecutionThread, nil); err != nil {
-			return fmt.Errorf("save EXECUTION_THREAD metadata: %w", err)
 		}
 
 		if err := databases.FINALIZATION_THREAD_METADATA.Put([]byte(constants.DBKeyFinalizerThreadMetadata), serializedFinalizerThread, nil); err != nil {
@@ -364,22 +351,23 @@ func setGenesisToState() error {
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
 
-	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics == nil {
-		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
-	}
+	cursor := &handlers.EXECUTION_THREAD_METADATA.ChainCursor
 
-	isFirstLaunch := handlers.CHAIN_CURSOR.CoreMajorVersion == -1
+	isFirstLaunch := cursor.CoreMajorVersion == -1
 
-	handlers.CHAIN_CURSOR.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
-	handlers.CHAIN_CURSOR.NetworkId = globals.GENESIS.NetworkId
+	cursor.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
+	cursor.NetworkId = globals.GENESIS.NetworkId
+
+	// EpochStatistics resets on every (re)bootstrap — the new genesis starts a fresh epoch 0.
+	cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
 
 	if isFirstLaunch {
-		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{
+		cursor.Statistics = &structures.Statistics{
 			LastHeight:     -1,
 			AccountsNumber: genesisAccountsCount,
 			StakingDelta:   int64(genesisTotalStaked),
 		}
-		handlers.CHAIN_CURSOR.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
+		cursor.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
 	}
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters = globals.GENESIS.NetworkParameters.CopyNetworkParameters()
@@ -412,7 +400,7 @@ func setGenesisToState() error {
 
 	epochHandlerForApprovementThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForApprovementThread, handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
-	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, handlers.CHAIN_CURSOR.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
+	epochHandlerForExecThread.Quorum = utils.GetCurrentEpochQuorum(&epochHandlerForExecThread, cursor.NetworkParameters.QuorumSize, initEpochHash, utils.GetValidatorFromApprovementThreadState)
 
 	// Now set the block generators for epoch pseudorandomly and in deterministic way
 
@@ -422,7 +410,7 @@ func setGenesisToState() error {
 
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForApprovementThread
 
-	handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForExecThread
+	cursor.EpochDataHandler = epochHandlerForExecThread
 
 	// FINALIZER_THREAD_METADATA starts on the genesis epoch as well, with a fresh
 	// SequenceAlignmentData. Both fields will be re-persisted to FINALIZATION_THREAD_METADATA
@@ -454,13 +442,15 @@ func setGenesisToState() error {
 	approvementThreadBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(currentEpochDataHandler.Id)), jsonedCurrentEpochDataHandler)
 
 	// Durable epoch data for API/Explorer is stored in STATE using absolute epoch ID.
-	absoluteEpochId := currentEpochDataHandler.Id + handlers.CHAIN_CURSOR.EpochOffset
+	absoluteEpochId := currentEpochDataHandler.Id + cursor.EpochOffset
 	execThreadBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(absoluteEpochId)), jsonedCurrentEpochDataHandler)
 
-	// Persist ChainCursor (permanent state) in the same atomic batch.
-	if cursorBytes, err := json.Marshal(handlers.CHAIN_CURSOR); err == nil {
-		execThreadBatch.Put([]byte(constants.DBKeyChainCursor), cursorBytes)
+	// Persist ChainCursor (the only execution-thread state) in the same atomic batch.
+	cursorBytes, err := json.Marshal(cursor)
+	if err != nil {
+		return fmt.Errorf("marshal ChainCursor: %w", err)
 	}
+	execThreadBatch.Put([]byte(constants.DBKeyChainCursor), cursorBytes)
 
 	// Commit changes
 	if err := databases.APPROVEMENT_THREAD_METADATA.Write(approvementThreadBatch, nil); err != nil {
