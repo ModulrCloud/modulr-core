@@ -46,7 +46,7 @@ func HasLocalVerifiedAfp(blockId string, epochHandler *structures.EpochDataHandl
 }
 
 func LoadLastMileSequenceState(dbKey string) *LastMileSequenceState {
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(dbKey), nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(dbKey), nil)
 
 	if err != nil || len(raw) == 0 {
 		return &LastMileSequenceState{}
@@ -105,7 +105,7 @@ func PersistLastMileMappingsAndState(dbKey string, height int64, blockId string,
 		return err
 	}
 
-	return databases.FINALIZATION_VOTING_STATS.Write(batch, nil)
+	return databases.FINALIZATION_THREAD_METADATA.Write(batch, nil)
 }
 
 func PersistLastMileMappingsAndStateTransition(
@@ -128,7 +128,7 @@ func PersistLastMileMappingsAndStateTransition(
 		return err
 	}
 
-	return databases.FINALIZATION_VOTING_STATS.Write(batch, nil)
+	return databases.FINALIZATION_THREAD_METADATA.Write(batch, nil)
 }
 
 func PersistLastMileStateTransition(dbKey string, state *LastMileSequenceState, completedBoundary *structures.LastMileEpochBoundary) error {
@@ -142,7 +142,7 @@ func PersistLastMileStateTransition(dbKey string, state *LastMileSequenceState, 
 		return err
 	}
 
-	return databases.FINALIZATION_VOTING_STATS.Write(batch, nil)
+	return databases.FINALIZATION_THREAD_METADATA.Write(batch, nil)
 }
 
 func HasLocallySequencedFullEpoch(epochId int) bool {
@@ -151,7 +151,7 @@ func HasLocallySequencedFullEpoch(epochId int) bool {
 
 func LoadLastMileEpochBoundary(epochId int) *structures.LastMileEpochBoundary {
 	key := fmt.Sprintf(constants.DBKeyPrefixLastMileEpochBoundary+"%d", epochId)
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(key), nil)
 	if err != nil || len(raw) == 0 {
 		return nil
 	}
@@ -166,7 +166,7 @@ func LoadLastMileEpochBoundary(epochId int) *structures.LastMileEpochBoundary {
 
 func LoadHeightBlockIdMapping(height int64) string {
 	key := fmt.Sprintf(constants.DBKeyPrefixLastMileHeightMap+"%d", height)
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(key), nil)
 	if err != nil {
 		return ""
 	}
@@ -175,7 +175,7 @@ func LoadHeightBlockIdMapping(height int64) string {
 
 func LoadHeightInEpochMapping(height int64) (int, bool) {
 	key := fmt.Sprintf("%s%d", constants.DBKeyPrefixHeightInEpochMap, height)
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(key), nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(key), nil)
 	if err != nil {
 		return 0, false
 	}
@@ -195,5 +195,5 @@ func StoreAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpochA
 	if err != nil {
 		return
 	}
-	_ = databases.FINALIZATION_VOTING_STATS.Put(key, raw, nil)
+	_ = databases.FINALIZATION_THREAD_METADATA.Put(key, raw, nil)
 }

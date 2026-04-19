@@ -15,7 +15,7 @@ func StoreAlfpIncluded(epochId int, leader string) {
 		return
 	}
 
-	_ = databases.FINALIZATION_VOTING_STATS.Put(alfpIncludedKey(epochId, leader), []byte{1}, nil)
+	_ = databases.FINALIZATION_THREAD_METADATA.Put(alfpIncludedKey(epochId, leader), []byte{1}, nil)
 }
 
 func HasAnyAlfpIncluded(epochId int, leader string) bool {
@@ -23,6 +23,6 @@ func HasAnyAlfpIncluded(epochId int, leader string) bool {
 		return false
 	}
 
-	_, err := databases.FINALIZATION_VOTING_STATS.Get(alfpIncludedKey(epochId, leader), nil)
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(alfpIncludedKey(epochId, leader), nil)
 	return err == nil
 }

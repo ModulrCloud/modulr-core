@@ -77,7 +77,7 @@ func BlocksSharingAndProofsGrabingThread() {
 
 			dbKey := []byte(strconv.Itoa(epochSnapshot.Id) + ":PROOFS_GRABBER")
 
-			if rawGrabber, err := databases.FINALIZATION_VOTING_STATS.Get(dbKey, nil); err == nil {
+			if rawGrabber, err := databases.FINALIZATION_THREAD_METADATA.Get(dbKey, nil); err == nil {
 				json.Unmarshal(rawGrabber, &PROOFS_GRABBER)
 			} else {
 				// Assign initial value of proofs grabber for each new epoch
@@ -99,7 +99,7 @@ func BlocksSharingAndProofsGrabingThread() {
 			// And store new descriptor
 
 			if serialized, err := json.Marshal(PROOFS_GRABBER); err == nil {
-				databases.FINALIZATION_VOTING_STATS.Put(dbKey, serialized, nil)
+				databases.FINALIZATION_THREAD_METADATA.Put(dbKey, serialized, nil)
 			}
 
 			PROOFS_GRABBER_MUTEX.Unlock()
@@ -264,7 +264,7 @@ func runFinalizationProofsGrabbing(epochHandler *structures.EpochDataHandler) {
 		proofGrabberValueBytes, marshalErr := json.Marshal(PROOFS_GRABBER)
 
 		if marshalErr == nil {
-			proofsGrabberStoreErr := databases.FINALIZATION_VOTING_STATS.Put(proofGrabberKeyBytes, proofGrabberValueBytes, nil)
+			proofsGrabberStoreErr := databases.FINALIZATION_THREAD_METADATA.Put(proofGrabberKeyBytes, proofGrabberValueBytes, nil)
 
 			if proofsGrabberStoreErr == nil {
 				PROOFS_GRABBER.AfpForPrevious = aggregatedFinalizationProof

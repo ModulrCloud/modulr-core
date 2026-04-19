@@ -37,7 +37,7 @@ func alfpWatcherStateKey(epochId int) []byte {
 }
 
 func loadAlfpWatcherState(epochId int) *AlfpWatcherState {
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(alfpWatcherStateKey(epochId), nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(alfpWatcherStateKey(epochId), nil)
 	if err != nil || len(raw) == 0 {
 		return newAlfpWatcherState(epochId)
 	}
@@ -68,7 +68,7 @@ func persistAlfpWatcherState(st *AlfpWatcherState) {
 		st.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
 	}
 	if payload, err := json.Marshal(st); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(alfpWatcherStateKey(st.EpochId), payload, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(alfpWatcherStateKey(st.EpochId), payload, nil)
 	}
 }
 

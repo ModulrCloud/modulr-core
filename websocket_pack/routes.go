@@ -114,7 +114,7 @@ func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *
 	if itsLeader {
 		localVotingDataForLeader := structures.NewLeaderVotingStatTemplate()
 
-		localVotingDataRaw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(strconv.Itoa(epochIndex)+":"+parsedRequest.Block.Creator), nil)
+		localVotingDataRaw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(strconv.Itoa(epochIndex)+":"+parsedRequest.Block.Creator), nil)
 
 		if err == nil {
 			json.Unmarshal(localVotingDataRaw, &localVotingDataForLeader)
@@ -188,7 +188,7 @@ func GetFinalizationProof(parsedRequest WsFinalizationProofRequest, connection *
 							if errStore == nil && errParse == nil {
 								// 3. Store the voting stats
 
-								err := databases.FINALIZATION_VOTING_STATS.Put([]byte(strconv.Itoa(epochIndex)+":"+parsedRequest.Block.Creator), votingStatBytes, nil)
+								err := databases.FINALIZATION_THREAD_METADATA.Put([]byte(strconv.Itoa(epochIndex)+":"+parsedRequest.Block.Creator), votingStatBytes, nil)
 
 								if err == nil {
 									// Only after we stored the these 3 components = generate signature (finalization proof)
@@ -270,7 +270,7 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 	if isRequestForPastEpoch || epochHandler.CurrentLeaderIndex > parsedRequest.IndexOfLeaderToFinalize || isLastLeader {
 		localVotingData := structures.NewLeaderVotingStatTemplate()
 
-		localVotingDataRaw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(strconv.Itoa(epochIndex)+":"+leaderToFinalize), nil)
+		localVotingDataRaw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(strconv.Itoa(epochIndex)+":"+leaderToFinalize), nil)
 
 		if err == nil {
 			json.Unmarshal(localVotingDataRaw, &localVotingData)
@@ -364,7 +364,7 @@ func AcceptAggregatedAnchorEpochAckProof(parsedRequest WsAcceptAggregatedAnchorE
 
 func isAnchorEpochAckAvailable(epochId int) bool {
 	key := []byte(constants.DBKeyPrefixAggregatedAnchorEpochAckProof + strconv.Itoa(epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err == nil && len(raw) > 0 {
 		var proof structures.AggregatedAnchorEpochAckProof
 		if json.Unmarshal(raw, &proof) == nil && utils.VerifyAggregatedAnchorEpochAckProof(&proof) {

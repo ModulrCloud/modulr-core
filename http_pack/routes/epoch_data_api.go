@@ -57,7 +57,7 @@ func GetAggregatedEpochRotationProof(ctx *fasthttp.RequestCtx) {
 	}
 
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return
@@ -150,7 +150,7 @@ func GetAggregatedAnchorEpochAckProof(ctx *fasthttp.RequestCtx) {
 	}
 
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedAnchorEpochAckProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return

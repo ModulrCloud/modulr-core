@@ -142,7 +142,7 @@ func GetLeaderFinalizationState() LeaderFinalizationState {
 }
 
 func loadFinalizationProgress() int {
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
+	if raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
 		}
@@ -168,13 +168,13 @@ func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
 
 func leaderHasAlfp(epochId int, leader string) bool {
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
-	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	return err == nil
 }
 
 func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structures.AggregatedLeaderFinalizationProof {
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}
@@ -186,12 +186,12 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 }
 
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
-	handlers.STATE_MUTEX.RLock()
-	defer handlers.STATE_MUTEX.RUnlock()
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
+	if handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
 		return false
 	}
-	_, exists := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
+	_, exists := handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
 	return exists
 }

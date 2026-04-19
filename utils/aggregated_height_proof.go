@@ -16,12 +16,12 @@ type AggregatedHeightProofInfo struct {
 	EpochId        int    `json:"epochId"`
 }
 
-// LoadAggregatedHeightProofInfo reads an AggregatedHeightProof from FINALIZATION_VOTING_STATS
+// LoadAggregatedHeightProofInfo reads an AggregatedHeightProof from FINALIZATION_THREAD_METADATA
 // and returns a summary suitable for the recovery API.
 func LoadAggregatedHeightProofInfo(absoluteHeight int) *AggregatedHeightProofInfo {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedHeightProof, absoluteHeight))
 
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}

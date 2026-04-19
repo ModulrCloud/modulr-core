@@ -154,7 +154,7 @@ func GetAggregatedHeightProof(ctx *fasthttp.RequestCtx) {
 	}
 
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedHeightProof, height))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return
@@ -185,7 +185,7 @@ func GetFirstBlockInEpoch(ctx *fasthttp.RequestCtx) {
 	}
 
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAggregatedHeightProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
 		return

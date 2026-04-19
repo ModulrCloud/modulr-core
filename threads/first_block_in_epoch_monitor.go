@@ -108,13 +108,13 @@ func storeDataAboutFirstBlockInEpoch(epochIndex int, data *FirstBlockData) error
 func storeFirstBlockAggregatedHeightProof(proof *structures.AggregatedHeightProof) {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAggregatedHeightProof, proof.EpochId))
 	if value, err := json.Marshal(proof); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(key, value, nil)
 	}
 }
 
 func loadFirstBlockAggregatedHeightProof(epochId int) *structures.AggregatedHeightProof {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAggregatedHeightProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}

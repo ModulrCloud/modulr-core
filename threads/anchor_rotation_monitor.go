@@ -21,20 +21,20 @@ import (
 
 var RANDOM_GENERATOR = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-type executionThreadMetadataSnapshot struct {
+type finalizerThreadMetadataSnapshot struct {
 	EpochID                 int
 	CurrentAnchorAssumption int
 	AnchorStatsKnown        bool
 }
 
-func takeExecutionThreadMetadataSnapshot(anchorIndex int) executionThreadMetadataSnapshot {
-	handlers.STATE_MUTEX.RLock()
-	defer handlers.STATE_MUTEX.RUnlock()
+func takeFinalizerThreadMetadataSnapshot(anchorIndex int) finalizerThreadMetadataSnapshot {
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	handler := handlers.EXECUTION_THREAD_METADATA.Handler
+	handler := handlers.FINALIZER_THREAD_METADATA.Handler
 	_, exists := handler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex]
 
-	return executionThreadMetadataSnapshot{
+	return finalizerThreadMetadataSnapshot{
 		EpochID:                 handler.EpochDataHandler.Id,
 		CurrentAnchorAssumption: handler.SequenceAlignmentData.CurrentAnchorAssumption,
 		AnchorStatsKnown:        exists,
@@ -45,13 +45,13 @@ func AnchorRotationMonitorThread() {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for {
-		handlers.STATE_MUTEX.RLock()
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
 
-		anchorIndex := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption
+		anchorIndex := handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData.CurrentAnchorAssumption
 
-		epochHandler := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+		epochHandler := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler
 
-		handlers.STATE_MUTEX.RUnlock()
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
 		checkSequenceAlignmentData(anchorIndex, &epochHandler, client)
 
@@ -87,7 +87,7 @@ func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochD
 		return
 	}
 
-	metadataSnapshot := takeExecutionThreadMetadataSnapshot(anchorIndex)
+	metadataSnapshot := takeFinalizerThreadMetadataSnapshot(anchorIndex)
 	if metadataSnapshot.AnchorStatsKnown || metadataSnapshot.CurrentAnchorAssumption != anchorIndex || metadataSnapshot.EpochID != epochHandler.Id {
 		return
 	}
@@ -97,10 +97,10 @@ func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochD
 		return
 	}
 
-	handlers.STATE_MUTEX.Lock()
-	defer handlers.STATE_MUTEX.Unlock()
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.Lock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.Unlock()
 
-	currentHandler := &handlers.EXECUTION_THREAD_METADATA.Handler
+	currentHandler := &handlers.FINALIZER_THREAD_METADATA.Handler
 	if currentHandler.EpochDataHandler.Id != metadataSnapshot.EpochID ||
 		currentHandler.SequenceAlignmentData.CurrentAnchorAssumption != metadataSnapshot.CurrentAnchorAssumption {
 		return
@@ -112,6 +112,7 @@ func checkSequenceAlignmentData(anchorIndex int, epochHandler *structures.EpochD
 
 	if _, exists := currentHandler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex]; !exists {
 		currentHandler.SequenceAlignmentData.LastBlocksByAnchors[anchorIndex] = earliestRotationStats
+		persistFinalizerThreadMetadataLocked()
 	}
 }
 

@@ -29,7 +29,7 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 		return val
 	}
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]; ok && val != nil {
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.AccountsCache[accountId]; ok && val != nil {
 		TouchExecAccountCache(accountId)
 		MarkExecAccountTouched(accountId, val)
 		return val
@@ -106,7 +106,7 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 		return val
 	}
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 		return val
 	}
@@ -136,7 +136,7 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
 		return val
 	}
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
 	}
 
@@ -156,7 +156,7 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 		return val
 	}
 
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
 		TouchApprovementValidatorCache(validatorStorageKey)
 		MarkApprovementValidatorTouched(validatorStorageKey, val)
 		return val
@@ -193,7 +193,7 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 		return val
 	}
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
 		TouchExecValidatorCache(validatorStorageKey)
 		MarkExecValidatorTouched(validatorStorageKey, val)
 		return val

@@ -93,25 +93,25 @@ func evictIfNeeded[V any](cache map[string]V, touched map[string]V, cap int, sta
 
 func TouchExecAccountCache(accountID string) {
 	touch(lruState{lru: handlers.EXECUTION_THREAD_METADATA.AccountsLRU, index: handlers.EXECUTION_THREAD_METADATA.AccountsLRUIndex}, accountID)
-	evictIfNeeded(handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache, handlers.EXECUTION_THREAD_METADATA.AccountsTouched, handlers.EXECUTION_THREAD_METADATA.AccountsCacheMax,
+	evictIfNeeded(handlers.EXECUTION_THREAD_METADATA.AccountsCache, handlers.EXECUTION_THREAD_METADATA.AccountsTouched, handlers.EXECUTION_THREAD_METADATA.AccountsCacheMax,
 		lruState{lru: handlers.EXECUTION_THREAD_METADATA.AccountsLRU, index: handlers.EXECUTION_THREAD_METADATA.AccountsLRUIndex},
 	)
 }
 
 func TouchExecValidatorCache(storageKey string) {
 	touch(lruState{lru: handlers.EXECUTION_THREAD_METADATA.ValidatorsLRU, index: handlers.EXECUTION_THREAD_METADATA.ValidatorsLRUIndex}, storageKey)
-	evictIfNeeded(handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache, handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched, handlers.EXECUTION_THREAD_METADATA.ValidatorsCacheMax,
+	evictIfNeeded(handlers.EXECUTION_THREAD_METADATA.ValidatorsStoragesCache, handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched, handlers.EXECUTION_THREAD_METADATA.ValidatorsCacheMax,
 		lruState{lru: handlers.EXECUTION_THREAD_METADATA.ValidatorsLRU, index: handlers.EXECUTION_THREAD_METADATA.ValidatorsLRUIndex},
 	)
 }
 
 func PutExecAccountCache(accountID string, account *structures.Account) {
-	handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountID] = account
+	handlers.EXECUTION_THREAD_METADATA.AccountsCache[accountID] = account
 	TouchExecAccountCache(accountID)
 }
 
 func PutExecValidatorCache(storageKey string, vs *structures.ValidatorStorage) {
-	handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[storageKey] = vs
+	handlers.EXECUTION_THREAD_METADATA.ValidatorsStoragesCache[storageKey] = vs
 	TouchExecValidatorCache(storageKey)
 }
 
@@ -119,12 +119,12 @@ func PutExecValidatorCache(storageKey string, vs *structures.ValidatorStorage) {
 
 func TouchApprovementValidatorCache(storageKey string) {
 	touch(lruState{lru: handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRU, index: handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRUIndex}, storageKey)
-	evictIfNeeded(handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache, handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched, handlers.APPROVEMENT_THREAD_METADATA.ValidatorsCacheMax,
+	evictIfNeeded(handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache, handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched, handlers.APPROVEMENT_THREAD_METADATA.ValidatorsCacheMax,
 		lruState{lru: handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRU, index: handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRUIndex},
 	)
 }
 
 func PutApprovementValidatorCache(storageKey string, vs *structures.ValidatorStorage) {
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[storageKey] = vs
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[storageKey] = vs
 	TouchApprovementValidatorCache(storageKey)
 }

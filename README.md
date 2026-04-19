@@ -28,7 +28,7 @@ In this directory you should add `configs.json` and `genesis.json`. The chaindat
 │   ├── BLOCKS/
 │   ├── EPOCH_DATA/
 │   ├── APPROVEMENT_THREAD_METADATA/
-│   └── FINALIZATION_VOTING_STATS/
+│   └── FINALIZATION_THREAD_METADATA/
 └── ...
 ```
 

@@ -20,14 +20,14 @@ import (
 
 func setupApprovementHandler(t *testing.T, network structures.NetworkParameters) {
 	handlers.APPROVEMENT_THREAD_METADATA.Handler = structures.ApprovementThreadMetadataHandler{
-		NetworkParameters:       network,
-		EpochDataHandler:        structures.EpochDataHandler{},
-		ValidatorsStoragesCache: make(map[string]*structures.ValidatorStorage),
+		NetworkParameters: network,
+		EpochDataHandler:  structures.EpochDataHandler{},
 	}
 
 	// Isolate tests from each other: contract helpers prioritize ValidatorsTouched over cache,
 	// so we must reset touched sets + cache bookkeeping between tests.
 	utils.ResetApprovementTouchedSets()
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
 	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRU = list.New()
 	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsLRUIndex = make(map[string]*list.Element)
 
@@ -64,7 +64,7 @@ func TestCreateValidatorAddsNewValidatorToApprovementCache(t *testing.T) {
 	}
 
 	key := constants.DBKeyPrefixValidatorStorage + "validator1"
-	stored := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key]
+	stored := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key]
 	if stored == nil {
 		t.Fatalf("expected validator to be stored in cache")
 	}
@@ -84,7 +84,7 @@ func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T)
 		WssValidatorUrl: "old-wss",
 	}
 	key := constants.DBKeyPrefixValidatorStorage + "validator1"
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = existing
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key] = existing
 
 	delayedTx := map[string]string{
 		"creator":         "validator1",
@@ -97,7 +97,7 @@ func TestUpdateValidatorUpdatesExistingValidatorInApprovementCache(t *testing.T)
 		t.Fatalf("expected UpdateValidator to succeed")
 	}
 
-	updated := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key]
+	updated := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key]
 	if updated.Percentage != 65 || updated.ValidatorUrl != "http://new" || updated.WssValidatorUrl != "ws://new" {
 		t.Fatalf("unexpected updated validator data: %+v", updated)
 	}
@@ -118,7 +118,7 @@ func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
 		WssValidatorUrl: "ws://validator",
 	}
 	key := constants.DBKeyPrefixValidatorStorage + "validator1"
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = validator
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key] = validator
 
 	delayedTx := map[string]string{
 		"staker":          "alice",
@@ -130,7 +130,7 @@ func TestStakeAddsStakeAndRegistersValidator(t *testing.T) {
 		t.Fatalf("expected Stake to succeed")
 	}
 
-	updated := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key]
+	updated := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key]
 	if updated.TotalStaked != 110 {
 		t.Fatalf("expected total staked 110, got %d", updated.TotalStaked)
 	}
@@ -157,7 +157,7 @@ func TestUnstakeRemovesValidatorFromRegistryWhenBelowRequiredStake(t *testing.T)
 		WssValidatorUrl: "ws://validator",
 	}
 	key := constants.DBKeyPrefixValidatorStorage + "validator1"
-	handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key] = validator
+	handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key] = validator
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.ValidatorsRegistry = []string{"validator1"}
 
 	delayedTx := map[string]string{
@@ -170,7 +170,7 @@ func TestUnstakeRemovesValidatorFromRegistryWhenBelowRequiredStake(t *testing.T)
 		t.Fatalf("expected Unstake to succeed")
 	}
 
-	updated := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[key]
+	updated := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[key]
 	if updated.TotalStaked != 90 {
 		t.Fatalf("expected total staked 90, got %d", updated.TotalStaked)
 	}

@@ -81,7 +81,7 @@ Approvement thread state, epoch snapshots, validator storage (AT copy), and help
 
 ---
 
-## 5. FINALIZATION_VOTING_STATS
+## 5. FINALIZATION_THREAD_METADATA
 
 All voting/finalization-related data: proofs grabber state, ALFPs, height attestations, last mile sequence, PoD outbox, and ALFP inclusion tracking.
 

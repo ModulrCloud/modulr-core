@@ -89,15 +89,15 @@ func LeaderFinalizationThread() {
 	processingEpochIndex := loadAlfpProgress()
 
 	for {
-		// If execution already advanced beyond our current ALFP progress,
+		// If the finalizer/sequencing layer already advanced beyond our current ALFP progress,
 		// there is no point processing older epochs here. Fast-forward.
-		handlers.STATE_MUTEX.RLock()
-		execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.STATE_MUTEX.RUnlock()
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+		finalizerEpochId := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-		if execEpochId > processingEpochIndex {
+		if finalizerEpochId > processingEpochIndex {
 			currentEpoch := processingEpochIndex
-			processingEpochIndex = execEpochId
+			processingEpochIndex = finalizerEpochId
 			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
@@ -206,7 +206,7 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 }
 
 func loadAlfpProgress() int {
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
+	if raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
 		}
@@ -216,7 +216,7 @@ func loadAlfpProgress() int {
 }
 
 func persistAlfpProgress(epochId int) {
-	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte(constants.DBKeyAlfpProgress), []byte(strconv.Itoa(epochId)), nil)
+	_ = databases.FINALIZATION_THREAD_METADATA.Put([]byte(constants.DBKeyAlfpProgress), []byte(strconv.Itoa(epochId)), nil)
 }
 
 func cleanupLeaderFinalizationState(epochId int) {
@@ -272,13 +272,13 @@ func getLeadersWithNoFoundAlfp(epochHandler *structures.EpochDataHandler, networ
 
 func haveInfoAboutAlfpLocally(epochId int, leader string) bool {
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
-	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	return err == nil
 }
 
 func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structures.AggregatedLeaderFinalizationProof {
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}
@@ -294,25 +294,26 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 // In case we are able to find the info about last block by leader in the SequenceAlignmentData,
 // we can consider that network quorum has already generated the ALFP for this leader.
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
-	handlers.STATE_MUTEX.RLock()
-	defer handlers.STATE_MUTEX.RUnlock()
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
+	if handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
 		return false
 	}
 
-	_, exists := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
+	_, exists := handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
 	return exists
 }
 
 func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHandler) bool {
-	// If execution already advanced beyond this epoch, it means ET has all the data it needs for it.
-	// No point to keep ALFP thread blocked on older epoch.
-	handlers.STATE_MUTEX.RLock()
-	execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-	handlers.STATE_MUTEX.RUnlock()
+	// If the finalizer/sequencing layer already advanced beyond this epoch, it means
+	// the canonical sequence for this epoch has been fully resolved. No point to keep
+	// ALFP thread blocked on older epoch.
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	finalizerEpochId := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	if execEpochId > epochHandler.Id {
+	if finalizerEpochId > epochHandler.Id {
 		return true
 	}
 
@@ -482,7 +483,7 @@ func loadLeaderSkipData(epochId int, leaderPubKey string) structures.VotingStat 
 	skipData := structures.NewLeaderVotingStatTemplate()
 	key := []byte(fmt.Sprintf("%d:%s", epochId, leaderPubKey))
 
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil); err == nil {
+	if raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil); err == nil {
 		_ = json.Unmarshal(raw, &skipData)
 	}
 
@@ -658,7 +659,7 @@ func persistAggregatedLeaderFinalizationProofDirect(aggregated *structures.Aggre
 
 	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, aggregated.EpochIndex, aggregated.Leader))
 	if value, err := json.Marshal(aggregated); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(key, value, nil)
 	}
 }
 

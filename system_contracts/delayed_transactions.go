@@ -39,7 +39,7 @@ func resolveContext(context string) (threadContext, bool) {
 	switch context {
 	case constants.ContextApprovementThread:
 		return threadContext{
-			validatorsCache:      handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache,
+			validatorsCache:      handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache,
 			db:                   databases.APPROVEMENT_THREAD_METADATA,
 			getValidator:         utils.GetValidatorFromApprovementThreadStateUnderLock,
 			putValidatorCache:    utils.PutApprovementValidatorCache,
@@ -51,7 +51,7 @@ func resolveContext(context string) (threadContext, bool) {
 
 	case constants.ContextExecutionThread:
 		return threadContext{
-			validatorsCache:      handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache,
+			validatorsCache:      handlers.EXECUTION_THREAD_METADATA.ValidatorsStoragesCache,
 			db:                   databases.STATE,
 			getValidator:         utils.GetValidatorFromExecThreadState,
 			putValidatorCache:    utils.PutExecValidatorCache,

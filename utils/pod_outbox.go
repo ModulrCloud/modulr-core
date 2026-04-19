@@ -28,7 +28,7 @@ func podOutboxKey(id string) []byte {
 }
 
 // SendToPoDWithOutbox sends a message to PoD and requires an OK ack.
-// On failure, it persists the message into FINALIZATION_VOTING_STATS for retry.
+// On failure, it persists the message into FINALIZATION_THREAD_METADATA for retry.
 func SendToPoDWithOutbox(id string, payload []byte) bool {
 	if id == "" || len(payload) == 0 {
 		return false
@@ -36,25 +36,25 @@ func SendToPoDWithOutbox(id string, payload []byte) bool {
 
 	resp, err := SendWebsocketMessageToPoD(payload)
 	if err == nil && isPodAck(resp) {
-		_ = databases.FINALIZATION_VOTING_STATS.Delete(podOutboxKey(id), nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Delete(podOutboxKey(id), nil)
 		return true
 	}
 
 	// Persist for retry.
-	_ = databases.FINALIZATION_VOTING_STATS.Put(podOutboxKey(id), payload, nil)
+	_ = databases.FINALIZATION_THREAD_METADATA.Put(podOutboxKey(id), payload, nil)
 	return false
 }
 
 // FlushPoDOutboxOnce retries up to limit pending PoD messages.
 func FlushPoDOutboxOnce(limit int) int {
-	if databases.FINALIZATION_VOTING_STATS == nil {
+	if databases.FINALIZATION_THREAD_METADATA == nil {
 		return 0
 	}
 	if limit <= 0 {
 		limit = 50
 	}
 
-	it := databases.FINALIZATION_VOTING_STATS.NewIterator(util.BytesPrefix([]byte(constants.DBKeyPrefixPodOutbox)), nil)
+	it := databases.FINALIZATION_THREAD_METADATA.NewIterator(util.BytesPrefix([]byte(constants.DBKeyPrefixPodOutbox)), nil)
 	defer it.Release()
 
 	sent := 0
@@ -69,7 +69,7 @@ func FlushPoDOutboxOnce(limit int) int {
 		id := strings.TrimPrefix(key, constants.DBKeyPrefixPodOutbox)
 		payload := append([]byte(nil), it.Value()...)
 		if len(payload) == 0 {
-			_ = databases.FINALIZATION_VOTING_STATS.Delete([]byte(key), nil)
+			_ = databases.FINALIZATION_THREAD_METADATA.Delete([]byte(key), nil)
 			continue
 		}
 		if SendToPoDWithOutbox(id, payload) {

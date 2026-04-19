@@ -44,6 +44,7 @@ const (
 	DBKeyExecutionThreadMetadata   = "EXECUTION_THREAD_METADATA"
 	DBKeyApprovementThreadMetadata = "APPROVEMENT_THREAD_METADATA"
 	DBKeyGenerationThreadMetadata  = "GENERATION_THREAD_METADATA"
+	DBKeyFinalizerThreadMetadata   = "FINALIZER_THREAD_METADATA"
 	DBKeyLatestBatchIndex          = "LATEST_BATCH_INDEX"
 
 	DBKeyPrefixBlockIndex                   = "BLOCK_INDEX:"

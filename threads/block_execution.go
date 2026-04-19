@@ -940,17 +940,9 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 
 		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 
-		// Finally, clean & nullify sequence data
-
-		handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData = structures.AlignmentDataHandler{
-
-			CurrentAnchorAssumption:         0,
-			CurrentAnchorBlockIndexObserved: -1,
-			CurrentLeaderToExecBlocksFrom:   0,
-
-			LastBlocksByLeaders: make(map[string]structures.ExecutionStats),
-			LastBlocksByAnchors: make(map[int]structures.ExecutionStats),
-		}
+		// SequenceAlignmentData lives in FINALIZER_THREAD_METADATA now and is reset
+		// by last_mile_finalizer.go when the finalizer epoch rotates. Block execution
+		// no longer touches it.
 
 		// Commit the changes of state using atomic batch. Because we modified state via delayed transactions when epoch finished
 

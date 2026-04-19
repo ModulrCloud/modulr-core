@@ -134,6 +134,7 @@ func LastMileFinalizerThread() {
 		if tracker.EpochId < epochSnapshot.Id {
 			if syncedTracker, synced := syncLastMileTrackerToCurrentEpochStart(tracker, &epochSnapshot); synced {
 				tracker = syncedTracker
+				rotateFinalizerEpochIfNeeded(tracker.EpochId)
 				continue
 			}
 		}
@@ -146,6 +147,10 @@ func LastMileFinalizerThread() {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+
+		// Keep FINALIZER_THREAD_METADATA.EpochDataHandler in sync with the tracker.
+		// Sequence/anchor threads rely on this for canonical sequencing of the current epoch.
+		rotateFinalizerEpochIfNeeded(tracker.EpochId)
 
 		if tracker.LeaderIndex >= len(epochHandler.LeadersSequence) {
 			completedBoundary := buildCompletedEpochBoundaryFromTracker(tracker, tracker.EpochId)
@@ -509,14 +514,14 @@ func storeAggregatedHeightProof(proof *structures.AggregatedHeightProof) {
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", proof.AbsoluteHeight))
 
 	if value, err := json.Marshal(proof); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(key, value, nil)
 	}
 }
 
 func LoadAggregatedHeightProof(absoluteHeight int) *structures.AggregatedHeightProof {
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", absoluteHeight))
 
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 
 	if err != nil {
 		return nil
@@ -548,10 +553,10 @@ func getEpochHandlerForTracker(epochId int) *structures.EpochDataHandler {
 }
 
 func snapshotLastBlocksByLeaders() map[string]structures.ExecutionStats {
-	handlers.STATE_MUTEX.RLock()
-	defer handlers.STATE_MUTEX.RUnlock()
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	data := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
+	data := handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders
 	if data == nil {
 		return make(map[string]structures.ExecutionStats)
 	}
@@ -561,6 +566,53 @@ func snapshotLastBlocksByLeaders() map[string]structures.ExecutionStats {
 		cp[k] = v
 	}
 	return cp
+}
+
+// rotateFinalizerEpochIfNeeded synchronizes FINALIZER_THREAD_METADATA.Handler.EpochDataHandler
+// with tracker.EpochId. Whenever LMF advances to a new epoch (either via natural
+// LeadersSequence completion or via fast-forward sync), this function loads the
+// next epoch's handler from APPROVEMENT_THREAD_METADATA DB and resets SequenceAlignmentData.
+//
+// Returns true if rotation actually happened. Returns false if no rotation was needed,
+// or if the next epoch handler is not yet available locally.
+func rotateFinalizerEpochIfNeeded(targetEpochId int) bool {
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	currentEpochId := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
+
+	if currentEpochId == targetEpochId {
+		return false
+	}
+
+	nextEpochHandler := getEpochHandlerForTracker(targetEpochId)
+	if nextEpochHandler == nil {
+		return false
+	}
+
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.Lock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.Unlock()
+
+	if handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id == targetEpochId {
+		return false
+	}
+
+	handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler = *nextEpochHandler
+	handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData = structures.AlignmentDataHandler{
+		CurrentAnchorAssumption:         0,
+		CurrentAnchorBlockIndexObserved: -1,
+		CurrentLeaderToExecBlocksFrom:   0,
+		LastBlocksByLeaders:             make(map[string]structures.ExecutionStats),
+		LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
+	}
+
+	persistFinalizerThreadMetadataLocked()
+
+	utils.LogWithTime(
+		fmt.Sprintf("FINALIZER_THREAD_METADATA: rotated to epoch %d (from %d)", targetEpochId, currentEpochId),
+		utils.CYAN_COLOR,
+	)
+
+	return true
 }
 
 func getBlockHashByBlockId(blockId string) string {
@@ -870,13 +922,13 @@ func tryCollectAggregatedEpochRotationProofWithConns(
 func storeAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotationProof) {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, proof.EpochId))
 	if value, err := json.Marshal(proof); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(key, value, nil)
 	}
 }
 
 func LoadAggregatedEpochRotationProof(epochId int) *structures.AggregatedEpochRotationProof {
 	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedEpochRotationProof, epochId))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}
@@ -996,5 +1048,21 @@ func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.Aggregate
 			defer conn.Close()
 			_ = conn.WriteMessage(websocket.TextMessage, message)
 		}(validatorStorage.WssValidatorUrl)
+	}
+}
+
+// persistFinalizerThreadMetadataLocked serializes handlers.FINALIZER_THREAD_METADATA.Handler
+// and writes it to FINALIZATION_THREAD_METADATA under DBKeyFinalizerThreadMetadata.
+//
+// Caller MUST hold handlers.FINALIZER_THREAD_METADATA.RWMutex (Lock, not RLock).
+func persistFinalizerThreadMetadataLocked() {
+	payload, err := json.Marshal(&handlers.FINALIZER_THREAD_METADATA.Handler)
+	if err != nil {
+		utils.LogWithTime("FINALIZER_THREAD_METADATA: marshal failed: "+err.Error(), utils.RED_COLOR)
+		return
+	}
+
+	if err := databases.FINALIZATION_THREAD_METADATA.Put([]byte(constants.DBKeyFinalizerThreadMetadata), payload, nil); err != nil {
+		utils.LogWithTime("FINALIZER_THREAD_METADATA: persist failed: "+err.Error(), utils.RED_COLOR)
 	}
 }

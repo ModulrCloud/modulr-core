@@ -148,7 +148,7 @@ func prepareBlockchain() error {
 	databases.STATE = utils.OpenDb("STATE")
 	databases.EPOCH_DATA = utils.OpenDb("EPOCH_DATA")
 	databases.APPROVEMENT_THREAD_METADATA = utils.OpenDb("APPROVEMENT_THREAD_METADATA")
-	databases.FINALIZATION_VOTING_STATS = utils.OpenDb("FINALIZATION_VOTING_STATS")
+	databases.FINALIZATION_THREAD_METADATA = utils.OpenDb("FINALIZATION_THREAD_METADATA")
 
 	// Load CHAIN_CURSOR (offset mapping for network restarts; defaults to {0,0})
 	if cursorRaw, err := databases.STATE.Get([]byte(constants.DBKeyChainCursor), nil); err == nil {
@@ -193,10 +193,6 @@ func prepareBlockchain() error {
 			return fmt.Errorf("unmarshal APPROVEMENT_THREAD metadata: %w", err)
 		}
 
-		if atHandler.ValidatorsStoragesCache == nil {
-			atHandler.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
-		}
-
 		handlers.APPROVEMENT_THREAD_METADATA.Handler = atHandler
 	}
 
@@ -207,19 +203,29 @@ func prepareBlockchain() error {
 			return fmt.Errorf("unmarshal EXECUTION_THREAD metadata: %w", err)
 		}
 
-		if etHandler.AccountsCache == nil {
-			etHandler.AccountsCache = make(map[string]*structures.Account)
-		}
-
-		if etHandler.ValidatorsStoragesCache == nil {
-			etHandler.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
-		}
-
 		if etHandler.EpochStatistics == nil {
 			etHandler.EpochStatistics = &structures.Statistics{LastHeight: -1}
 		}
 
 		handlers.EXECUTION_THREAD_METADATA.Handler = etHandler
+	}
+
+	// Load FINALIZER_THREAD_METADATA (consensus/sequencing state, separate from execution).
+	if data, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(constants.DBKeyFinalizerThreadMetadata), nil); err == nil {
+		var fHandler structures.FinalizerThreadMetadataHandler
+
+		if err := json.Unmarshal(data, &fHandler); err != nil {
+			return fmt.Errorf("unmarshal FINALIZER_THREAD metadata: %w", err)
+		}
+
+		if fHandler.SequenceAlignmentData.LastBlocksByLeaders == nil {
+			fHandler.SequenceAlignmentData.LastBlocksByLeaders = make(map[string]structures.ExecutionStats)
+		}
+		if fHandler.SequenceAlignmentData.LastBlocksByAnchors == nil {
+			fHandler.SequenceAlignmentData.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
+		}
+
+		handlers.FINALIZER_THREAD_METADATA.Handler = fHandler
 	}
 
 	// Backfill CHAIN_CURSOR statistics if missing (e.g. first run after accounts were created)
@@ -251,12 +257,22 @@ func prepareBlockchain() error {
 			return fmt.Errorf("marshal EXECUTION_THREAD metadata: %w", err)
 		}
 
+		serializedFinalizerThread, err := json.Marshal(handlers.FINALIZER_THREAD_METADATA.Handler)
+
+		if err != nil {
+			return fmt.Errorf("marshal FINALIZER_THREAD metadata: %w", err)
+		}
+
 		if err := databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyApprovementThreadMetadata), serializedApprovementThread, nil); err != nil {
 			return fmt.Errorf("save APPROVEMENT_THREAD metadata: %w", err)
 		}
 
 		if err := databases.STATE.Put([]byte(constants.DBKeyExecutionThreadMetadata), serializedExecutionThread, nil); err != nil {
 			return fmt.Errorf("save EXECUTION_THREAD metadata: %w", err)
+		}
+
+		if err := databases.FINALIZATION_THREAD_METADATA.Put([]byte(constants.DBKeyFinalizerThreadMetadata), serializedFinalizerThread, nil); err != nil {
+			return fmt.Errorf("save FINALIZER_THREAD metadata: %w", err)
 		}
 	}
 
@@ -296,14 +312,6 @@ func setGenesisToState() error {
 	validatorsRegistryForEpochHandler := []string{}
 
 	validatorsRegistryForEpochHandler2 := []string{}
-
-	// Ensure caches exist during genesis init, since quorum/leader selection reads validator data via caches/DB.
-	if handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache == nil {
-		handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
-	}
-	if handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache == nil {
-		handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache = make(map[string]*structures.ValidatorStorage)
-	}
 
 	// __________________________________ Load info about accounts __________________________________
 
@@ -415,6 +423,18 @@ func setGenesisToState() error {
 	handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForApprovementThread
 
 	handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForExecThread
+
+	// FINALIZER_THREAD_METADATA starts on the genesis epoch as well, with a fresh
+	// SequenceAlignmentData. Both fields will be re-persisted to FINALIZATION_THREAD_METADATA
+	// at the end of prepareBlockchain().
+	handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler = epochHandlerForExecThread
+	handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData = structures.AlignmentDataHandler{
+		CurrentAnchorAssumption:         0,
+		CurrentAnchorBlockIndexObserved: -1,
+		CurrentLeaderToExecBlocksFrom:   0,
+		LastBlocksByLeaders:             make(map[string]structures.ExecutionStats),
+		LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
+	}
 
 	// Store epoch data snapshot for API/finalization
 
