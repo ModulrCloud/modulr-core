@@ -581,6 +581,19 @@ func nextBlockId(blockId string) string {
 }
 
 func executeBlock(block *block_pack.Block) {
+	// Invariant: cursor.NetworkId and genesis.NetworkId must be in sync at execution time.
+	// Block.GetHash() already mixes in globals.GENESIS.NetworkId, so a foreign block would fail
+	// signature verification — but this explicit check makes a runtime drift loud and obvious
+	// instead of surfacing as "invalid signature".
+	if handlers.CHAIN_CURSOR.NetworkId != globals.GENESIS.NetworkId {
+		utils.LogWithTime(fmt.Sprintf(
+			"FATAL: NetworkId drift during execution: cursor=%q genesis=%q",
+			handlers.CHAIN_CURSOR.NetworkId, globals.GENESIS.NetworkId,
+		), utils.RED_COLOR)
+		utils.GracefulShutdown()
+		return
+	}
+
 	handlers.STATE_MUTEX.Lock()
 	stateBatch, logMsg, ok := buildExecutionBatch(block)
 	handlers.STATE_MUTEX.Unlock()

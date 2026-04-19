@@ -158,6 +158,17 @@ func prepareBlockchain() error {
 		}
 	}
 
+	// Defensive check: chaindata must belong to the same network iteration as the loaded genesis.
+	// Empty NetworkId means clean install (no cursor in STATE) — setGenesisToState() will populate it.
+	if handlers.CHAIN_CURSOR.NetworkId != "" &&
+		handlers.CHAIN_CURSOR.NetworkId != globals.GENESIS.NetworkId {
+		return fmt.Errorf(
+			"network id mismatch: chaindata belongs to %q but loaded genesis is %q — "+
+				"wrong genesis file or chaindata directory",
+			handlers.CHAIN_CURSOR.NetworkId, globals.GENESIS.NetworkId,
+		)
+	}
+
 	// Load GT - Generation Thread handler
 	if data, err := databases.BLOCKS.Get([]byte(constants.DBKeyGenerationThreadMetadata), nil); err == nil {
 		var gtHandler structures.GenerationThreadMetadataHandler
@@ -352,6 +363,7 @@ func setGenesisToState() error {
 	isFirstLaunch := handlers.CHAIN_CURSOR.CoreMajorVersion == -1
 
 	handlers.CHAIN_CURSOR.CoreMajorVersion = globals.GENESIS.CoreMajorVersion
+	handlers.CHAIN_CURSOR.NetworkId = globals.GENESIS.NetworkId
 
 	if isFirstLaunch {
 		handlers.CHAIN_CURSOR.Statistics = &structures.Statistics{
