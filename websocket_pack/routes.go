@@ -315,21 +315,14 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 			}
 
 			if afpIsOk {
-				dataToSignForLeaderFinalization := ""
 
-				if parsedRequest.SkipData.Index == -1 {
-
-					dataToSignForLeaderFinalization = constants.SigningPrefixLeaderFinalization + leaderToFinalize
-					dataToSignForLeaderFinalization += ":-1:" + constants.ZeroHash + ":"
-					dataToSignForLeaderFinalization += epochFullID
-
-				} else if parsedRequest.SkipData.Index >= 0 {
-
-					dataToSignForLeaderFinalization = constants.SigningPrefixLeaderFinalization + leaderToFinalize +
-						":" + strconv.Itoa(propSkipData.Index) +
-						":" + propSkipData.Hash +
-						":" + epochFullID
-				}
+				dataToSignForLeaderFinalization := strings.Join([]string{
+					constants.SigningPrefixLeaderFinalization,
+					leaderToFinalize,
+					strconv.Itoa(propSkipData.Index),
+					propSkipData.Hash,
+					epochFullID,
+				}, ":")
 
 				// Finally - generate LFP(leader finalization proof)
 
