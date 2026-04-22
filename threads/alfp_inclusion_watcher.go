@@ -92,7 +92,10 @@ func fetchCatchUpTargetForAnchor(epochHandler *structures.EpochDataHandler, anch
 	if epochHandler == nil || client == nil || rng == nil {
 		return structures.ExecutionStats{}, false
 	}
-	if anchorIndex < 0 || anchorIndex >= len(globals.ANCHORS) {
+	if anchorIndex < 0 || anchorIndex >= len(globals.ANCHORS)-1 {
+		// The last anchor in the registry (or the only anchor in a single-anchor setup)
+		// never rotates away, so /sequence_alignment_data has nothing to return for it.
+		// Callers must short-circuit this case before reaching the network round-trip.
 		return structures.ExecutionStats{}, false
 	}
 	targetAnchor := globals.ANCHORS[rng.Intn(len(globals.ANCHORS))]
@@ -160,16 +163,26 @@ func AlfpInclusionWatcherThread() {
 			continue
 		}
 
-		// Ensure we know the last block target for this anchor (catch-up limit).
-		target, ok := state.LastBlocksByAnchors[anchorIndex]
-		if !ok {
-			if stats, ok := fetchCatchUpTargetForAnchor(epochHandler, anchorIndex, client, rng); ok {
-				state.LastBlocksByAnchors[anchorIndex] = stats
-				persistAlfpWatcherState(state)
-			} else {
-				time.Sleep(200 * time.Millisecond)
+		// The last anchor in the registry (and, trivially, the single anchor in a
+		// 1-anchor setup) never rotates away, so it has no upper-bound "last block"
+		// determined by an AARP. We treat it as an unbounded segment: accept every
+		// AFP'd block and never advance past it within the epoch.
+		isLastAnchor := anchorIndex == len(globals.ANCHORS)-1
+
+		var target structures.ExecutionStats
+		if !isLastAnchor {
+			// Ensure we know the last block target for this anchor (catch-up limit).
+			cached, ok := state.LastBlocksByAnchors[anchorIndex]
+			if !ok {
+				if stats, ok := fetchCatchUpTargetForAnchor(epochHandler, anchorIndex, client, rng); ok {
+					state.LastBlocksByAnchors[anchorIndex] = stats
+					persistAlfpWatcherState(state)
+				} else {
+					time.Sleep(200 * time.Millisecond)
+				}
+				continue
 			}
-			continue
+			target = cached
 		}
 
 		currentExec := state.CurrentAnchorBlockIndexObserved
@@ -211,6 +224,9 @@ func AlfpInclusionWatcherThread() {
 
 		accepted := false
 		switch {
+		case isLastAnchor:
+			// No upper bound — acceptance is purely "this block has a valid AFP".
+			accepted = afpOk
 		case currentExec < target.Index:
 			accepted = afpOk
 		case currentExec == target.Index:
@@ -237,7 +253,10 @@ func AlfpInclusionWatcherThread() {
 		}
 
 		// Advance scan cursor.
-		if currentExec < target.Index {
+		// For the last anchor we always stay on it within the epoch — there is no
+		// next anchor to advance to. The epoch transition itself (driven by
+		// loadAlfpProgress) is what moves us forward.
+		if isLastAnchor || currentExec < target.Index {
 			state.CurrentAnchorBlockIndexObserved = currentExec + 1
 			persistAlfpWatcherState(state)
 			continue
