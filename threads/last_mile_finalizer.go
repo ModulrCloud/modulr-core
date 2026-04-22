@@ -510,6 +510,69 @@ func openAnchorConnectionsForLastMile() {
 	}
 }
 
+// getOrRedialAnchorConn returns the live websocket to the given anchor, redialing
+// lazily if the cached connection is missing. The redial is bounded to a few
+// attempts with a small backoff so that a transient anchor hiccup doesn't force
+// us to wait for the next epoch rotation to refresh LAST_MILE_ANCHOR_WS_CONNS.
+//
+// Returns nil if the anchor URL is empty or all redial attempts failed.
+func getOrRedialAnchorConn(anchorPubkey, anchorUrl string) *websocket.Conn {
+	if anchorUrl == "" {
+		return nil
+	}
+
+	LAST_MILE_MUTEX.Lock()
+	conn := LAST_MILE_ANCHOR_WS_CONNS[anchorPubkey]
+	LAST_MILE_MUTEX.Unlock()
+	if conn != nil {
+		return conn
+	}
+
+	const (
+		anchorRedialAttempts = 3
+		anchorRedialBackoff  = 200 * time.Millisecond
+	)
+
+	for attempt := 1; attempt <= anchorRedialAttempts; attempt++ {
+		fresh, _, err := websocket.DefaultDialer.Dial(anchorUrl, nil)
+		if err == nil {
+			LAST_MILE_MUTEX.Lock()
+			if existing := LAST_MILE_ANCHOR_WS_CONNS[anchorPubkey]; existing != nil {
+				_ = fresh.Close()
+				conn = existing
+			} else {
+				LAST_MILE_ANCHOR_WS_CONNS[anchorPubkey] = fresh
+				conn = fresh
+			}
+			LAST_MILE_MUTEX.Unlock()
+			return conn
+		}
+		utils.LogWithTimeThrottled(
+			"last_mile:anchor:redial:"+anchorPubkey,
+			2*time.Second,
+			fmt.Sprintf("Last mile: anchor %s redial failed (attempt %d/%d): %v", anchorPubkey, attempt, anchorRedialAttempts, err),
+			utils.YELLOW_COLOR,
+		)
+		if attempt < anchorRedialAttempts {
+			time.Sleep(anchorRedialBackoff)
+		}
+	}
+	return nil
+}
+
+// dropAnchorConn closes and removes the cached connection for the anchor so the
+// next getOrRedialAnchorConn call dials fresh. Safe under LAST_MILE_MUTEX.
+func dropAnchorConn(anchorPubkey string, expected *websocket.Conn) {
+	LAST_MILE_MUTEX.Lock()
+	defer LAST_MILE_MUTEX.Unlock()
+	if cur, ok := LAST_MILE_ANCHOR_WS_CONNS[anchorPubkey]; ok && (expected == nil || cur == expected) {
+		if cur != nil {
+			_ = cur.Close()
+		}
+		delete(LAST_MILE_ANCHOR_WS_CONNS, anchorPubkey)
+	}
+}
+
 func storeAggregatedHeightProof(proof *structures.AggregatedHeightProof) {
 	key := []byte(fmt.Sprintf(constants.DBKeyPrefixAggregatedHeightProof+"%d", proof.AbsoluteHeight))
 
@@ -940,10 +1003,6 @@ func LoadAggregatedEpochRotationProof(epochId int) *structures.AggregatedEpochRo
 }
 
 func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEpochRotationProof) *structures.AggregatedAnchorEpochAckProof {
-	LAST_MILE_MUTEX.Lock()
-	conns := LAST_MILE_ANCHOR_WS_CONNS
-	LAST_MILE_MUTEX.Unlock()
-
 	message, err := json.Marshal(struct {
 		Route string                                  `json:"route"`
 		Proof structures.AggregatedEpochRotationProof `json:"proof"`
@@ -961,25 +1020,46 @@ func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEp
 		Sig    string
 	}
 
-	ackChan := make(chan anchorAck, len(conns))
+	// Iterate over the canonical anchor list (not the conn map) so we also try
+	// anchors whose cached connection is currently nil — getOrRedialAnchorConn
+	// will attempt a bounded lazy redial for them.
+	anchors := globals.ANCHORS
+
+	ackChan := make(chan anchorAck, len(anchors))
 	var wg sync.WaitGroup
 
-	for anchorKey, conn := range conns {
-		if conn == nil {
+	for _, anchor := range anchors {
+		if anchor.WssAnchorUrl == "" {
 			continue
 		}
 		wg.Add(1)
-		go func(key string, c *websocket.Conn) {
+		go func(pubkey, wsUrl string) {
 			defer wg.Done()
 
-			if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+			c := getOrRedialAnchorConn(pubkey, wsUrl)
+			if c == nil {
 				return
+			}
+
+			if err := c.WriteMessage(websocket.TextMessage, message); err != nil {
+				dropAnchorConn(pubkey, c)
+				// Lazy retry: redial once and try the same write again.
+				if c2 := getOrRedialAnchorConn(pubkey, wsUrl); c2 != nil {
+					if err := c2.WriteMessage(websocket.TextMessage, message); err != nil {
+						dropAnchorConn(pubkey, c2)
+						return
+					}
+					c = c2
+				} else {
+					return
+				}
 			}
 
 			c.SetReadDeadline(time.Now().Add(5 * time.Second))
 			_, respBytes, err := c.ReadMessage()
 			c.SetReadDeadline(time.Time{})
 			if err != nil {
+				dropAnchorConn(pubkey, c)
 				return
 			}
 
@@ -993,7 +1073,7 @@ func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEp
 			}
 
 			ackChan <- anchorAck{Anchor: resp.Anchor, Sig: resp.Signature}
-		}(anchorKey, conn)
+		}(anchor.Pubkey, anchor.WssAnchorUrl)
 	}
 
 	go func() {
@@ -1032,6 +1112,11 @@ func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.Aggregate
 		return
 	}
 
+	const (
+		ackDialAttempts = 3
+		ackDialBackoff  = 200 * time.Millisecond
+	)
+
 	for _, member := range nextEpochHandler.Quorum {
 		if member == globals.CONFIGURATION.PublicKey {
 			continue
@@ -1040,14 +1125,30 @@ func deliverAggregatedAnchorEpochAckProofToNewQuorum(proof *structures.Aggregate
 		if validatorStorage == nil || validatorStorage.WssValidatorUrl == "" {
 			continue
 		}
-		go func(wsUrl string) {
-			conn, _, err := websocket.DefaultDialer.Dial(wsUrl, nil)
-			if err != nil {
+		go func(memberPubkey, wsUrl string) {
+			var conn *websocket.Conn
+			for attempt := 1; attempt <= ackDialAttempts; attempt++ {
+				c, _, dialErr := websocket.DefaultDialer.Dial(wsUrl, nil)
+				if dialErr == nil {
+					conn = c
+					break
+				}
+				utils.LogWithTimeThrottled(
+					"last_mile:ack:dial:"+memberPubkey,
+					2*time.Second,
+					fmt.Sprintf("Last mile: ack-proof dial to new-quorum member %s failed (attempt %d/%d): %v", memberPubkey, attempt, ackDialAttempts, dialErr),
+					utils.YELLOW_COLOR,
+				)
+				if attempt < ackDialAttempts {
+					time.Sleep(ackDialBackoff)
+				}
+			}
+			if conn == nil {
 				return
 			}
 			defer conn.Close()
 			_ = conn.WriteMessage(websocket.TextMessage, message)
-		}(validatorStorage.WssValidatorUrl)
+		}(member, validatorStorage.WssValidatorUrl)
 	}
 }
 

@@ -515,8 +515,12 @@ func (qw *QuorumWaiter) getWriteMuConn(c *websocket.Conn) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// reconnectOnce makes up to MAX_RETRIES dial attempts with RETRY_INTERVAL backoff
+// between them. Despite the name (kept for callers), this is the single per-round
+// reconnect entry point invoked by QuorumWaiter.reconnectFailed; the retries are
+// here so that a transient validator hiccup does not require waiting for a full
+// QuorumWaiter round before we even try to redial again.
 func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	// Get validator metadata
 	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixValidatorStorage+pubkey), nil)
 	if err != nil {
 		return
@@ -526,13 +530,27 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 		return
 	}
 
-	// Try a single dial attempt
-	conn, _, err := websocket.DefaultDialer.Dial(validatorStorage.WssValidatorUrl, nil)
-	if err != nil {
+	var conn *websocket.Conn
+	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
+		c, _, dialErr := websocket.DefaultDialer.Dial(validatorStorage.WssValidatorUrl, nil)
+		if dialErr == nil {
+			conn = c
+			break
+		}
+		LogWithTimeThrottled(
+			"quorum:ws:redial:"+pubkey,
+			2*time.Second,
+			fmt.Sprintf("quorum websocket redial failed for %s (attempt %d/%d): %v", pubkey, attempt, MAX_RETRIES, dialErr),
+			YELLOW_COLOR,
+		)
+		if attempt < MAX_RETRIES {
+			time.Sleep(RETRY_INTERVAL)
+		}
+	}
+	if conn == nil {
 		return
 	}
 
-	// Store back into the shared map under lock
 	guards.ConnMu.Lock()
 	if old := wsConnMap[pubkey]; old != nil {
 		_ = old.Close()
