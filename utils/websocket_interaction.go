@@ -154,6 +154,27 @@ func NewWebsocketGuards() *WebsocketGuards {
 	}
 }
 
+// scheduleWriteMuCleanup removes the per-connection mutex entry from guards.WriteMu
+// after a safe delay (3x READ_WRITE_DEADLINE). The delay ensures that any in-flight
+// goroutine that already captured the old *websocket.Conn pointer has finished its
+// Write/Read round before we drop the mutex — otherwise a late LoadOrStore could
+// resurrect a stale entry (or, worse, a new goroutine that races with the delete
+// could end up with a different mutex than the one our in-flight goroutine holds,
+// leading to concurrent writes on the same conn and a gorilla/websocket panic).
+//
+// Without this helper, every mid-epoch reconnect (sendMessages write/read error,
+// reconnectOnce) leaked one WriteMu entry that stayed alive until the next full
+// epoch rotation, accumulating across runs of the same validator hiccup.
+func scheduleWriteMuCleanup(guards *WebsocketGuards, conn *websocket.Conn) {
+	if guards == nil || guards.WriteMu == nil || conn == nil {
+		return
+	}
+	go func(writeMu *sync.Map, c *websocket.Conn) {
+		time.Sleep(3 * READ_WRITE_DEADLINE)
+		writeMu.Delete(c)
+	}(guards.WriteMu, conn)
+}
+
 func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
 	return POD_CLIENT.Send(msg)
 }
@@ -169,31 +190,17 @@ func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	// Collect old connections for delayed mutex cleanup
-	var oldConns []*websocket.Conn
-
-	// Close and remove any existing connections
+	// Close and remove any existing connections, scheduling delayed WriteMu
+	// cleanup for each so that in-flight Write/Read rounds have time to drain.
 	guards.ConnMu.Lock()
 	for id, conn := range wsConnMap {
 		if conn != nil {
-			oldConns = append(oldConns, conn)
 			_ = conn.Close()
+			scheduleWriteMuCleanup(guards, conn)
 		}
 		delete(wsConnMap, id)
 	}
 	guards.ConnMu.Unlock()
-
-	// Schedule async cleanup of old connection mutexes.
-	// We wait 3x READ_WRITE_DEADLINE to ensure all goroutines have finished.
-	// This runs in background and doesn't block.
-	if len(oldConns) > 0 {
-		go func(conns []*websocket.Conn, writeMu *sync.Map) {
-			time.Sleep(3 * READ_WRITE_DEADLINE) // 6 seconds
-			for _, c := range conns {
-				writeMu.Delete(c)
-			}
-		}(oldConns, guards.WriteMu)
-	}
 
 	// Establish new connections for each validator in the quorum
 	for _, validatorPubkey := range quorum {
@@ -552,11 +559,18 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 	}
 
 	guards.ConnMu.Lock()
-	if old := wsConnMap[pubkey]; old != nil {
+	old := wsConnMap[pubkey]
+	if old != nil {
 		_ = old.Close()
 	}
 	wsConnMap[pubkey] = conn
 	guards.ConnMu.Unlock()
+
+	// The old conn is abandoned — drop its WriteMu entry after the safety delay
+	// so we don't accumulate one leaked mutex per mid-epoch reconnect.
+	if old != nil {
+		scheduleWriteMuCleanup(guards, old)
+	}
 }
 
 func (qw *QuorumWaiter) reconnectFailed(wsConnMap map[string]*websocket.Conn) {
@@ -629,6 +643,9 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				// The conn is gone from wsConnMap — schedule cleanup so its
+				// WriteMu entry doesn't live forever after a transient error.
+				scheduleWriteMuCleanup(qw.guards, c)
 				return
 			}
 
@@ -646,6 +663,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				scheduleWriteMuCleanup(qw.guards, c)
 				return
 			}
 

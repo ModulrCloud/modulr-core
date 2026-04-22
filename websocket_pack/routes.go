@@ -31,6 +31,12 @@ var (
 	anchorEpochAckLastAttempt   sync.Map
 )
 
+// anchorEpochAckThrottleWindow is how long a recorded attempt in
+// anchorEpochAckLastAttempt is still considered "recent" for throttling purposes.
+// Anything older is pure dead-weight and is swept opportunistically on each
+// scheduleAnchorEpochAckFetch call.
+const anchorEpochAckThrottleWindow = 2 * time.Second
+
 func sendNotReady(connection *gws.Conn) {
 	connection.WriteMessage(gws.OpcodeText, []byte(`{"status":"NOT_READY"}`))
 }
@@ -374,8 +380,20 @@ func scheduleAnchorEpochAckFetch(epochId int) {
 	}
 
 	now := time.Now()
+
+	// Opportunistic sweep: any lastAttempt entry older than the throttle window
+	// is no longer throttling anything and would otherwise live forever (one
+	// leaked entry per epoch ID). This keeps the map bounded to "recently
+	// attempted" epochs without a separate cleanup goroutine.
+	anchorEpochAckLastAttempt.Range(func(key, value any) bool {
+		if ts, ok := value.(time.Time); ok && now.Sub(ts) > anchorEpochAckThrottleWindow {
+			anchorEpochAckLastAttempt.Delete(key)
+		}
+		return true
+	})
+
 	if lastAttempt, ok := anchorEpochAckLastAttempt.Load(epochId); ok {
-		if now.Sub(lastAttempt.(time.Time)) < 2*time.Second {
+		if now.Sub(lastAttempt.(time.Time)) < anchorEpochAckThrottleWindow {
 			anchorEpochAckFetchInFlight.Delete(epochId)
 			return
 		}
