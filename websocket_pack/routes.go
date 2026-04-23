@@ -263,6 +263,33 @@ func GetLeaderFinalizationProof(parsedRequest WsLeaderFinalizationProofRequest, 
 	lastLeaderIdx := len(epochHandler.LeadersSequence) - 1
 	isLastLeader := parsedRequest.IndexOfLeaderToFinalize == lastLeaderIdx && epochHandler.CurrentLeaderIndex == lastLeaderIdx
 
+	// Defense-in-depth for the last leader of an active epoch.
+	//
+	// For non-last leaders we already know they're done because CurrentLeaderIndex
+	// has moved past them (the leaderTimeIsOut watchdog rotated within the epoch).
+	// The last leader has no such intra-epoch indicator — CurrentLeaderIndex stays
+	// at lastLeaderIdx until the whole epoch rotates. Without this gate, a misbehaving
+	// or buggy peer (e.g. an anchor scheduling proactive ALFP collection too early)
+	// could ask us to sign a finalization for the last leader while it is still
+	// actively producing blocks, locking in a low VotingStat.Index and stalling
+	// the anchor's last-mile sequencing.
+	//
+	// Refuse unless one of these "last leader is genuinely done" signals holds:
+	//   1. Time-based: epoch is no longer fresh, i.e. now >= StartTimestamp + EpochDuration.
+	//      Past this boundary the last leader has no right to produce more blocks.
+	//   2. Event-based: a local EPOCH_FINISH:N=TRUE signal has been raised, meaning
+	//      this node has already accepted that the epoch is rotating.
+	if !isRequestForPastEpoch && isLastLeader {
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
+		stillFresh := utils.EpochStillFresh(&handlers.APPROVEMENT_THREAD_METADATA.Handler)
+		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
+
+		if stillFresh && !utils.SignalAboutEpochRotationExists(epochHandler.Id) {
+			sendNotReady(connection)
+			return
+		}
+	}
+
 	if !isRequestForPastEpoch && epochHandler.CurrentLeaderIndex <= parsedRequest.IndexOfLeaderToFinalize && !isLastLeader {
 		sendNotReady(connection)
 		return

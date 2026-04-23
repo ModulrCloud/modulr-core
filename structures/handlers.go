@@ -36,11 +36,19 @@ type EpochDataSnapshot struct {
 }
 
 type NextEpochDataHandler struct {
-	NextEpochHash               string              `json:"nextEpochHash"`
-	NextEpochValidatorsRegistry []string            `json:"nextEpochValidatorsRegistry"`
-	NextEpochQuorum             []string            `json:"nextEpochQuorum"`
-	NextEpochLeadersSequence    []string            `json:"nextEpochLeadersSequence"`
-	DelayedTransactions         []map[string]string `json:"delayedTransactions"`
+	NextEpochHash               string   `json:"nextEpochHash"`
+	NextEpochValidatorsRegistry []string `json:"nextEpochValidatorsRegistry"`
+	NextEpochQuorum             []string `json:"nextEpochQuorum"`
+	NextEpochLeadersSequence    []string `json:"nextEpochLeadersSequence"`
+	// NextEpochStartTimestamp is the canonical scheduled start time (UTC ms) of the
+	// next epoch on the approvement thread, computed as
+	// prevEpoch.StartTimestamp + NetworkParameters.EpochDuration. It is included in
+	// the signed AggregatedEpochRotationProof payload (via EpochDataHash over the
+	// marshalled NextEpochDataHandler) so that downstream consumers — notably the
+	// modulr-anchors-core proactive ALFP collector — can derive precise per-leader
+	// end timestamps for an epoch without depending on static genesis offsets.
+	NextEpochStartTimestamp uint64              `json:"nextEpochStartTimestamp"`
+	DelayedTransactions     []map[string]string `json:"delayedTransactions"`
 }
 
 // FinalizerThreadMetadataHandler holds state used by the consensus/sequencing threads

@@ -213,6 +213,7 @@ func EpochRotationThread() {
 							NextEpochValidatorsRegistry: nextEpochHandler.ValidatorsRegistry,
 							NextEpochQuorum:             nextEpochHandler.Quorum,
 							NextEpochLeadersSequence:    nextEpochHandler.LeadersSequence,
+							NextEpochStartTimestamp:     nextEpochHandler.StartTimestamp,
 							DelayedTransactions:         delayedTransactionsOrderByPriority,
 						}
 
