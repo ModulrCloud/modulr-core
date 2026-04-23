@@ -42,13 +42,6 @@ func createRouter() fasthttp.RequestHandler {
 	// Information to help with recovery
 	r.GET("/recovery/last_finalized_height", routes.GetRecoveryLastFinalizedHeight)
 
-	// Dashboard
-	r.GET("/dashboard", routes.ServeDashboard)
-	r.GET("/dashboard/api/overview", routes.ServeDashboardOverview)
-	r.GET("/dashboard/api/execution", routes.ServeDashboardExecutionThread)
-	r.GET("/dashboard/api/approvement", routes.ServeDashboardApprovementThread)
-	r.GET("/dashboard/api/leader_finalization", routes.ServeDashboardLeaderFinalization)
-
 	// Other
 	r.GET("/aggregated_anchor_epoch_ack_proof/{epochId}", routes.GetAggregatedAnchorEpochAckProof)
 	r.GET("/live_stats", routes.GetLiveStats)
