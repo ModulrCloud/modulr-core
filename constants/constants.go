@@ -1,6 +1,6 @@
 package constants
 
-// Logical thread contexts (used by system contracts / delayed tx execution).
+// Logical thread contexts
 const (
 	ContextApprovementThread = "APPROVEMENT_THREAD"
 	ContextExecutionThread   = "EXECUTION_THREAD"
@@ -45,6 +45,9 @@ const (
 	DBKeyGenerationThreadMetadata  = "GENERATION_THREAD_METADATA"
 	DBKeyFinalizerThreadMetadata   = "FINALIZER_THREAD_METADATA"
 	DBKeyLatestBatchIndex          = "LATEST_BATCH_INDEX"
+	DBKeyAlfpProgress              = "ALFP_PROGRESS"
+	DBKeyLastMileFinalizerTracker  = "LAST_MILE_FINALIZER_TRACKER"
+	DBKeyChainCursor               = "CHAIN_CURSOR"
 
 	DBKeyPrefixBlockIndex                   = "BLOCK_INDEX:"
 	DBKeyPrefixEpochData                    = "EPOCH_DATA:"
@@ -66,16 +69,12 @@ const (
 	DBKeyPrefixFirstBlockAggregatedHeightProof = "FIRST_BLOCK_AGGREGATED_HEIGHT_PROOF:"
 	DBKeyPrefixAggregatedAnchorEpochAckProof   = "ANCHOR_EPOCH_ACK_PROOF:"
 	DBKeyPrefixAlfp                            = "ALFP:"
-
-	DBKeyAlfpProgress             = "ALFP_PROGRESS"
-	DBKeyLastMileFinalizerTracker = "LAST_MILE_FINALIZER_TRACKER"
-	DBKeyChainCursor              = "CHAIN_CURSOR"
 )
 
 // Signing prefixes (used as salts for cryptographic signatures).
 const (
 	SigningPrefixEpochRotationProof  = "EPOCH_ROTATION_PROOF"
-	SigningPrefixDelayedOperations   = "SIG_DELAYED_OPERATIONS:"
+	SigningPrefixDelayedOperations   = "SIG_DELAYED_OPERATIONS"
 	SigningPrefixHeightProof         = "HEIGHT_PROOF"
 	SigningPrefixLeaderFinalization  = "LEADER_FINALIZATION_PROOF"
 	SigningPrefixAnchorEpochAckProof = "ANCHOR_EPOCH_ACK_PROOF"

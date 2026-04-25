@@ -10,6 +10,7 @@ import (
 const MAX_THROTTLED_LOG_KEYS = 10000
 
 var THROTTLED_LOGS_MUTEX sync.Mutex
+
 var THROTTLED_LOGS_LAST = make(map[string]time.Time)
 
 // LogWithTimeThrottled logs at most once per `every` duration for a given `key`.

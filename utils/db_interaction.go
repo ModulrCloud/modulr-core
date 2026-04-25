@@ -244,3 +244,24 @@ func LoadAggregatedHeightProofInfo(absoluteHeight int) *structures.AggregatedHei
 		EpochId:        proof.EpochId,
 	}
 }
+
+func StoreAlfpIncluded(epochId int, leader string) {
+	if leader == "" {
+		return
+	}
+
+	key := []byte(fmt.Sprintf("ALFP_INCLUDED:%d:%s", epochId, leader))
+
+	_ = databases.FINALIZATION_THREAD_METADATA.Put(key, []byte{1}, nil)
+}
+
+func HasAnyAlfpIncluded(epochId int, leader string) bool {
+	if leader == "" {
+		return false
+	}
+
+	key := []byte(fmt.Sprintf("ALFP_INCLUDED:%d:%s", epochId, leader))
+
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
+	return err == nil
+}

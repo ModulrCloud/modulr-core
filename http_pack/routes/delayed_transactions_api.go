@@ -78,7 +78,7 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
 	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned)
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, DelayedTransactionsSignResponse{Signature: signature})

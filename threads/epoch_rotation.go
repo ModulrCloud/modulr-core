@@ -91,7 +91,7 @@ func EpochRotationThread() {
 
 						jsonedDelayedTxs, _ := json.Marshal(firstBlock.ExtraData.DelayedTransactionsBatch.DelayedTransactions)
 
-						dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
+						dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
 
 						okSignatures := 0
 

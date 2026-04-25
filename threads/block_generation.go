@@ -116,7 +116,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 		return batch
 	}
 
-	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
 
 	proofs := map[string]string{
 		globals.CONFIGURATION.PublicKey: cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned),
