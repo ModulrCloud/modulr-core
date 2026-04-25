@@ -58,18 +58,18 @@ func RunBlockchain() {
 	//✅ 8.Thread to get consensus about the last block by each leader, grab proofs and send to anchors
 	go threads.LeaderFinalizationThread()
 
-	//✅ 8.0 PoD outbox: retry store messages to PoD until acknowledged (optional)
+	//✅ 9.PoD outbox: retry store messages to PoD until acknowledged (optional)
 	if !globals.CONFIGURATION.DisablePoDOutbox {
 		go threads.PoDOutboxThread()
 	}
 
-	//✅ 8.1 Thread to independently scan anchor blocks and persist ALFP inclusion markers (delivery confirmation)
+	//✅ 10.Thread to independently scan anchor blocks and persist ALFP inclusion markers (delivery confirmation)
 	go threads.AlfpInclusionWatcherThread()
 
-	//✅ 9.Thread to asynchronously find and store first block data in each epoch
+	//✅ 11.Thread to asynchronously find and store first block data in each epoch
 	go threads.FirstBlockInEpochMonitorThread()
 
-	//✅ 10.Thread for last mile finalization: sequences blocks locally (writes height->blockId
+	//✅ 12.Thread for last mile finalization: sequences blocks locally (writes height->blockId
 	//   mappings for SignHeightProof on ALL nodes) and collects AggregatedHeightProof on finalizer nodes
 	go threads.LastMileFinalizerThread()
 

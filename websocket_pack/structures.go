@@ -156,11 +156,6 @@ type WsAcceptAggregatedAnchorEpochAckProofRequest struct {
 
 // PoD storage/retrieval for aggregated anchor epoch ack proofs
 
-type WsAggregatedAnchorEpochAckProofStoreRequest struct {
-	Route string                                   `json:"route"`
-	Proof structures.AggregatedAnchorEpochAckProof `json:"proof"`
-}
-
 type WsAggregatedAnchorEpochAckProofGetRequest struct {
 	Route   string `json:"route"`
 	EpochId int    `json:"epochId"`

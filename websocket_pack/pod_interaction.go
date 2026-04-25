@@ -104,7 +104,7 @@ func GetAggregatedEpochRotationProofFromPoD(epochId int) *structures.AggregatedE
 }
 
 func SendAggregatedAnchorEpochAckProofToPoD(proof structures.AggregatedAnchorEpochAckProof) {
-	req := WsAggregatedAnchorEpochAckProofStoreRequest{Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof, Proof: proof}
+	req := WsAcceptAggregatedAnchorEpochAckProofRequest{Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof, Proof: proof}
 	if reqBytes, err := json.Marshal(req); err == nil {
 		if globals.CONFIGURATION.DisablePoDOutbox {
 			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
