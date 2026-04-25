@@ -7,6 +7,7 @@ import (
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/globals"
 	"github.com/modulrcloud/modulr-core/http_pack/helpers"
+	"github.com/modulrcloud/modulr-core/structures"
 	"github.com/modulrcloud/modulr-core/utils"
 
 	"github.com/valyala/fasthttp"
@@ -34,7 +35,7 @@ func GetRecoveryLastFinalizedHeight(ctx *fasthttp.RequestCtx) {
 
 	lastHeight := int(tracker.NextHeight - 1)
 
-	var proofInfo *utils.AggregatedHeightProofInfo
+	var proofInfo *structures.AggregatedHeightProofInfo
 	for h := lastHeight; h >= 0 && h > lastHeight-10; h-- {
 		if info := utils.LoadAggregatedHeightProofInfo(h); info != nil {
 			proofInfo = info

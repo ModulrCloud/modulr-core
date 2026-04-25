@@ -11,6 +11,13 @@ type AggregatedHeightProof struct {
 	Proofs         map[string]string `json:"proofs"`
 }
 
+type AggregatedHeightProofInfo struct {
+	AbsoluteHeight int    `json:"absoluteHeight"`
+	BlockId        string `json:"blockId"`
+	BlockHash      string `json:"blockHash"`
+	EpochId        int    `json:"epochId"`
+}
+
 func (ha *AggregatedHeightProof) UnmarshalJSON(data []byte) error {
 	type alias AggregatedHeightProof
 
