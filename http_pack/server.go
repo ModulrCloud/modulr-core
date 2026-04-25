@@ -29,6 +29,9 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/epoch_stats/{epochIndex}", routes.GetEpochStatsByEpochIndex)
 	r.GET("/aggregated_epoch_rotation_proof/{epochId}", routes.GetAggregatedEpochRotationProof)
 
+	// Information about statistics
+	r.GET("/live_stats", routes.GetLiveStats)
+
 	// Information about accounts and validators
 	r.GET("/account/{accountId}", routes.GetAccountById)
 	r.GET("/validator/{validatorPubkey}", routes.GetValidatorByPubkey)
@@ -44,7 +47,6 @@ func createRouter() fasthttp.RequestHandler {
 
 	// Other
 	r.GET("/aggregated_anchor_epoch_ack_proof/{epochId}", routes.GetAggregatedAnchorEpochAckProof)
-	r.GET("/live_stats", routes.GetLiveStats)
 
 	return r.Handler
 }

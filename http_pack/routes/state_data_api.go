@@ -14,9 +14,9 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// maxValidatorWsEndpointPubkeys caps the number of pubkeys per request to keep
+// MAX_VALIDATOR_WS_ENDPOINT_PUBKEYS caps the number of pubkeys per request to keep
 // the response small and protect the node from accidental fan-out abuse.
-const maxValidatorWsEndpointPubkeys = 256
+const MAX_VALIDATOR_WS_ENDPOINT_PUBKEYS = 256
 
 func GetAccountById(ctx *fasthttp.RequestCtx) {
 	accountIdRaw := ctx.UserValue("accountId")
@@ -107,7 +107,7 @@ func GetValidatorWsEndpoints(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	pubkeys := splitAndDedupPubkeys(raw, maxValidatorWsEndpointPubkeys)
+	pubkeys := splitAndDedupPubkeys(raw, MAX_VALIDATOR_WS_ENDPOINT_PUBKEYS)
 	if len(pubkeys) == 0 {
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "no valid pubkeys provided")
 		return
