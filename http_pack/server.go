@@ -36,6 +36,7 @@ func createRouter() fasthttp.RequestHandler {
 	r.GET("/account/{accountId}", routes.GetAccountById)
 	r.GET("/validator/{validatorPubkey}", routes.GetValidatorByPubkey)
 	r.GET("/get_validator_ws_endpoints", routes.GetValidatorWsEndpoints)
+	r.GET("/get_validator_endpoints", routes.GetValidatorEndpoints)
 
 	// Transactions related API
 	r.GET("/transaction/{hash}", routes.GetTransactionByHash)
