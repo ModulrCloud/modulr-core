@@ -42,7 +42,6 @@ func NewBlock(transactions []structures.Transaction, extraData ExtraDataToBlock,
 }
 
 func (block *Block) GetHash() string {
-
 	jsonedTransactions, err := json.Marshal(block.Transactions)
 
 	if err != nil {
@@ -70,15 +69,11 @@ func (block *Block) GetHash() string {
 }
 
 func (block *Block) SignBlock() {
-
 	block.Sig = cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, block.GetHash())
-
 }
 
 func (block *Block) VerifySignature() bool {
-
 	return cryptography.VerifySignature(block.GetHash(), block.Creator, block.Sig)
-
 }
 
 func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *structures.EpochDataHandler) *Block {
@@ -88,7 +83,6 @@ func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *str
 	blockAsBytes, err := databases.BLOCKS.Get([]byte(blockID), nil)
 
 	if err == nil {
-
 		var blockParsed *Block
 
 		err = json.Unmarshal(blockAsBytes, &blockParsed)
@@ -96,7 +90,6 @@ func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *str
 		if err == nil {
 			return blockParsed
 		}
-
 	}
 
 	// Find from other nodes
@@ -106,9 +99,7 @@ func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *str
 	var quorumUrls []string
 
 	for _, quorumMember := range quorumUrlsAndPubkeys {
-
 		quorumUrls = append(quorumUrls, quorumMember.Url)
-
 	}
 
 	allKnownNodes := append(quorumUrls, globals.CONFIGURATION.BootstrapNodes...)
@@ -117,14 +108,12 @@ func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *str
 	var wg sync.WaitGroup
 
 	for _, node := range allKnownNodes {
-
 		if node == globals.CONFIGURATION.MyHostname {
 			continue
 		}
 
 		wg.Add(1)
 		go func(endpoint string) {
-
 			defer wg.Done()
 
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -147,9 +136,7 @@ func GetBlock(epochIndex int, blockCreator string, index uint, epochHandler *str
 			if err := json.NewDecoder(resp.Body).Decode(&block); err == nil {
 				resultChan <- &block
 			}
-
 		}(node)
-
 	}
 
 	go func() {

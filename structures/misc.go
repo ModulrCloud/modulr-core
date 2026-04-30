@@ -47,11 +47,3 @@ type ExecutionStats struct {
 	Hash  string
 }
 
-func NewExecutionStatsTemplate() ExecutionStats {
-
-	return ExecutionStats{
-		Index: -1,
-		Hash:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-	}
-
-}

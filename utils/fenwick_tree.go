@@ -1,7 +1,5 @@
 package utils
 
-import "encoding/hex"
-
 // StakeFenwickTree is a Fenwick (Binary Indexed) tree over uint64 stake values.
 // It supports O(log N) prefix-sum queries, O(log N) point updates, and
 // O(log N) weighted random selection via FindByWeight.
@@ -54,21 +52,4 @@ func (t *StakeFenwickTree) FindByWeight(r uint64) int {
 		bitMask >>= 1
 	}
 	return pos
-}
-
-// hashHexToUint64 converts the first 8 bytes (16 hex chars) of a hex string
-// into a big-endian uint64. Returns 0 if the input is too short or invalid.
-func hashHexToUint64(hashHex string) uint64 {
-	if len(hashHex) < 16 {
-		return 0
-	}
-	b, err := hex.DecodeString(hashHex[:16])
-	if err != nil {
-		return 0
-	}
-	var r uint64
-	for _, by := range b {
-		r = (r << 8) | uint64(by)
-	}
-	return r
 }

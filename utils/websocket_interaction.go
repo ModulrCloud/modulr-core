@@ -40,24 +40,99 @@ const (
 )
 
 var (
-	POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of PoD conn
-	POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for PoD
-	POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with PoD itself
+	POD_CLIENT         = NewPodClient("PoD", openWebsocketConnectionWithPoD)
+	POD_BULK_CLIENT    = NewPodClient("PoD-Bulk", openWebsocketConnectionWithPoD)
+	ANCHORS_POD_CLIENT = NewPodClient("Anchors-PoD", openWebsocketConnectionWithAnchorsPoD)
 )
 
-// Dedicated "bulk" PoD connection used for high-frequency requests (e.g. block execution fetching blocks).
-// This avoids head-of-line blocking with other PoD requests that share the default connection.
-var (
-	POD_BULK_ACCESS_MUTEX         sync.Mutex
-	POD_BULK_READ_WRITE_MUTEX     sync.Mutex
-	POD_WEBSOCKET_CONNECTION_BULK *websocket.Conn
-)
+// PodClient manages a single persistent websocket connection to a PoD endpoint
+// with automatic reconnection, retries, and serialized request/response access.
+type PodClient struct {
+	name     string
+	dialFunc func() (*websocket.Conn, error)
+	accessMu sync.Mutex
+	rwMu     sync.Mutex
+	conn     *websocket.Conn
+}
 
-var (
-	ANCHORS_POD_ACCESS_MUTEX         sync.Mutex      // Guards open/close & replace of Anchors PoD conn
-	ANCHORS_POD_READ_WRITE_MUTEX     sync.Mutex      // Single request (write+read) guarantee for Anchors PoD
-	ANCHORS_POD_WEBSOCKET_CONNECTION *websocket.Conn // Connection with anchors PoD itself
-)
+func NewPodClient(name string, dialFunc func() (*websocket.Conn, error)) *PodClient {
+	return &PodClient{name: name, dialFunc: dialFunc}
+}
+
+func (pc *PodClient) Send(msg []byte) ([]byte, error) {
+	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
+		pc.accessMu.Lock()
+		if pc.conn == nil {
+			conn, err := pc.dialFunc()
+			if err != nil {
+				LogWithTimeThrottled(
+					pc.name+":WS:DIAL",
+					2*time.Second,
+					fmt.Sprintf("%s websocket dial failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+					YELLOW_COLOR,
+				)
+				pc.accessMu.Unlock()
+				time.Sleep(RETRY_INTERVAL)
+				continue
+			}
+			pc.conn = conn
+		}
+		c := pc.conn
+		pc.accessMu.Unlock()
+
+		pc.rwMu.Lock()
+		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
+		err := c.WriteMessage(websocket.TextMessage, msg)
+		if err != nil {
+			LogWithTimeThrottled(
+				pc.name+":WS:WRITE",
+				2*time.Second,
+				fmt.Sprintf("%s websocket write failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
+			pc.rwMu.Unlock()
+			pc.accessMu.Lock()
+			if pc.conn == c {
+				_ = c.Close()
+				pc.conn = nil
+			}
+			pc.accessMu.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
+		_, resp, err := c.ReadMessage()
+		pc.rwMu.Unlock()
+
+		if err != nil {
+			LogWithTimeThrottled(
+				pc.name+":WS:READ",
+				2*time.Second,
+				fmt.Sprintf("%s websocket read failed (attempt %d/%d): %v", pc.name, attempt, MAX_RETRIES, err),
+				YELLOW_COLOR,
+			)
+			pc.accessMu.Lock()
+			if pc.conn == c {
+				_ = c.Close()
+				pc.conn = nil
+			}
+			pc.accessMu.Unlock()
+			time.Sleep(RETRY_INTERVAL)
+			continue
+		}
+
+		return resp, nil
+	}
+
+	LogWithTimeThrottled(
+		pc.name+":WS:FAILED",
+		2*time.Second,
+		fmt.Sprintf("%s websocket request failed after %d attempts", pc.name, MAX_RETRIES),
+		RED_COLOR,
+	)
+	return nil, fmt.Errorf("failed to send %s message after %d attempts", pc.name, MAX_RETRIES)
+}
 
 type WebsocketGuards struct {
 	ConnMu *sync.RWMutex
@@ -79,308 +154,53 @@ func NewWebsocketGuards() *WebsocketGuards {
 	}
 }
 
-func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
-
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
-		POD_ACCESS_MUTEX.Lock()
-
-		if POD_WEBSOCKET_CONNECTION == nil {
-
-			conn, err := openWebsocketConnectionWithPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"POD:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				POD_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			POD_WEBSOCKET_CONNECTION = conn
-
-		}
-
-		c := POD_WEBSOCKET_CONNECTION
-
-		POD_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		POD_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_READ_WRITE_MUTEX.Unlock()
-			POD_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION = nil
-			}
-			POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		POD_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION = nil
-			}
-			POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
+// scheduleWriteMuCleanup removes the per-connection mutex entry from guards.WriteMu
+// after a safe delay (3x READ_WRITE_DEADLINE). The delay ensures that any in-flight
+// goroutine that already captured the old *websocket.Conn pointer has finished its
+// Write/Read round before we drop the mutex — otherwise a late LoadOrStore could
+// resurrect a stale entry (or, worse, a new goroutine that races with the delete
+// could end up with a different mutex than the one our in-flight goroutine holds,
+// leading to concurrent writes on the same conn and a gorilla/websocket panic).
+//
+// Without this helper, every mid-epoch reconnect (sendMessages write/read error,
+// reconnectOnce) leaked one WriteMu entry that stayed alive until the next full
+// epoch rotation, accumulating across runs of the same validator hiccup.
+func scheduleWriteMuCleanup(guards *WebsocketGuards, conn *websocket.Conn) {
+	if guards == nil || guards.WriteMu == nil || conn == nil {
+		return
 	}
-
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
+	go func(writeMu *sync.Map, c *websocket.Conn) {
+		time.Sleep(3 * READ_WRITE_DEADLINE)
+		writeMu.Delete(c)
+	}(guards.WriteMu, conn)
 }
 
-// SendWebsocketMessageToPoDForBlocks is the same as SendWebsocketMessageToPoD but uses a dedicated PoD connection.
-// Use it for high-frequency block fetching so it doesn't block other PoD calls (proofs, stores, etc).
+func SendWebsocketMessageToPoD(msg []byte) ([]byte, error) {
+	return POD_CLIENT.Send(msg)
+}
+
+// SendWebsocketMessageToPoDForBlocks uses a dedicated PoD connection for high-frequency block fetching
+// so it doesn't block other PoD calls (proofs, stores, etc).
 func SendWebsocketMessageToPoDForBlocks(msg []byte) ([]byte, error) {
-
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
-		POD_BULK_ACCESS_MUTEX.Lock()
-
-		if POD_WEBSOCKET_CONNECTION_BULK == nil {
-
-			conn, err := openWebsocketConnectionWithPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"POD:BULK:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("PoD bulk websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				POD_BULK_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			POD_WEBSOCKET_CONNECTION_BULK = conn
-
-		}
-
-		c := POD_WEBSOCKET_CONNECTION_BULK
-
-		POD_BULK_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		POD_BULK_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:BULK:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("PoD bulk websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_BULK_READ_WRITE_MUTEX.Unlock()
-			POD_BULK_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION_BULK == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION_BULK = nil
-			}
-			POD_BULK_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		POD_BULK_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"POD:BULK:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("PoD bulk websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			POD_BULK_ACCESS_MUTEX.Lock()
-			if POD_WEBSOCKET_CONNECTION_BULK == c {
-				_ = c.Close()
-				POD_WEBSOCKET_CONNECTION_BULK = nil
-			}
-			POD_BULK_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
-	}
-
-	LogWithTimeThrottled(
-		"POD:BULK:WS:FAILED",
-		2*time.Second,
-		fmt.Sprintf("PoD bulk websocket request failed after %d attempts", MAX_RETRIES),
-		RED_COLOR,
-	)
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
+	return POD_BULK_CLIENT.Send(msg)
 }
 
 func SendWebsocketMessageToAnchorsPoD(msg []byte) ([]byte, error) {
-
-	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
-
-		ANCHORS_POD_ACCESS_MUTEX.Lock()
-
-		if ANCHORS_POD_WEBSOCKET_CONNECTION == nil {
-
-			conn, err := openWebsocketConnectionWithAnchorsPoD()
-
-			if err != nil {
-				LogWithTimeThrottled(
-					"ANCHORS_POD:WS:DIAL",
-					2*time.Second,
-					fmt.Sprintf("Anchors-PoD websocket dial failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-					YELLOW_COLOR,
-				)
-
-				ANCHORS_POD_ACCESS_MUTEX.Unlock()
-
-				time.Sleep(RETRY_INTERVAL)
-
-				continue
-			}
-
-			ANCHORS_POD_WEBSOCKET_CONNECTION = conn
-
-		}
-
-		c := ANCHORS_POD_WEBSOCKET_CONNECTION
-
-		ANCHORS_POD_ACCESS_MUTEX.Unlock()
-
-		// single request (write+read) for this connection
-		ANCHORS_POD_READ_WRITE_MUTEX.Lock()
-
-		_ = c.SetWriteDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-
-		err := c.WriteMessage(websocket.TextMessage, msg)
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"ANCHORS_POD:WS:WRITE",
-				2*time.Second,
-				fmt.Sprintf("Anchors-PoD websocket write failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
-			ANCHORS_POD_ACCESS_MUTEX.Lock()
-			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
-			}
-			ANCHORS_POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		_ = c.SetReadDeadline(time.Now().Add(READ_WRITE_DEADLINE))
-		_, resp, err := c.ReadMessage()
-
-		ANCHORS_POD_READ_WRITE_MUTEX.Unlock()
-
-		if err != nil {
-			LogWithTimeThrottled(
-				"ANCHORS_POD:WS:READ",
-				2*time.Second,
-				fmt.Sprintf("Anchors-PoD websocket read failed (attempt %d/%d): %v", attempt, MAX_RETRIES, err),
-				YELLOW_COLOR,
-			)
-			ANCHORS_POD_ACCESS_MUTEX.Lock()
-			if ANCHORS_POD_WEBSOCKET_CONNECTION == c {
-				_ = c.Close()
-				ANCHORS_POD_WEBSOCKET_CONNECTION = nil
-			}
-			ANCHORS_POD_ACCESS_MUTEX.Unlock()
-			time.Sleep(RETRY_INTERVAL)
-			continue
-		}
-
-		return resp, nil
-
-	}
-
-	LogWithTimeThrottled(
-		"ANCHORS_POD:WS:FAILED",
-		2*time.Second,
-		fmt.Sprintf("Anchors-PoD websocket request failed after %d attempts", MAX_RETRIES),
-		RED_COLOR,
-	)
-	return nil, fmt.Errorf("failed to send message after %d attempts", MAX_RETRIES)
-
+	return ANCHORS_POD_CLIENT.Send(msg)
 }
 
 func OpenWebsocketConnectionsWithQuorum(quorum []string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-	// Collect old connections for delayed mutex cleanup
-	var oldConns []*websocket.Conn
-
-	// Close and remove any existing connections
+	// Close and remove any existing connections, scheduling delayed WriteMu
+	// cleanup for each so that in-flight Write/Read rounds have time to drain.
 	guards.ConnMu.Lock()
 	for id, conn := range wsConnMap {
 		if conn != nil {
-			oldConns = append(oldConns, conn)
 			_ = conn.Close()
+			scheduleWriteMuCleanup(guards, conn)
 		}
 		delete(wsConnMap, id)
 	}
 	guards.ConnMu.Unlock()
-
-	// Schedule async cleanup of old connection mutexes.
-	// We wait 3x READ_WRITE_DEADLINE to ensure all goroutines have finished.
-	// This runs in background and doesn't block.
-	if len(oldConns) > 0 {
-		go func(conns []*websocket.Conn, writeMu *sync.Map) {
-			time.Sleep(3 * READ_WRITE_DEADLINE) // 6 seconds
-			for _, c := range conns {
-				writeMu.Delete(c)
-			}
-		}(oldConns, guards.WriteMu)
-	}
 
 	// Establish new connections for each validator in the quorum
 	for _, validatorPubkey := range quorum {
@@ -431,7 +251,6 @@ func (qw *QuorumWaiter) SendAndWait(
 	ctx context.Context, message []byte, quorum []string,
 	wsConnMap map[string]*websocket.Conn, majority int,
 ) (map[string][]byte, bool) {
-
 	// Reset state
 	qw.mu.Lock()
 	for k := range qw.answered {
@@ -526,7 +345,6 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 	wsConnMap map[string]*websocket.Conn, majority int,
 	validate func(id string, raw []byte) bool,
 ) (map[string][]byte, bool) {
-
 	// Reset state
 	qw.mu.Lock()
 	for k := range qw.answered {
@@ -603,6 +421,13 @@ func (qw *QuorumWaiter) SendAndWaitValidated(
 					} else {
 						validMu.Unlock()
 					}
+				} else {
+					// Validation failed (e.g. NOT_READY) — remove from answered
+					// so the node gets resent to on the next timer tick.
+					qw.mu.Lock()
+					delete(qw.answered, id)
+					delete(qw.responses, id)
+					qw.mu.Unlock()
 				}
 			}(r.id, r.msg)
 
@@ -697,9 +522,12 @@ func (qw *QuorumWaiter) getWriteMuConn(c *websocket.Conn) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
+// reconnectOnce makes up to MAX_RETRIES dial attempts with RETRY_INTERVAL backoff
+// between them. Despite the name (kept for callers), this is the single per-round
+// reconnect entry point invoked by QuorumWaiter.reconnectFailed; the retries are
+// here so that a transient validator hiccup does not require waiting for a full
+// QuorumWaiter round before we even try to redial again.
 func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *WebsocketGuards) {
-
-	// Get validator metadata
 	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyPrefixValidatorStorage+pubkey), nil)
 	if err != nil {
 		return
@@ -709,20 +537,40 @@ func reconnectOnce(pubkey string, wsConnMap map[string]*websocket.Conn, guards *
 		return
 	}
 
-	// Try a single dial attempt
-	conn, _, err := websocket.DefaultDialer.Dial(validatorStorage.WssValidatorUrl, nil)
-	if err != nil {
+	var conn *websocket.Conn
+	for attempt := 1; attempt <= MAX_RETRIES; attempt++ {
+		c, _, dialErr := websocket.DefaultDialer.Dial(validatorStorage.WssValidatorUrl, nil)
+		if dialErr == nil {
+			conn = c
+			break
+		}
+		LogWithTimeThrottled(
+			"quorum:ws:redial:"+pubkey,
+			2*time.Second,
+			fmt.Sprintf("quorum websocket redial failed for %s (attempt %d/%d): %v", pubkey, attempt, MAX_RETRIES, dialErr),
+			YELLOW_COLOR,
+		)
+		if attempt < MAX_RETRIES {
+			time.Sleep(RETRY_INTERVAL)
+		}
+	}
+	if conn == nil {
 		return
 	}
 
-	// Store back into the shared map under lock
 	guards.ConnMu.Lock()
-	if old := wsConnMap[pubkey]; old != nil {
+	old := wsConnMap[pubkey]
+	if old != nil {
 		_ = old.Close()
 	}
 	wsConnMap[pubkey] = conn
 	guards.ConnMu.Unlock()
 
+	// The old conn is abandoned — drop its WriteMu entry after the safety delay
+	// so we don't accumulate one leaked mutex per mid-epoch reconnect.
+	if old != nil {
+		scheduleWriteMuCleanup(guards, old)
+	}
 }
 
 func (qw *QuorumWaiter) reconnectFailed(wsConnMap map[string]*websocket.Conn) {
@@ -742,32 +590,24 @@ func (qw *QuorumWaiter) reconnectFailed(wsConnMap map[string]*websocket.Conn) {
 	}
 }
 
-func openWebsocketConnectionWithPoD() (*websocket.Conn, error) {
-	u, err := url.Parse(globals.CONFIGURATION.PointOfDistributionWS)
+func dialWebsocket(rawURL string) (*websocket.Conn, error) {
+	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
 	}
-
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("dial error: %w", err)
 	}
-
 	return conn, nil
 }
 
+func openWebsocketConnectionWithPoD() (*websocket.Conn, error) {
+	return dialWebsocket(globals.CONFIGURATION.PointOfDistributionWS)
+}
+
 func openWebsocketConnectionWithAnchorsPoD() (*websocket.Conn, error) {
-	u, err := url.Parse(globals.CONFIGURATION.AnchorsPointOfDistributionWS)
-	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
-	}
-
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("dial error: %w", err)
-	}
-
-	return conn, nil
+	return dialWebsocket(globals.CONFIGURATION.AnchorsPointOfDistributionWS)
 }
 
 func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map[string]*websocket.Conn) {
@@ -803,6 +643,9 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				// The conn is gone from wsConnMap — schedule cleanup so its
+				// WriteMu entry doesn't live forever after a transient error.
+				scheduleWriteMuCleanup(qw.guards, c)
 				return
 			}
 
@@ -820,6 +663,7 @@ func (qw *QuorumWaiter) sendMessages(targets []string, msg []byte, wsConnMap map
 				_ = c.Close()
 				delete(wsConnMap, id)
 				qw.guards.ConnMu.Unlock()
+				scheduleWriteMuCleanup(qw.guards, c)
 				return
 			}
 

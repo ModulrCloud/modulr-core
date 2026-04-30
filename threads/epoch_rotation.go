@@ -1,3 +1,4 @@
+// Thread to handle epoch transitions and execute delayed transactions
 package threads
 
 import (
@@ -29,37 +30,29 @@ var FIRST_BLOCK_DATA FirstBlockData
 const STUB_FOR_FIRST_BLOCK_SEARCH = true
 
 func EpochRotationThread() {
-
 	for {
-
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 
 		if !utils.EpochStillFresh(&handlers.APPROVEMENT_THREAD_METADATA.Handler) {
-
 			epochHandlerRef := &handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler
 
 			epochFullID := epochHandlerRef.Hash + "#" + strconv.Itoa(epochHandlerRef.Id)
 
 			if !utils.SignalAboutEpochRotationExists(epochHandlerRef.Id) {
-
 				// If epoch is not fresh - send the signal to persistent db that we finish it - not to create AFPs, ALFPs anymore
 				keyValue := []byte(constants.DBKeyPrefixEpochFinish + strconv.Itoa(epochHandlerRef.Id))
 
 				databases.EPOCH_DATA.Put(keyValue, []byte("TRUE"), nil)
-
 			}
 
 			if utils.SignalAboutEpochRotationExists(epochHandlerRef.Id) {
-
 				majority := utils.GetQuorumMajority(epochHandlerRef)
 
 				haveFirstBlockData := FIRST_BLOCK_DATA.FirstBlockHash != ""
 
 				if !haveFirstBlockData {
-
 					// Find first block in this epoch
 					if FIRST_BLOCK_DATA.FirstBlockHash == "" {
-
 						var firstBlockData *FirstBlockData
 
 						if STUB_FOR_FIRST_BLOCK_SEARCH {
@@ -69,19 +62,14 @@ func EpochRotationThread() {
 						}
 
 						if firstBlockData != nil {
-
 							FIRST_BLOCK_DATA.FirstBlockCreator = firstBlockData.FirstBlockCreator
 
 							FIRST_BLOCK_DATA.FirstBlockHash = firstBlockData.FirstBlockHash
-
 						}
-
 					}
-
 				}
 
 				if FIRST_BLOCK_DATA.FirstBlockHash != "" {
-
 					// 1. Fetch first block
 
 					var firstBlock *block_pack.Block
@@ -95,7 +83,6 @@ func EpochRotationThread() {
 					// 2. Compare hashes
 
 					if firstBlock != nil && (STUB_FOR_FIRST_BLOCK_SEARCH || firstBlock.GetHash() == FIRST_BLOCK_DATA.FirstBlockHash) {
-
 						// 3. Verify that quorum agreed batch of delayed transactions
 
 						latestBatchIndex := readLatestBatchIndex()
@@ -104,7 +91,7 @@ func EpochRotationThread() {
 
 						jsonedDelayedTxs, _ := json.Marshal(firstBlock.ExtraData.DelayedTransactionsBatch.DelayedTransactions)
 
-						dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
+						dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(firstBlock.ExtraData.DelayedTransactionsBatch.EpochIndex) + ":" + utils.Blake3(string(jsonedDelayedTxs))
 
 						okSignatures := 0
 
@@ -117,19 +104,15 @@ func EpochRotationThread() {
 						}
 
 						for signerPubKey, signa := range firstBlock.ExtraData.DelayedTransactionsBatch.Proofs {
-
 							isOK := cryptography.VerifySignature(dataThatShouldBeSigned, signerPubKey, signa)
 
 							quorumMember := quorumMap[signerPubKey]
 
 							if isOK && quorumMember && !unique[signerPubKey] {
-
 								unique[signerPubKey] = true
 
 								okSignatures++
-
 							}
-
 						}
 
 						// 5. Finally - check if this batch has bigger index than already executed
@@ -147,11 +130,9 @@ func EpochRotationThread() {
 						handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Lock()
 
 						if okSignatures >= majority && int64(epochHandlerRef.Id) > latestBatchIndex {
-
 							latestBatchIndex = int64(epochHandlerRef.Id)
 
 							delayedTransactionsToExecute = firstBlock.ExtraData.DelayedTransactionsBatch.DelayedTransactions
-
 						}
 
 						networkParamsCopy := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.CopyNetworkParameters()
@@ -161,13 +142,11 @@ func EpochRotationThread() {
 						valBytes, marshalErr := json.Marshal(snapshot)
 
 						if marshalErr != nil {
-
 							handlers.APPROVEMENT_THREAD_METADATA.RWMutex.Unlock()
 
 							globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Store(true)
 
 							panic(fmt.Sprintf("failed to marshal epoch handler: %v", marshalErr))
-
 						}
 
 						var daoVotingContractCalls, allTheRestContractCalls []map[string]string
@@ -175,24 +154,16 @@ func EpochRotationThread() {
 						atomicBatch := new(leveldb.Batch)
 
 						// Store snapshot of the finishing epoch in the same DB/batch as AT update for atomicity.
-						atomicBatch.Put([]byte("EPOCH_HANDLER:"+strconv.Itoa(epochHandlerRef.Id)), valBytes)
+						atomicBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(epochHandlerRef.Id)), valBytes)
 
 						for _, delayedTransaction := range delayedTransactionsToExecute {
-
 							if delayedTxType, ok := delayedTransaction["type"]; ok {
-
 								if delayedTxType == "votingAccept" {
-
 									daoVotingContractCalls = append(daoVotingContractCalls, delayedTransaction)
-
 								} else {
-
 									allTheRestContractCalls = append(allTheRestContractCalls, delayedTransaction)
-
 								}
-
 							}
-
 						}
 
 						delayedTransactionsOrderByPriority := append(daoVotingContractCalls, allTheRestContractCalls...)
@@ -204,17 +175,13 @@ func EpochRotationThread() {
 						utils.ResetApprovementTouchedSets()
 
 						for _, delayedTransaction := range delayedTransactionsOrderByPriority {
-
 							executeDelayedTransaction(delayedTransaction, constants.ContextApprovementThread)
-
 						}
 
 						for key, value := range handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched {
-
 							valBytes, _ := json.Marshal(value)
 
 							atomicBatch.Put([]byte(key), valBytes)
-
 						}
 
 						utils.LogWithTime("Delayed txs were executed for epoch on AT: "+epochFullID, utils.GREEN_COLOR)
@@ -233,25 +200,26 @@ func EpochRotationThread() {
 							Id:                 nextEpochId,
 							Hash:               nextEpochHash,
 							ValidatorsRegistry: epochHandlerRef.ValidatorsRegistry,
-							Quorum:             utils.GetCurrentEpochQuorumUnderLock(epochHandlerRef, nextEpochQuorumSize, nextEpochHash),
+							Quorum:             utils.GetCurrentEpochQuorum(epochHandlerRef, nextEpochQuorumSize, nextEpochHash, utils.GetValidatorFromApprovementThreadStateUnderLock),
 							LeadersSequence:    []string{},
 							StartTimestamp:     epochHandlerRef.StartTimestamp + uint64(handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.EpochDuration),
 							CurrentLeaderIndex: 0,
 						}
 
-						utils.SetLeadersSequenceUnderLock(&nextEpochHandler, nextEpochHash)
+						utils.SetLeadersSequence(&nextEpochHandler, nextEpochHash, utils.GetValidatorFromApprovementThreadStateUnderLock)
 
 						nextEpochDataHandler := structures.NextEpochDataHandler{
 							NextEpochHash:               nextEpochHash,
 							NextEpochValidatorsRegistry: nextEpochHandler.ValidatorsRegistry,
 							NextEpochQuorum:             nextEpochHandler.Quorum,
 							NextEpochLeadersSequence:    nextEpochHandler.LeadersSequence,
+							NextEpochStartTimestamp:     nextEpochHandler.StartTimestamp,
 							DelayedTransactions:         delayedTransactionsOrderByPriority,
 						}
 
 						jsonedNextEpochDataHandler, _ := json.Marshal(nextEpochDataHandler)
 
-						atomicBatch.Put([]byte("EPOCH_DATA:"+strconv.Itoa(nextEpochId)), jsonedNextEpochDataHandler)
+						atomicBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(nextEpochId)), jsonedNextEpochDataHandler)
 
 						writeLatestBatchIndexBatch(atomicBatch, latestBatchIndex)
 
@@ -266,14 +234,14 @@ func EpochRotationThread() {
 							NetworkParameters: networkParamsCopy,
 						}
 						if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
-							atomicBatch.Put([]byte("EPOCH_HANDLER:"+strconv.Itoa(nextEpochId)), nextValBytes)
+							atomicBatch.Put([]byte(constants.DBKeyPrefixEpochHandler+strconv.Itoa(nextEpochId)), nextValBytes)
 						}
 
 						// And commit all the changes on AT as a single atomic batch
 
 						jsonedHandler, _ := json.Marshal(handlers.APPROVEMENT_THREAD_METADATA.Handler)
 
-						atomicBatch.Put([]byte("AT"), jsonedHandler)
+						atomicBatch.Put([]byte(constants.DBKeyApprovementThreadMetadata), jsonedHandler)
 
 						// Clear write-back set (cache itself stays bounded via LRU).
 						utils.ResetApprovementTouchedSets()
@@ -283,9 +251,7 @@ func EpochRotationThread() {
 						FIRST_BLOCK_DATA = FirstBlockData{}
 
 						if batchCommitErr := databases.APPROVEMENT_THREAD_METADATA.Write(atomicBatch, nil); batchCommitErr != nil {
-
 							panic("Error with writing batch to approvement thread db. Try to launch again")
-
 						}
 
 						utils.LogWithTime("Epoch on approvement thread was updated => "+nextEpochHash+"#"+strconv.Itoa(nextEpochId), utils.GREEN_COLOR)
@@ -300,70 +266,45 @@ func EpochRotationThread() {
 						//_______________________Check the version required for the next epoch________________________
 
 						if utils.IsMyCoreVersionOld(&handlers.APPROVEMENT_THREAD_METADATA.Handler) {
-
 							utils.LogWithTime("New version detected on APPROVEMENT_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 							utils.GracefulShutdown()
-
 						}
-
 					} else {
-
 						handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
 					}
-
 				} else {
-
 					handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
 				}
-
 			} else {
-
 				handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
 			}
-
 		} else {
-
 			handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
-
 		}
 
 		time.Sleep(200 * time.Millisecond)
-
 	}
-
 }
 
 func firstBlockDataKey(epochIndex int) []byte {
-
-	return []byte(fmt.Sprintf("FIRST_BLOCK_DATA:%d", epochIndex))
-
+	return []byte(fmt.Sprintf(constants.DBKeyPrefixFirstBlockData+"%d", epochIndex))
 }
 
 func executeDelayedTransaction(delayedTransaction map[string]string, contextTag string) {
-
 	if delayedTxType, ok := delayedTransaction["type"]; ok {
-
 		// Now find the handler
 
 		if funcHandler, ok := system_contracts.DELAYED_TRANSACTIONS_MAP[delayedTxType]; ok {
-
 			funcHandler(delayedTransaction, contextTag)
-
 		}
-
 	}
-
 }
 
 // Reads latest batch index from LevelDB.
 // Supports legacy decimal-string format and migrates it to 8-byte BigEndian.
 func readLatestBatchIndex() int64 {
-
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("LATEST_BATCH_INDEX"), nil)
+	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get([]byte(constants.DBKeyLatestBatchIndex), nil)
 
 	if err != nil || len(raw) == 0 {
 		return 0
@@ -377,53 +318,41 @@ func readLatestBatchIndex() int64 {
 	if v, perr := strconv.ParseInt(string(raw), 10, 64); perr == nil && v >= 0 {
 		var buf [8]byte
 		binary.BigEndian.PutUint64(buf[:], uint64(v))
-		_ = databases.APPROVEMENT_THREAD_METADATA.Put([]byte("LATEST_BATCH_INDEX"), buf[:], nil)
+		_ = databases.APPROVEMENT_THREAD_METADATA.Put([]byte(constants.DBKeyLatestBatchIndex), buf[:], nil)
 		return v
 	}
 
 	return 0
-
 }
 
 // Writes latest batch index to LevelDB as 8-byte BigEndian.
 func writeLatestBatchIndexBatch(batch *leveldb.Batch, v int64) {
-
 	var buf [8]byte
 
 	binary.BigEndian.PutUint64(buf[:], uint64(v))
 
-	batch.Put([]byte("LATEST_BATCH_INDEX"), buf[:])
-
+	batch.Put([]byte(constants.DBKeyLatestBatchIndex), buf[:])
 }
 
 func getFirstBlockDataFromDB(epochIndex int) *FirstBlockData {
-
 	data, err := databases.APPROVEMENT_THREAD_METADATA.Get(firstBlockDataKey(epochIndex), nil)
 	if err != nil {
-
 		return nil
-
 	}
 
 	var firstBlockData FirstBlockData
 
 	if err := json.Unmarshal(data, &firstBlockData); err != nil {
-
 		return nil
-
 	}
 
 	if firstBlockData.FirstBlockCreator == "" || firstBlockData.FirstBlockHash == "" {
-
 		return nil
-
 	}
 
 	return &firstBlockData
 }
 
 func getFirstBlockDataFromDBStub() *FirstBlockData {
-
 	return &FirstBlockData{FirstBlockHash: handlers.APPROVEMENT_THREAD_METADATA.Handler.EpochDataHandler.Hash}
-
 }

@@ -1,3 +1,5 @@
+// Thread to scan anchor blocks for included ALFP
+// We need this for durability to have a 100% guarantee that we'll have ALFP for each leader in each epoch
 package threads
 
 import (
@@ -6,7 +8,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/modulrcloud/modulr-core/databases"
@@ -22,111 +23,6 @@ type AlfpWatcherState struct {
 	LastBlocksByAnchors             map[int]structures.ExecutionStats `json:"lastBlocksByAnchors"`
 }
 
-func newAlfpWatcherState(epochId int) *AlfpWatcherState {
-	return &AlfpWatcherState{
-		EpochId:                         epochId,
-		CurrentAnchorAssumption:         0,
-		CurrentAnchorBlockIndexObserved: 0,
-		LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
-	}
-}
-
-func alfpWatcherStateKey(epochId int) []byte {
-	return []byte(fmt.Sprintf("ALFP_WATCHER_STATE:%d", epochId))
-}
-
-func loadAlfpWatcherState(epochId int) *AlfpWatcherState {
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(alfpWatcherStateKey(epochId), nil)
-	if err != nil || len(raw) == 0 {
-		return newAlfpWatcherState(epochId)
-	}
-	var st AlfpWatcherState
-	if json.Unmarshal(raw, &st) != nil {
-		return newAlfpWatcherState(epochId)
-	}
-	if st.LastBlocksByAnchors == nil {
-		st.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
-	}
-	if st.EpochId != epochId {
-		return newAlfpWatcherState(epochId)
-	}
-	if st.CurrentAnchorAssumption < 0 {
-		st.CurrentAnchorAssumption = 0
-	}
-	if st.CurrentAnchorBlockIndexObserved < 0 {
-		st.CurrentAnchorBlockIndexObserved = 0
-	}
-	return &st
-}
-
-func persistAlfpWatcherState(st *AlfpWatcherState) {
-	if st == nil {
-		return
-	}
-	if st.LastBlocksByAnchors == nil {
-		st.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
-	}
-	if payload, err := json.Marshal(st); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(alfpWatcherStateKey(st.EpochId), payload, nil)
-	}
-}
-
-func loadEpochSnapshotForWatcher(epochId int) *structures.EpochDataSnapshot {
-	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochId))
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
-	if err != nil {
-		return nil
-	}
-	var snap structures.EpochDataSnapshot
-	if json.Unmarshal(raw, &snap) != nil {
-		return nil
-	}
-	return &snap
-}
-
-func allLocalAlfpsIncluded(epochHandler *structures.EpochDataHandler) bool {
-	if epochHandler == nil {
-		return false
-	}
-	for _, leader := range epochHandler.LeadersSequence {
-		if !utils.HasAnyAlfpIncluded(epochHandler.Id, leader) {
-			return false
-		}
-	}
-	return true
-}
-
-func fetchCatchUpTargetForAnchor(epochHandler *structures.EpochDataHandler, anchorIndex int, client *http.Client, rng *rand.Rand) (structures.ExecutionStats, bool) {
-	if epochHandler == nil || client == nil || rng == nil {
-		return structures.ExecutionStats{}, false
-	}
-	if anchorIndex < 0 || anchorIndex >= len(globals.ANCHORS) {
-		return structures.ExecutionStats{}, false
-	}
-	targetAnchor := globals.ANCHORS[rng.Intn(len(globals.ANCHORS))]
-	url := fmt.Sprintf("%s/sequence_alignment_data/%d/%d", targetAnchor.AnchorUrl, epochHandler.Id, anchorIndex)
-	resp, err := client.Get(url)
-	if err != nil {
-		return structures.ExecutionStats{}, false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return structures.ExecutionStats{}, false
-	}
-
-	dec := json.NewDecoder(io.LimitReader(resp.Body, 10<<20))
-	var alignmentData SequenceAlignmentDataResponse
-	if err := dec.Decode(&alignmentData); err != nil {
-		return structures.ExecutionStats{}, false
-	}
-
-	earliestRotationStats, ok := processSequenceAlignmentDataResponse(&alignmentData, anchorIndex, epochHandler)
-	if !ok {
-		return structures.ExecutionStats{}, false
-	}
-	return earliestRotationStats, true
-}
-
 // AlfpInclusionWatcherThread scans anchor blocks linearly (per epoch) and persists ALFP_INCLUDED markers.
 // It follows ALFP_PROGRESS (same as LeaderFinalizationThread) so it focuses on the epoch currently being finalized.
 func AlfpInclusionWatcherThread() {
@@ -137,7 +33,7 @@ func AlfpInclusionWatcherThread() {
 	var state *AlfpWatcherState
 
 	for {
-		epochId := loadFinalizationProgress()
+		epochId := loadAlfpProgress()
 
 		if epochId != lastEpochSeen || state == nil {
 			state = loadAlfpWatcherState(epochId)
@@ -168,16 +64,26 @@ func AlfpInclusionWatcherThread() {
 			continue
 		}
 
-		// Ensure we know the last block target for this anchor (catch-up limit).
-		target, ok := state.LastBlocksByAnchors[anchorIndex]
-		if !ok {
-			if stats, ok := fetchCatchUpTargetForAnchor(epochHandler, anchorIndex, client, rng); ok {
-				state.LastBlocksByAnchors[anchorIndex] = stats
-				persistAlfpWatcherState(state)
-			} else {
-				time.Sleep(200 * time.Millisecond)
+		// The last anchor in the registry (and, trivially, the single anchor in a
+		// 1-anchor setup) never rotates away, so it has no upper-bound "last block"
+		// determined by an AARP. We treat it as an unbounded segment: accept every
+		// AFP'd block and never advance past it within the epoch.
+		isLastAnchor := anchorIndex == len(globals.ANCHORS)-1
+
+		var target structures.ExecutionStats
+		if !isLastAnchor {
+			// Ensure we know the last block target for this anchor (catch-up limit).
+			cached, ok := state.LastBlocksByAnchors[anchorIndex]
+			if !ok {
+				if stats, ok := fetchCatchUpTargetForAnchor(epochHandler, anchorIndex, client, rng); ok {
+					state.LastBlocksByAnchors[anchorIndex] = stats
+					persistAlfpWatcherState(state)
+				} else {
+					time.Sleep(200 * time.Millisecond)
+				}
+				continue
 			}
-			continue
+			target = cached
 		}
 
 		currentExec := state.CurrentAnchorBlockIndexObserved
@@ -219,6 +125,9 @@ func AlfpInclusionWatcherThread() {
 
 		accepted := false
 		switch {
+		case isLastAnchor:
+			// No upper bound — acceptance is purely "this block has a valid AFP".
+			accepted = afpOk
 		case currentExec < target.Index:
 			accepted = afpOk
 		case currentExec == target.Index:
@@ -241,16 +150,14 @@ func AlfpInclusionWatcherThread() {
 			if !utils.VerifyAggregatedLeaderFinalizationProof(&proof, epochHandler) {
 				continue
 			}
-			marker := utils.AlfpInclusionMarker{
-				Hash:    proof.VotingStat.Hash,
-				BlockId: blockID,
-				Anchor:  anchor.Pubkey,
-			}
-			utils.StoreAlfpIncluded(marker, epochId, proof.Leader, proof.VotingStat.Index)
+			utils.StoreAlfpIncluded(epochId, proof.Leader)
 		}
 
 		// Advance scan cursor.
-		if currentExec < target.Index {
+		// For the last anchor we always stay on it within the epoch — there is no
+		// next anchor to advance to. The epoch transition itself (driven by
+		// loadAlfpProgress) is what moves us forward.
+		if isLastAnchor || currentExec < target.Index {
 			state.CurrentAnchorBlockIndexObserved = currentExec + 1
 			persistAlfpWatcherState(state)
 			continue
@@ -261,4 +168,103 @@ func AlfpInclusionWatcherThread() {
 		state.CurrentAnchorBlockIndexObserved = 0
 		persistAlfpWatcherState(state)
 	}
+}
+
+func newAlfpWatcherState(epochId int) *AlfpWatcherState {
+	return &AlfpWatcherState{
+		EpochId:                         epochId,
+		CurrentAnchorAssumption:         0,
+		CurrentAnchorBlockIndexObserved: 0,
+		LastBlocksByAnchors:             make(map[int]structures.ExecutionStats),
+	}
+}
+
+func alfpWatcherStateKey(epochId int) []byte {
+	return []byte(fmt.Sprintf("ALFP_WATCHER_STATE:%d", epochId))
+}
+
+func loadAlfpWatcherState(epochId int) *AlfpWatcherState {
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(alfpWatcherStateKey(epochId), nil)
+	if err != nil || len(raw) == 0 {
+		return newAlfpWatcherState(epochId)
+	}
+	var st AlfpWatcherState
+	if json.Unmarshal(raw, &st) != nil {
+		return newAlfpWatcherState(epochId)
+	}
+	if st.LastBlocksByAnchors == nil {
+		st.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
+	}
+	if st.EpochId != epochId {
+		return newAlfpWatcherState(epochId)
+	}
+	if st.CurrentAnchorAssumption < 0 {
+		st.CurrentAnchorAssumption = 0
+	}
+	if st.CurrentAnchorBlockIndexObserved < 0 {
+		st.CurrentAnchorBlockIndexObserved = 0
+	}
+	return &st
+}
+
+func persistAlfpWatcherState(st *AlfpWatcherState) {
+	if st == nil {
+		return
+	}
+	if st.LastBlocksByAnchors == nil {
+		st.LastBlocksByAnchors = make(map[int]structures.ExecutionStats)
+	}
+	if payload, err := json.Marshal(st); err == nil {
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(alfpWatcherStateKey(st.EpochId), payload, nil)
+	}
+}
+
+func loadEpochSnapshotForWatcher(epochId int) *structures.EpochDataSnapshot {
+	return utils.GetEpochSnapshot(epochId)
+}
+
+func allLocalAlfpsIncluded(epochHandler *structures.EpochDataHandler) bool {
+	if epochHandler == nil {
+		return false
+	}
+	for _, leader := range epochHandler.LeadersSequence {
+		if !utils.HasAnyAlfpIncluded(epochHandler.Id, leader) {
+			return false
+		}
+	}
+	return true
+}
+
+func fetchCatchUpTargetForAnchor(epochHandler *structures.EpochDataHandler, anchorIndex int, client *http.Client, rng *rand.Rand) (structures.ExecutionStats, bool) {
+	if epochHandler == nil || client == nil || rng == nil {
+		return structures.ExecutionStats{}, false
+	}
+	if anchorIndex < 0 || anchorIndex >= len(globals.ANCHORS)-1 {
+		// The last anchor in the registry (or the only anchor in a single-anchor setup)
+		// never rotates away, so /sequence_alignment_data has nothing to return for it.
+		// Callers must short-circuit this case before reaching the network round-trip.
+		return structures.ExecutionStats{}, false
+	}
+	targetAnchor := globals.ANCHORS[rng.Intn(len(globals.ANCHORS))]
+	url := fmt.Sprintf("%s/sequence_alignment_data/%d/%d", targetAnchor.AnchorUrl, epochHandler.Id, anchorIndex)
+	resp, err := client.Get(url)
+	if err != nil {
+		return structures.ExecutionStats{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return structures.ExecutionStats{}, false
+	}
+
+	dec := json.NewDecoder(io.LimitReader(resp.Body, 10<<20))
+	var alignmentData SequenceAlignmentDataResponse
+	if err := dec.Decode(&alignmentData); err != nil {
+		return structures.ExecutionStats{}, false
+	}
+
+	earliestRotationStats, ok := processSequenceAlignmentDataResponse(&alignmentData, anchorIndex, epochHandler)
+	if !ok {
+		return structures.ExecutionStats{}, false
+	}
+	return earliestRotationStats, true
 }

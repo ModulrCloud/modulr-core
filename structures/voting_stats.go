@@ -1,5 +1,7 @@
 package structures
 
+import "github.com/modulrcloud/modulr-core/constants"
+
 type VotingStat struct {
 	Index int                         `json:"index"`
 	Hash  string                      `json:"hash"`
@@ -7,11 +9,9 @@ type VotingStat struct {
 }
 
 func NewLeaderVotingStatTemplate() VotingStat {
-
 	return VotingStat{
 		Index: -1,
-		Hash:  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Hash:  constants.ZeroHash,
 		Afp:   AggregatedFinalizationProof{},
 	}
-
 }

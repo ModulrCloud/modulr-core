@@ -67,8 +67,8 @@ func TestSequenceAlignmentWatcherConvergesOnRotationHeight(t *testing.T) {
 		return scenario.blockMap[blockID]
 	}
 
-	metaA := structures.ExecutionThreadMetadataHandler{SequenceAlignmentData: structures.AlignmentDataHandler{CurrentAnchorAssumption: 0, LastBlocksByLeaders: make(map[string]structures.ExecutionStats), LastBlocksByAnchors: make(map[int]structures.ExecutionStats)}}
-	metaB := structures.ExecutionThreadMetadataHandler{SequenceAlignmentData: structures.AlignmentDataHandler{CurrentAnchorAssumption: 0, LastBlocksByLeaders: make(map[string]structures.ExecutionStats), LastBlocksByAnchors: make(map[int]structures.ExecutionStats)}}
+	metaA := structures.FinalizerThreadMetadataHandler{SequenceAlignmentData: structures.AlignmentDataHandler{CurrentAnchorAssumption: 0, LastBlocksByLeaders: make(map[string]structures.ExecutionStats), LastBlocksByAnchors: make(map[int]structures.ExecutionStats)}}
+	metaB := structures.FinalizerThreadMetadataHandler{SequenceAlignmentData: structures.AlignmentDataHandler{CurrentAnchorAssumption: 0, LastBlocksByLeaders: make(map[string]structures.ExecutionStats), LastBlocksByAnchors: make(map[int]structures.ExecutionStats)}}
 
 	// Node A receives a higher anchor response, Node B receives a nearer response; both should still agree on the last block for anchor 0.
 	for idx, resp := range []*threads.SequenceAlignmentDataResponse{&scenario.responseA} {
@@ -449,7 +449,7 @@ func buildAggregatedAnchorRotationProof(anchorKeys []cryptography.Ed25519Box, ep
 
 type testAnchorBlockFetcher func(blockID string) *websocket_pack.WsAnchorBlockWithAfpResponse
 
-func processSequenceAlignmentDataResponseForTest(alignmentData *threads.SequenceAlignmentDataResponse, anchorIndex int, epochHandler *structures.EpochDataHandler, metadata *structures.ExecutionThreadMetadataHandler, fetcher testAnchorBlockFetcher) bool {
+func processSequenceAlignmentDataResponseForTest(alignmentData *threads.SequenceAlignmentDataResponse, anchorIndex int, epochHandler *structures.EpochDataHandler, metadata *structures.FinalizerThreadMetadataHandler, fetcher testAnchorBlockFetcher) bool {
 
 	if alignmentData == nil || alignmentData.Afp == nil || metadata == nil || epochHandler == nil || fetcher == nil {
 		return false
@@ -615,7 +615,7 @@ func findEarliestAnchorRotationProofForTest(currentAnchor, foundInAnchorIndex, b
 	return structures.ExecutionStats{}, false
 }
 
-func simulateSequenceAlignmentThreadForTest(t *testing.T, metadata *structures.ExecutionThreadMetadataHandler, epochHandler structures.EpochDataHandler, fetcher testAnchorBlockFetcher, maxSteps int) {
+func simulateSequenceAlignmentThreadForTest(t *testing.T, metadata *structures.FinalizerThreadMetadataHandler, epochHandler structures.EpochDataHandler, fetcher testAnchorBlockFetcher, maxSteps int) {
 
 	t.Helper()
 

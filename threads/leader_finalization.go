@@ -1,3 +1,4 @@
+// Thread to collect and broadcast ALFP - aggregated leader finalization proof to the anchors
 package threads
 
 import (
@@ -47,59 +48,20 @@ var (
 	ALFP_PROCESS_METADATA *AlfpProcessMetadata
 )
 
-// GetLeaderFinalizationWsConnectionCount returns the number of non-nil WS connections
-// currently maintained by LeaderFinalizationThread for the given epoch.
-// Returns 0 if the thread is not processing this epoch.
-func GetLeaderFinalizationWsConnectionCount(epochId int) int {
-	ALFP_GRABBING_MUTEX.Lock()
-	defer ALFP_GRABBING_MUTEX.Unlock()
-
-	if ALFP_PROCESS_METADATA == nil || ALFP_PROCESS_METADATA.EpochId != epochId {
-		return 0
-	}
-	wsCount := 0
-	for _, conn := range ALFP_PROCESS_METADATA.WsConns {
-		if conn != nil {
-			wsCount++
-		}
-	}
-	return wsCount
-}
-
-// GetLeaderFinalizationLiveCache returns a snapshot of in-memory collection progress
-// for the (epochId, leader) pair.
-// ok=false if there is no active metadata/caches for this epoch or leader.
-func GetLeaderFinalizationLiveCache(epochId int, leader string) (skipDataIndex int, skipDataHash string, proofsCollected int, ok bool) {
-	ALFP_GRABBING_MUTEX.Lock()
-	defer ALFP_GRABBING_MUTEX.Unlock()
-
-	if ALFP_PROCESS_METADATA == nil || ALFP_PROCESS_METADATA.EpochId != epochId {
-		return 0, "", 0, false
-	}
-	key := fmt.Sprintf("%d:%s", epochId, leader)
-	cache, exists := ALFP_PROCESS_METADATA.Caches[key]
-	if !exists || cache == nil {
-		return 0, "", 0, false
-	}
-	return cache.SkipData.Index, cache.SkipData.Hash, len(cache.Proofs), true
-}
-
 func LeaderFinalizationThread() {
-
-	processingEpochIndex := loadFinalizationProgress()
+	processingEpochIndex := loadAlfpProgress()
 
 	for {
-
-		// If execution already advanced beyond our current ALFP progress,
+		// If the finalizer/sequencing layer already advanced beyond our current ALFP progress,
 		// there is no point processing older epochs here. Fast-forward.
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-		execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+		finalizerEpochId := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id
+		handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-		if execEpochId > processingEpochIndex {
+		if finalizerEpochId > processingEpochIndex {
 			currentEpoch := processingEpochIndex
-			processingEpochIndex = execEpochId
-			persistFinalizationProgress(processingEpochIndex)
+			processingEpochIndex = finalizerEpochId
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -114,10 +76,10 @@ func LeaderFinalizationThread() {
 
 		processingHandler := &snapshot.EpochDataHandler
 
-		if !weAreInEpochQuorum(processingHandler) {
+		if !iAmQuorumMember(processingHandler) {
 			currentEpoch := processingEpochIndex
 			processingEpochIndex++
-			persistFinalizationProgress(processingEpochIndex)
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -128,14 +90,14 @@ func LeaderFinalizationThread() {
 
 		networkParams := snapshot.NetworkParameters
 
-		for _, leaderIndex := range leadersReadyForAlfp(processingHandler, &networkParams) {
+		for _, leaderIndex := range getLeadersWithNoFoundAlfp(processingHandler, &networkParams) {
 			tryCollectLeaderFinalizationProofs(processingHandler, leaderIndex, majority, state)
 		}
 
 		if allLeaderFinalizationProofsCollected(processingHandler) {
 			currentEpoch := processingEpochIndex
 			processingEpochIndex++
-			persistFinalizationProgress(processingEpochIndex)
+			persistAlfpProgress(processingEpochIndex)
 			cleanupLeaderFinalizationState(currentEpoch)
 		}
 
@@ -144,7 +106,6 @@ func LeaderFinalizationThread() {
 }
 
 func ensureAlfpProcessMetadata(epochHandler *structures.EpochDataHandler) *AlfpProcessMetadata {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	defer ALFP_GRABBING_MUTEX.Unlock()
 
@@ -178,7 +139,6 @@ func ensureAlfpProcessMetadata(epochHandler *structures.EpochDataHandler) *AlfpP
 }
 
 func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	if ALFP_PROCESS_METADATA != nil &&
 		ALFP_PROCESS_METADATA.EpochId == epochId &&
@@ -189,34 +149,27 @@ func getOrLoadEpochSnapshot(epochId int) *structures.EpochDataSnapshot {
 	}
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	key := []byte("EPOCH_HANDLER:" + strconv.Itoa(epochId))
 	// EPOCH_HANDLER snapshots are stored in APPROVEMENT_THREAD_METADATA DB
 	// to be committed atomically with AT updates.
-	raw, err := databases.APPROVEMENT_THREAD_METADATA.Get(key, nil)
-	if err != nil {
-		return nil
-	}
-
-	var loaded structures.EpochDataSnapshot
-	if json.Unmarshal(raw, &loaded) != nil {
+	loaded := utils.GetEpochSnapshot(epochId)
+	if loaded == nil {
 		return nil
 	}
 
 	// Keep snapshot in the current epoch state (single-epoch processing).
 	ALFP_GRABBING_MUTEX.Lock()
 	if ALFP_PROCESS_METADATA != nil && ALFP_PROCESS_METADATA.EpochId == epochId {
-		ALFP_PROCESS_METADATA.Snapshot = &loaded
+		ALFP_PROCESS_METADATA.Snapshot = loaded
 		ALFP_GRABBING_MUTEX.Unlock()
 		return ALFP_PROCESS_METADATA.Snapshot
 	}
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	return &loaded
+	return loaded
 }
 
-func loadFinalizationProgress() int {
-
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get([]byte("ALFP_PROGRESS"), nil); err == nil {
+func loadAlfpProgress() int {
+	if raw, err := databases.FINALIZATION_THREAD_METADATA.Get([]byte(constants.DBKeyAlfpProgress), nil); err == nil {
 		if idx, convErr := strconv.Atoi(string(raw)); convErr == nil {
 			return idx
 		}
@@ -225,13 +178,11 @@ func loadFinalizationProgress() int {
 	return 0
 }
 
-func persistFinalizationProgress(epochId int) {
-
-	_ = databases.FINALIZATION_VOTING_STATS.Put([]byte("ALFP_PROGRESS"), []byte(strconv.Itoa(epochId)), nil)
+func persistAlfpProgress(epochId int) {
+	_ = databases.FINALIZATION_THREAD_METADATA.Put([]byte(constants.DBKeyAlfpProgress), []byte(strconv.Itoa(epochId)), nil)
 }
 
 func cleanupLeaderFinalizationState(epochId int) {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	defer ALFP_GRABBING_MUTEX.Unlock()
 
@@ -248,8 +199,7 @@ func cleanupLeaderFinalizationState(epochId int) {
 	ALFP_PROCESS_METADATA = nil
 }
 
-func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
-
+func iAmQuorumMember(epochHandler *structures.EpochDataHandler) bool {
 	for _, quorumMember := range epochHandler.Quorum {
 		if quorumMember == globals.CONFIGURATION.PublicKey {
 			return true
@@ -259,12 +209,10 @@ func weAreInEpochQuorum(epochHandler *structures.EpochDataHandler) bool {
 	return false
 }
 
-func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters) []int {
-
+func getLeadersWithNoFoundAlfp(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters) []int {
 	ready := make([]int, 0)
 
 	for idx := range epochHandler.LeadersSequence {
-
 		leader := epochHandler.LeadersSequence[idx]
 		if utils.HasAnyAlfpIncluded(epochHandler.Id, leader) {
 			continue
@@ -285,17 +233,15 @@ func leadersReadyForAlfp(epochHandler *structures.EpochDataHandler, networkParam
 	return ready
 }
 
-func leaderHasAlfp(epochId int, leader string) bool {
-
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
-	_, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+func haveInfoAboutAlfpLocally(epochId int, leader string) bool {
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	return err == nil
 }
 
 func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structures.AggregatedLeaderFinalizationProof {
-
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", epochId, leader))
-	raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil)
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, epochId, leader))
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
 	if err != nil {
 		return nil
 	}
@@ -308,28 +254,29 @@ func loadAggregatedLeaderFinalizationProof(epochId int, leader string) *structur
 	return &proof
 }
 
+// In case we are able to find the info about last block by leader in the SequenceAlignmentData,
+// we can consider that network quorum has already generated the ALFP for this leader.
 func leaderFinalizationConfirmedByAlignment(epochId int, leader string) bool {
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	defer handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	if handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
+	if handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id != epochId {
 		return false
 	}
 
-	_, exists := handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
+	_, exists := handlers.FINALIZER_THREAD_METADATA.Handler.SequenceAlignmentData.LastBlocksByLeaders[leader]
 	return exists
 }
 
 func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHandler) bool {
+	// If the finalizer/sequencing layer already advanced beyond this epoch, it means
+	// the canonical sequence for this epoch has been fully resolved. No point to keep
+	// ALFP thread blocked on older epoch.
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RLock()
+	finalizerEpochId := handlers.FINALIZER_THREAD_METADATA.Handler.EpochDataHandler.Id
+	handlers.FINALIZER_THREAD_METADATA.RWMutex.RUnlock()
 
-	// If execution already advanced beyond this epoch, it means ET has all the data it needs for it.
-	// No point to keep ALFP thread blocked on older epoch.
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	execEpochId := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	if execEpochId > epochHandler.Id {
+	if finalizerEpochId > epochHandler.Id {
 		return true
 	}
 
@@ -340,7 +287,7 @@ func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHand
 		}
 
 		// Fallback: if execution is on this epoch and alignment already confirmed, allow progress.
-		if executionMetadataMatches(epochHandler.Id) && leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
+		if leaderFinalizationConfirmedByAlignment(epochHandler.Id, leader) {
 			continue
 		}
 
@@ -351,22 +298,12 @@ func allLeaderFinalizationProofsCollected(epochHandler *structures.EpochDataHand
 	return true
 }
 
-func executionMetadataMatches(epochId int) bool {
-
-	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	defer handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
-
-	return handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.Id == epochId
-}
-
 func leaderTimeIsOut(epochHandler *structures.EpochDataHandler, networkParams *structures.NetworkParameters, leaderIndex int) bool {
-
 	leadershipTimeframe := networkParams.LeadershipDuration
 	return utils.GetUTCTimestampInMilliSeconds() >= int64(epochHandler.StartTimestamp)+(int64(leaderIndex)+1)*leadershipTimeframe
 }
 
 func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandler, leaderIndex, majority int, state *AlfpProcessMetadata) {
-
 	leaderPubKey := epochHandler.LeadersSequence[leaderIndex]
 	epochFullID := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
 
@@ -379,7 +316,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 
 	cache := ensureLeaderFinalizationCache(state, epochHandler.Id, leaderPubKey)
 
-	if leaderHasAlfp(epochHandler.Id, leaderPubKey) || state.Waiter == nil {
+	if haveInfoAboutAlfpLocally(epochHandler.Id, leaderPubKey) || state.Waiter == nil {
 		if aggregated := loadAggregatedLeaderFinalizationProof(epochHandler.Id, leaderPubKey); aggregated != nil && !utils.HasAnyAlfpIncluded(epochHandler.Id, leaderPubKey) && shouldBroadcastLeaderFinalization(cache) {
 			markLeaderFinalizationBroadcast(cache)
 			sendAggregatedLeaderFinalizationProofToAnchors(aggregated)
@@ -440,7 +377,7 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 			}
 
 			// Verify signature
-			dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(cacheSnapshot.Index), cacheSnapshot.Hash, epochFullID}, ":")
+			dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, leaderPubKey, strconv.Itoa(cacheSnapshot.Index), cacheSnapshot.Hash, epochFullID}, ":")
 			return cryptography.VerifySignature(dataToVerify, response.Voter, response.Sig)
 
 		case "UPGRADE":
@@ -486,7 +423,6 @@ func tryCollectLeaderFinalizationProofs(epochHandler *structures.EpochDataHandle
 }
 
 func ensureLeaderFinalizationCache(state *AlfpProcessMetadata, epochId int, leaderPubKey string) *LeaderFinalizationCache {
-
 	key := fmt.Sprintf("%d:%s", epochId, leaderPubKey)
 
 	ALFP_GRABBING_MUTEX.Lock()
@@ -507,11 +443,10 @@ func ensureLeaderFinalizationCache(state *AlfpProcessMetadata, epochId int, lead
 }
 
 func loadLeaderSkipData(epochId int, leaderPubKey string) structures.VotingStat {
-
 	skipData := structures.NewLeaderVotingStatTemplate()
 	key := []byte(fmt.Sprintf("%d:%s", epochId, leaderPubKey))
 
-	if raw, err := databases.FINALIZATION_VOTING_STATS.Get(key, nil); err == nil {
+	if raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil); err == nil {
 		_ = json.Unmarshal(raw, &skipData)
 	}
 
@@ -519,7 +454,6 @@ func loadLeaderSkipData(epochId int, leaderPubKey string) structures.VotingStat 
 }
 
 func handleLeaderFinalizationResponse(raw []byte, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *AlfpProcessMetadata) {
-
 	var statusHolder map[string]any
 
 	if err := json.Unmarshal(raw, &statusHolder); err != nil {
@@ -546,7 +480,6 @@ func handleLeaderFinalizationResponse(raw []byte, epochHandler *structures.Epoch
 }
 
 func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProofResponseOk, epochHandler *structures.EpochDataHandler, leaderPubKey, epochFullID string, state *AlfpProcessMetadata) {
-
 	if response.ForLeaderPubkey != leaderPubKey {
 		return
 	}
@@ -557,7 +490,7 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 	skipData := cache.SkipData
 	ALFP_GRABBING_MUTEX.Unlock()
 
-	dataToVerify := strings.Join([]string{"LEADER_FINALIZATION_PROOF", leaderPubKey, strconv.Itoa(skipData.Index), skipData.Hash, epochFullID}, ":")
+	dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, leaderPubKey, strconv.Itoa(skipData.Index), skipData.Hash, epochFullID}, ":")
 
 	quorumMap := make(map[string]bool)
 	for _, pk := range epochHandler.Quorum {
@@ -574,7 +507,6 @@ func handleLeaderFinalizationOk(response websocket_pack.WsLeaderFinalizationProo
 }
 
 func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizationProofResponseUpgrade, epochHandler *structures.EpochDataHandler, leaderPubKey string, state *AlfpProcessMetadata) {
-
 	if response.ForLeaderPubkey != leaderPubKey {
 		return
 	}
@@ -601,18 +533,16 @@ func handleLeaderFinalizationUpgrade(response websocket_pack.WsLeaderFinalizatio
 			leaderPubKey,
 			epochHandler.Id,
 			prevIndex,
-			shortHash8(prevHash),
+			utils.ShortHash(prevHash),
 			response.SkipData.Index,
-			shortHash8(response.SkipData.Hash),
+			utils.ShortHash(response.SkipData.Hash),
 		),
 		utils.CYAN_COLOR,
 	)
 }
 
 func validateUpgradePayload(response websocket_pack.WsLeaderFinalizationProofResponseUpgrade, epochHandler *structures.EpochDataHandler, leaderPubKey string) bool {
-
 	if response.SkipData.Index >= 0 {
-
 		parts := strings.Split(response.SkipData.Afp.BlockId, ":")
 
 		if len(parts) != 3 {
@@ -637,7 +567,6 @@ func validateUpgradePayload(response websocket_pack.WsLeaderFinalizationProofRes
 }
 
 func persistAggregatedLeaderFinalizationProof(cache *LeaderFinalizationCache, epochId int, leaderPubKey string) {
-
 	ALFP_GRABBING_MUTEX.Lock()
 
 	// Capture values for logging (log outside the mutex).
@@ -691,14 +620,13 @@ func persistAggregatedLeaderFinalizationProofDirect(aggregated *structures.Aggre
 		return
 	}
 
-	key := []byte(fmt.Sprintf("ALFP:%d:%s", aggregated.EpochIndex, aggregated.Leader))
+	key := []byte(fmt.Sprintf("%s%d:%s", constants.DBKeyPrefixAlfp, aggregated.EpochIndex, aggregated.Leader))
 	if value, err := json.Marshal(aggregated); err == nil {
-		_ = databases.FINALIZATION_VOTING_STATS.Put(key, value, nil)
+		_ = databases.FINALIZATION_THREAD_METADATA.Put(key, value, nil)
 	}
 }
 
 func shouldBroadcastLeaderFinalization(cache *LeaderFinalizationCache) bool {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	defer ALFP_GRABBING_MUTEX.Unlock()
 
@@ -706,14 +634,12 @@ func shouldBroadcastLeaderFinalization(cache *LeaderFinalizationCache) bool {
 }
 
 func markLeaderFinalizationBroadcast(cache *LeaderFinalizationCache) {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	cache.LastBroadcasted = time.Now()
 	ALFP_GRABBING_MUTEX.Unlock()
 }
 
 func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.AggregatedLeaderFinalizationProof) {
-
 	if aggregated == nil {
 		return
 	}
@@ -730,9 +656,7 @@ func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.Aggre
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for _, anchor := range globals.ANCHORS {
-
 		go func(anchor structures.Anchor) {
-
 			url := fmt.Sprintf("%s/accept_aggregated_leader_finalization_proof", strings.TrimRight(anchor.AnchorUrl, "/"))
 			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 			if err != nil {
@@ -781,8 +705,8 @@ func sendAggregatedLeaderFinalizationProofToAnchors(aggregated *structures.Aggre
 	}
 }
 
+// In case we are not able to find or create ALFP - try to find it in network - maybe it's already created by other network member
 func requestLeaderFinalizationFromPoD(epochHandler *structures.EpochDataHandler, leaderPubKey string, cache *LeaderFinalizationCache) {
-
 	ALFP_GRABBING_MUTEX.Lock()
 	shouldRequest := time.Since(cache.LastPodFetch) > time.Second
 	if shouldRequest {
@@ -806,11 +730,4 @@ func requestLeaderFinalizationFromPoD(epochHandler *structures.EpochDataHandler,
 
 		persistAggregatedLeaderFinalizationProofDirect(aggregated)
 	}()
-}
-
-func shortHash8(h string) string {
-	if len(h) > 8 {
-		return h[:8]
-	}
-	return h
 }

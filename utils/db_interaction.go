@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
@@ -15,7 +16,6 @@ import (
 )
 
 func OpenDb(dbName string) *leveldb.DB {
-
 	db, err := leveldb.OpenFile(globals.CHAINDATA_PATH+"/DATABASES/"+dbName, nil)
 	if err != nil {
 		panic("Impossible to open db : " + dbName + " =>" + err.Error())
@@ -24,14 +24,13 @@ func OpenDb(dbName string) *leveldb.DB {
 }
 
 func GetAccountFromExecThreadState(accountId string) *structures.Account {
-
 	// If account was already touched/modified in this block, return the in-memory object.
 	if val, ok := handlers.EXECUTION_THREAD_METADATA.AccountsTouched[accountId]; ok && val != nil {
 		TouchExecAccountCache(accountId)
 		return val
 	}
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.AccountsCache[accountId]; ok && val != nil {
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.AccountsCache[accountId]; ok && val != nil {
 		TouchExecAccountCache(accountId)
 		MarkExecAccountTouched(accountId, val)
 		return val
@@ -44,18 +43,16 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 	}
 
 	if err == leveldb.ErrNotFound {
-
 		acc := &structures.Account{}
 		PutExecAccountCache(accountId, acc)
 		MarkExecAccountTouched(accountId, acc)
-		if handlers.EXECUTION_THREAD_METADATA.Handler.Statistics != nil {
-			handlers.EXECUTION_THREAD_METADATA.Handler.Statistics.AccountsNumber++
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.AccountsNumber++
 		}
-		if handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics != nil {
-			handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics.AccountsNumber++
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics != nil {
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochStatistics.AccountsNumber++
 		}
 		return acc
-
 	}
 
 	var account structures.Account
@@ -68,7 +65,6 @@ func GetAccountFromExecThreadState(accountId string) *structures.Account {
 	PutExecAccountCache(accountId, acc)
 	MarkExecAccountTouched(accountId, acc)
 	return acc
-
 }
 
 func CountStateAccounts() uint64 {
@@ -111,7 +107,7 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 		return val
 	}
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 		return val
 	}
@@ -141,7 +137,7 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsTouched[validatorStorageKey]; ok && val != nil {
 		return val
 	}
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok {
 		return val
 	}
 
@@ -153,7 +149,6 @@ func GetValidatorFromApprovementThreadState(validatorPubkey string) *structures.
 // GetValidatorFromApprovementThreadStateUnderLock reads/writes the AT validators cache.
 // Caller MUST already hold handlers.APPROVEMENT_THREAD_METADATA.RWMutex in write mode (Lock).
 func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *structures.ValidatorStorage {
-
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	// Prefer touched value if already accessed/modified in the current AT batch.
@@ -162,7 +157,7 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 		return val
 	}
 
-	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+	if val, ok := handlers.APPROVEMENT_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
 		TouchApprovementValidatorCache(validatorStorageKey)
 		MarkApprovementValidatorTouched(validatorStorageKey, val)
 		return val
@@ -188,11 +183,9 @@ func GetValidatorFromApprovementThreadStateUnderLock(validatorPubkey string) *st
 	PutApprovementValidatorCache(validatorStorageKey, vs)
 	MarkApprovementValidatorTouched(validatorStorageKey, vs)
 	return vs
-
 }
 
 func GetValidatorFromExecThreadState(validatorPubkey string) *structures.ValidatorStorage {
-
 	validatorStorageKey := constants.DBKeyPrefixValidatorStorage + validatorPubkey
 
 	// Prefer touched value if already accessed/modified in the current block/batch.
@@ -201,7 +194,7 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 		return val
 	}
 
-	if val, ok := handlers.EXECUTION_THREAD_METADATA.Handler.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
+	if val, ok := handlers.EXECUTION_THREAD_METADATA.ValidatorsStoragesCache[validatorStorageKey]; ok && val != nil {
 		TouchExecValidatorCache(validatorStorageKey)
 		MarkExecValidatorTouched(validatorStorageKey, val)
 		return val
@@ -227,5 +220,48 @@ func GetValidatorFromExecThreadState(validatorPubkey string) *structures.Validat
 	PutExecValidatorCache(validatorStorageKey, vs)
 	MarkExecValidatorTouched(validatorStorageKey, vs)
 	return vs
+}
 
+// LoadAggregatedHeightProofInfo reads an AggregatedHeightProof from FINALIZATION_THREAD_METADATA
+// and returns a summary suitable for the recovery API.
+func LoadAggregatedHeightProofInfo(absoluteHeight int) *structures.AggregatedHeightProofInfo {
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedHeightProof, absoluteHeight))
+
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
+	if err != nil {
+		return nil
+	}
+
+	var proof structures.AggregatedHeightProof
+	if json.Unmarshal(raw, &proof) != nil {
+		return nil
+	}
+
+	return &structures.AggregatedHeightProofInfo{
+		AbsoluteHeight: proof.AbsoluteHeight,
+		BlockId:        proof.BlockId,
+		BlockHash:      proof.BlockHash,
+		EpochId:        proof.EpochId,
+	}
+}
+
+func StoreAlfpIncluded(epochId int, leader string) {
+	if leader == "" {
+		return
+	}
+
+	key := []byte(fmt.Sprintf("ALFP_INCLUDED:%d:%s", epochId, leader))
+
+	_ = databases.FINALIZATION_THREAD_METADATA.Put(key, []byte{1}, nil)
+}
+
+func HasAnyAlfpIncluded(epochId int, leader string) bool {
+	if leader == "" {
+		return false
+	}
+
+	key := []byte(fmt.Sprintf("ALFP_INCLUDED:%d:%s", epochId, leader))
+
+	_, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
+	return err == nil
 }

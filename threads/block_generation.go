@@ -1,3 +1,4 @@
+// Thread to generate new blocks using transactions from the mempool
 package threads
 
 import (
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -29,9 +31,7 @@ const (
 )
 
 func BlockGenerationThread() {
-
 	for {
-
 		// Don't hold AT lock while generating blocks (generation may include network I/O for delayed tx quorum signatures).
 		handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 		blockTime := handlers.APPROVEMENT_THREAD_METADATA.Handler.NetworkParameters.BlockTime
@@ -40,13 +40,10 @@ func BlockGenerationThread() {
 		generateBlock()
 
 		time.Sleep(time.Duration(blockTime) * time.Millisecond)
-
 	}
-
 }
 
 func getTransactionsFromMempool(limit int) []structures.Transaction {
-
 	globals.MEMPOOL.Mutex.Lock()
 
 	defer globals.MEMPOOL.Mutex.Unlock()
@@ -54,9 +51,7 @@ func getTransactionsFromMempool(limit int) []structures.Transaction {
 	mempoolSize := len(globals.MEMPOOL.Slice)
 
 	if limit > mempoolSize {
-
 		limit = mempoolSize
-
 	}
 
 	transactions := make([]structures.Transaction, limit)
@@ -93,7 +88,6 @@ func compactMempoolIfNeeded() {
 }
 
 func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHandler, indexOfLeader int) structures.DelayedTransactionsBatch {
-
 	prevEpochIndex := epochSnapshot.Id - 2
 	majority := utils.GetQuorumMajority(&epochSnapshot)
 
@@ -107,7 +101,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 		return batch
 	}
 
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", prevEpochIndex)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", prevEpochIndex)
 	rawDelayedTxs, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 	if err != nil {
 		return batch
@@ -122,7 +116,7 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 		return batch
 	}
 
-	dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(prevEpochIndex) + ":" + utils.Blake3(string(rawDelayedTxs))
 
 	proofs := map[string]string{
 		globals.CONFIGURATION.PublicKey: cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned),
@@ -215,11 +209,9 @@ func getBatchOfApprovedDelayedTxsByQuorum(epochSnapshot structures.EpochDataHand
 	batch.Proofs = proofs
 
 	return batch
-
 }
 
 func generateBlock() {
-
 	// Snapshot AT quickly; do heavy work without holding AT lock.
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RLock()
 	atSnapshot := handlers.APPROVEMENT_THREAD_METADATA.Handler
@@ -228,9 +220,7 @@ func generateBlock() {
 	handlers.APPROVEMENT_THREAD_METADATA.RWMutex.RUnlock()
 
 	if !utils.EpochStillFresh(&atSnapshot) {
-
 		return
-
 	}
 
 	epochFullID := epochSnapshot.Hash + "#" + strconv.Itoa(epochSnapshot.Id)
@@ -248,23 +238,20 @@ func generateBlock() {
 	shouldRotateEpochOnGenerationThread := handlers.GENERATION_THREAD_METADATA.EpochFullId != epochFullID
 
 	if shouldGenerateBlocks || shouldRotateEpochOnGenerationThread {
-
 		PROOFS_GRABBER_MUTEX.RUnlock()
 
 		// Check if <epochFullID> is the same in APPROVEMENT_THREAD and in GENERATION_THREAD
 
 		if shouldRotateEpochOnGenerationThread {
-
 			// Update the index & hash of epoch (by assigning new epoch full ID)
 
 			handlers.GENERATION_THREAD_METADATA.EpochFullId = epochFullID
 
 			// Nullish the index & hash in generation thread for new epoch
 
-			handlers.GENERATION_THREAD_METADATA.PrevHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+			handlers.GENERATION_THREAD_METADATA.PrevHash = constants.ZeroHash
 
 			handlers.GENERATION_THREAD_METADATA.NextIndex = 0
-
 		}
 
 		// Safe "if" branch to prevent unnecessary blocks generation
@@ -293,35 +280,25 @@ func generateBlock() {
 		utils.LogWithTime("New block generated "+blockID+" (txs: "+strconv.Itoa(len(blockCandidate.Transactions))+", hash: "+blockHash[:8]+"...)", utils.CYAN_COLOR)
 
 		if blockBytes, serializeErr := json.Marshal(blockCandidate); serializeErr == nil {
-
 			handlers.GENERATION_THREAD_METADATA.PrevHash = blockHash
 
 			handlers.GENERATION_THREAD_METADATA.NextIndex++
 
 			if gtBytes, serializeErr2 := json.Marshal(handlers.GENERATION_THREAD_METADATA); serializeErr2 == nil {
-
 				// Store block locally
 
 				blockDbAtomicBatch.Put([]byte(blockID), blockBytes)
 
 				// Update the GENERATION_THREAD after all
 
-				blockDbAtomicBatch.Put([]byte("GT"), gtBytes)
+				blockDbAtomicBatch.Put([]byte(constants.DBKeyGenerationThreadMetadata), gtBytes)
 
 				if err := databases.BLOCKS.Write(blockDbAtomicBatch, nil); err != nil {
-
 					panic("Can't store GT and block candidate")
-
 				}
-
 			}
-
 		}
-
 	} else {
-
 		PROOFS_GRABBER_MUTEX.RUnlock()
-
 	}
-
 }

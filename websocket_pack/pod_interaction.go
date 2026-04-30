@@ -54,3 +54,88 @@ func GetAggregatedLeaderFinalizationProofFromPoD(epochIndex int, leader string) 
 	}
 	return nil
 }
+
+func SendAggregatedHeightProofToPoD(proof structures.AggregatedHeightProof) {
+	req := WsAggregatedHeightProofStoreRequest{Route: constants.WsRouteAcceptAggregatedHeightProof, Proof: proof}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedHeightProof(proof.AbsoluteHeight), reqBytes)
+	}
+}
+
+func GetAggregatedHeightProofFromPoD(absoluteHeight int) *structures.AggregatedHeightProof {
+	req := WsAggregatedHeightProofGetRequest{Route: constants.WsRouteGetAggregatedHeightProofFromPoD, AbsoluteHeight: absoluteHeight}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsAggregatedHeightProofGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Proof
+			}
+		}
+	}
+	return nil
+}
+
+func SendAggregatedEpochRotationProofToPoD(proof structures.AggregatedEpochRotationProof) {
+	req := WsAggregatedEpochRotationProofStoreRequest{Route: constants.WsRouteAcceptAggregatedEpochRotationProof, Proof: proof}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedEpochRotationProof(proof.EpochId), reqBytes)
+	}
+}
+
+func GetAggregatedEpochRotationProofFromPoD(epochId int) *structures.AggregatedEpochRotationProof {
+	req := WsAggregatedEpochRotationProofGetRequest{Route: constants.WsRouteGetAggregatedEpochRotationProofFromPoD, EpochId: epochId}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsAggregatedEpochRotationProofGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Proof
+			}
+		}
+	}
+	return nil
+}
+
+func SendAggregatedAnchorEpochAckProofToPoD(proof structures.AggregatedAnchorEpochAckProof) {
+	req := WsAcceptAggregatedAnchorEpochAckProofRequest{Route: constants.WsRouteAcceptAggregatedAnchorEpochAckProof, Proof: proof}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if globals.CONFIGURATION.DisablePoDOutbox {
+			_, _ = utils.SendWebsocketMessageToPoD(reqBytes)
+			return
+		}
+		_ = utils.SendToPoDWithOutbox(utils.PoDOutboxIdForAggregatedAnchorEpochAckProof(proof.NextEpochId), reqBytes)
+	}
+}
+
+func GetAggregatedAnchorEpochAckProofFromPoD(epochId int) *structures.AggregatedAnchorEpochAckProof {
+	req := WsAggregatedAnchorEpochAckProofGetRequest{Route: constants.WsRouteGetAnchorEpochAckFromPoD, EpochId: epochId}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoD(reqBytes); err == nil {
+			var resp WsAggregatedAnchorEpochAckProofGetResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return resp.Proof
+			}
+		}
+	}
+	return nil
+}
+
+func GetBlockByHeightFromPoD(absoluteHeight int) *WsBlockByHeightResponse {
+	req := WsBlockByHeightRequest{Route: constants.WsRouteGetBlockByHeight, AbsoluteHeight: absoluteHeight}
+	if reqBytes, err := json.Marshal(req); err == nil {
+		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
+			var resp WsBlockByHeightResponse
+			if err := json.Unmarshal(respBytes, &resp); err == nil {
+				return &resp
+			}
+		}
+	}
+	return nil
+}

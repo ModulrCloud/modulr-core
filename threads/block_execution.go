@@ -1,3 +1,6 @@
+// Thread to execute blocks sequentially driven by AggregatedHeightProofs from the quorum.
+// The quorum (via LastMileFinalizerThread + SignHeightProof) resolves block ordering
+// and assigns absolute heights. This thread simply follows that sequence.
 package threads
 
 import (
@@ -27,11 +30,8 @@ import (
 )
 
 const (
-	// How many consecutive PoD misses for the same blockID before we start querying the network (quorum/anchors) directly.
 	POD_MISSES_BEFORE_NETWORK_FALLBACK = 3
-
-	// Prevent spamming anchors with HTTP fallbacks if multiple threads call into anchors-PoD getter concurrently.
-	ANCHORS_FALLBACK_MIN_INTERVAL = 500 * time.Millisecond
+	ANCHORS_FALLBACK_MIN_INTERVAL      = 500 * time.Millisecond
 )
 
 type AnchorsPodMissState struct {
@@ -47,213 +47,306 @@ var (
 )
 
 func BlockExecutionThread() {
-
-	// Track PoD misses per blockID so we only fall back to querying the network after several failures.
-	podMisses := make(map[string]int)
-	lastEpochId := -1
-
 	for {
-
-		// NOTE: Don't hold EXECUTION_THREAD_METADATA lock during network I/O to PoD.
-		// On high-latency links this blocks alignment/monitor threads and can cause huge execution lag.
-
-		progressed := false
-
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
-
-		epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
-		currentEpochAlignmentData := &epochHandlerRef.SequenceAlignmentData
-
-		epochSnapshot := epochHandlerRef.EpochDataHandler
-		if epochSnapshot.Id != lastEpochId {
-			// New epoch: drop stale miss counters (safety against growth across epochs).
-			podMisses = make(map[string]int)
-			lastEpochId = epochSnapshot.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		var nextHeight int64
+		if handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics != nil {
+			nextHeight = handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics.LastHeight + 1
 		}
+		currentEpochId := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-		leaderIndexToExec := currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom
-		if leaderIndexToExec < 0 || leaderIndexToExec >= len(epochSnapshot.LeadersSequence) {
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		heightProof, block := fetchAggregatedHeightProofAndBlock(int(nextHeight))
+		if heightProof == nil {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		leaderPubkeyToExecBlocks := epochSnapshot.LeadersSequence[leaderIndexToExec]
-		execStatsOfLeader := epochHandlerRef.ExecutionData[leaderPubkeyToExecBlocks] // {index,hash}
-		infoAboutLastBlockByThisLeader, infoAboutLastBlockExists := currentEpochAlignmentData.LastBlocksByLeaders[leaderPubkeyToExecBlocks]
-
-		// If we already executed everything we know for this leader, advance leader/epoch.
-		if infoAboutLastBlockExists && execStatsOfLeader.Index == infoAboutLastBlockByThisLeader.Index {
-			allBlocksInEpochWereExecuted := len(epochSnapshot.LeadersSequence) == currentEpochAlignmentData.CurrentLeaderToExecBlocksFrom+1
-			if allBlocksInEpochWereExecuted {
-				setupNextEpoch(&epochHandlerRef.EpochDataHandler)
-			} else {
-				epochHandlerRef.SequenceAlignmentData.CurrentLeaderToExecBlocksFrom++
-			}
-			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
+		nextHeightProof := fetchVerifiedAggregatedHeightProof(int(nextHeight) + 1)
+		if nextHeightProof == nil {
+			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
-
-		// ___________ Now start a cycle to fetch blocks and exec ___________
-		for {
-			blockId := strconv.Itoa(epochSnapshot.Id) + ":" + leaderPubkeyToExecBlocks + ":" + strconv.Itoa(execStatsOfLeader.Index+1)
-
-			// Network I/O (PoD) - no locks held.
-			response := getBlockAndAfpFromPoD(blockId)
-			if response == nil || response.Block == nil {
-				podMisses[blockId]++
-
-				// Safety valve: avoid unbounded growth if keys become highly dynamic.
-				if len(podMisses) > 5000 {
-					podMisses = make(map[string]int)
-				}
-
+		if heightProof.EpochId > currentEpochId {
+			epochRotationProof := fetchVerifiedAggregatedEpochRotationProof(currentEpochId)
+			if epochRotationProof == nil {
 				utils.LogWithTimeThrottled(
-					"exec:pod_block_miss:"+blockId,
-					2*time.Second,
-					fmt.Sprintf("EXECUTION: can't fetch block %s from PoD (miss %d/%d)", blockId, podMisses[blockId], POD_MISSES_BEFORE_NETWORK_FALLBACK),
+					"exec:epoch_rotation_proof_wait",
+					5*time.Second,
+					fmt.Sprintf("EXECUTION: waiting for verified epoch rotation proof for epoch %d", currentEpochId),
 					utils.YELLOW_COLOR,
 				)
-
-				// After a few PoD misses, try to fetch the block from quorum/network directly (HTTP).
-				if podMisses[blockId] >= POD_MISSES_BEFORE_NETWORK_FALLBACK {
-					utils.LogWithTimeThrottled(
-						"exec:pod_block_fallback:"+blockId,
-						5*time.Second,
-						fmt.Sprintf("EXECUTION: falling back to quorum HTTP for block %s", blockId),
-						utils.DEEP_GRAY,
-					)
-
-					if fallbackBlock := getBlockFromNetworkById(blockId, &epochSnapshot); fallbackBlock != nil {
-						response = &websocket_pack.WsBlockWithAfpResponse{Block: fallbackBlock}
-						// success via fallback - reset counter
-						delete(podMisses, blockId)
-
-						utils.LogWithTimeThrottled(
-							"exec:pod_block_fallback_ok:"+blockId,
-							5*time.Second,
-							fmt.Sprintf("EXECUTION: fetched block %s via quorum HTTP fallback", blockId),
-							utils.CYAN_COLOR,
-						)
-					}
-				}
-
-				// Still nothing - stop this execution cycle and retry later.
-				if response == nil || response.Block == nil {
-					break
-				}
-			} else {
-				// Got data from PoD - reset counter.
-				delete(podMisses, blockId)
+				time.Sleep(200 * time.Millisecond)
+				continue
 			}
 
-			// Decide whether we can execute this block.
-			canExecWithoutAfp := infoAboutLastBlockExists &&
-				execStatsOfLeader.Index+1 == infoAboutLastBlockByThisLeader.Index &&
-				response.Block.GetHash() == infoAboutLastBlockByThisLeader.Hash
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
+			setupNextEpochFromRotationProof(&handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler, &epochRotationProof.EpochData)
+			handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
 
-			// Only fetch/verify AFP if we can't safely execute without it.
-			if !canExecWithoutAfp && response.Afp == nil {
-				if nextID := nextBlockId(blockId); nextID != "" {
-					if afp := utils.GetVerifiedAggregatedFinalizationProofByBlockId(nextID, &epochSnapshot); afp != nil {
-						response.Afp = afp
-					} else {
-						utils.LogWithTimeThrottled(
-							"exec:afp_missing:"+blockId,
-							2*time.Second,
-							fmt.Sprintf("EXECUTION: missing AFP for block %s (attempted quorum AFP for %s)", blockId, nextID),
-							utils.YELLOW_COLOR,
-						)
-					}
-				}
-			}
-
-			// Verify AFP only if we can't safely execute without it (AFP verification is relatively expensive).
-			mustExecWithAfp := false
-			if !canExecWithoutAfp {
-				mustExecWithAfp = response.Afp != nil && utils.VerifyAggregatedFinalizationProof(response.Afp, &epochSnapshot)
-				if response.Afp != nil && !mustExecWithAfp {
-					utils.LogWithTimeThrottled(
-						"exec:afp_invalid:"+blockId,
-						2*time.Second,
-						fmt.Sprintf("EXECUTION: AFP verification failed for block %s", blockId),
-						utils.YELLOW_COLOR,
-					)
-				}
-			}
-
-			if !canExecWithoutAfp && !mustExecWithAfp {
-				break
-			}
-
-			// Apply block (executes with internal lock; DB write happens outside lock).
-			executeBlock(response.Block)
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-			execStatsOfLeader = handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[leaderPubkeyToExecBlocks]
+			currentEpochId = handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler.Id
 			handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
-			progressed = true
+			if heightProof.EpochId != currentEpochId {
+				utils.LogWithTimeThrottled(
+					"exec:epoch_mismatch",
+					5*time.Second,
+					fmt.Sprintf("EXECUTION: waiting for epoch %d (currently at %d)", heightProof.EpochId, currentEpochId),
+					utils.YELLOW_COLOR,
+				)
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
 		}
 
-		// Avoid tight loop when PoD doesn't have the next block yet (especially on high RTT links).
-		if !progressed {
-			time.Sleep(100 * time.Millisecond)
+		if block == nil {
+			block = fetchBlockForExecution(heightProof.BlockId)
+		}
+		if block == nil {
+			utils.LogWithTimeThrottled(
+				"exec:block_fetch_fail:"+heightProof.BlockId,
+				2*time.Second,
+				fmt.Sprintf("EXECUTION: can't fetch block %s for height %d", heightProof.BlockId, nextHeight),
+				utils.YELLOW_COLOR,
+			)
+			time.Sleep(200 * time.Millisecond)
+			continue
 		}
 
+		if block.GetHash() != heightProof.BlockHash {
+			utils.LogWithTimeThrottled(
+				"exec:hash_mismatch:"+heightProof.BlockId,
+				5*time.Second,
+				fmt.Sprintf("EXECUTION: block hash mismatch for %s at height %d", heightProof.BlockId, nextHeight),
+				utils.YELLOW_COLOR,
+			)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		executeBlock(block)
+	}
+}
+
+// fetchAggregatedHeightProofAndBlock tries to get both the AggregatedHeightProof and the block for a given height
+// in a single PoD round-trip. Falls back to separate fetches if the combined route doesn't return both.
+func fetchAggregatedHeightProofAndBlock(absoluteHeight int) (*structures.AggregatedHeightProof, *block_pack.Block) {
+	localProof := LoadAggregatedHeightProof(absoluteHeight)
+	if localProof != nil {
+		epochHandler := getEpochHandlerForTracker(localProof.EpochId)
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(localProof, epochHandler) {
+			block := fetchBlockForExecution(localProof.BlockId)
+			return localProof, block
+		}
 	}
 
+	combined := websocket_pack.GetBlockByHeightFromPoD(absoluteHeight)
+	if combined != nil && combined.AggregatedHeightProof != nil {
+		epochHandler := getEpochHandlerForTracker(combined.AggregatedHeightProof.EpochId)
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(combined.AggregatedHeightProof, epochHandler) {
+			storeAggregatedHeightProof(combined.AggregatedHeightProof)
+			var block *block_pack.Block
+			if combined.Block != nil && combined.Block.VerifySignature() {
+				block = combined.Block
+			}
+			return combined.AggregatedHeightProof, block
+		}
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
+	if httpProof != nil {
+		storeAggregatedHeightProof(httpProof)
+		return httpProof, nil
+	}
+
+	return nil, nil
+}
+
+func fetchVerifiedAggregatedHeightProof(absoluteHeight int) *structures.AggregatedHeightProof {
+	proof := LoadAggregatedHeightProof(absoluteHeight)
+	if proof != nil {
+		epochHandler := getEpochHandlerForTracker(proof.EpochId)
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(proof, epochHandler) {
+			return proof
+		}
+	}
+
+	podProof := websocket_pack.GetAggregatedHeightProofFromPoD(absoluteHeight)
+	if podProof != nil {
+		epochHandler := getEpochHandlerForTracker(podProof.EpochId)
+		if epochHandler != nil && utils.VerifyAggregatedHeightProof(podProof, epochHandler) {
+			storeAggregatedHeightProof(podProof)
+			return podProof
+		}
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	httpProof := fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight, &currentEpochHandler)
+	if httpProof != nil {
+		storeAggregatedHeightProof(httpProof)
+		return httpProof
+	}
+
+	return nil
+}
+
+func fetchAggregatedHeightProofFromCurrentOrNextEpochQuorum(absoluteHeight int, currentEpochHandler *structures.EpochDataHandler) *structures.AggregatedHeightProof {
+	if currentEpochHandler == nil {
+		return nil
+	}
+
+	if proof := utils.GetAggregatedHeightProofFromQuorumByHeight(absoluteHeight, currentEpochHandler); proof != nil {
+		return proof
+	}
+
+	// Boundary fallback: if the next height already belongs to epoch N+1, the current
+	// epoch quorum cannot serve it. Use the signed epoch rotation proof from epoch N
+	// to discover and verify the next epoch quorum, then retry via that quorum.
+	epochRotationProof := fetchVerifiedAggregatedEpochRotationProof(currentEpochHandler.Id)
+	if epochRotationProof == nil || epochRotationProof.NextEpochId != currentEpochHandler.Id+1 {
+		return nil
+	}
+
+	nextEpochHandler := buildNextEpochHandlerForBoundaryFetch(currentEpochHandler, &epochRotationProof.EpochData)
+	if nextEpochHandler == nil {
+		return nil
+	}
+
+	return utils.GetAggregatedHeightProofFromQuorumByHeight(absoluteHeight, nextEpochHandler)
+}
+
+func buildNextEpochHandlerForBoundaryFetch(currentEpochHandler *structures.EpochDataHandler, nextEpochData *structures.NextEpochDataHandler) *structures.EpochDataHandler {
+	if currentEpochHandler == nil || nextEpochData == nil {
+		return nil
+	}
+
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+	epochDuration := handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkParameters.EpochDuration
+	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	return &structures.EpochDataHandler{
+		Id:                 currentEpochHandler.Id + 1,
+		Hash:               nextEpochData.NextEpochHash,
+		ValidatorsRegistry: nextEpochData.NextEpochValidatorsRegistry,
+		Quorum:             nextEpochData.NextEpochQuorum,
+		LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
+		StartTimestamp:     currentEpochHandler.StartTimestamp + uint64(epochDuration),
+		CurrentLeaderIndex: 0,
+	}
+}
+
+// fetchVerifiedAggregatedEpochRotationProof fetches and verifies an AggregatedEpochRotationProof for the
+// current epoch (signed by epoch N's quorum, containing data for epoch N+1).
+// Checks local DB first, then PoD.
+func fetchVerifiedAggregatedEpochRotationProof(currentEpochId int) *structures.AggregatedEpochRotationProof {
+	epochHandler := getEpochHandlerForTracker(currentEpochId)
+	if epochHandler == nil {
+		return nil
+	}
+
+	local := LoadAggregatedEpochRotationProof(currentEpochId)
+	if local != nil && utils.VerifyAggregatedEpochRotationProof(local, epochHandler) {
+		return local
+	}
+
+	fromPoD := websocket_pack.GetAggregatedEpochRotationProofFromPoD(currentEpochId)
+	if fromPoD != nil && utils.VerifyAggregatedEpochRotationProof(fromPoD, epochHandler) {
+		storeAggregatedEpochRotationProof(fromPoD)
+		return fromPoD
+	}
+
+	fromHTTP := utils.GetAggregatedEpochRotationProofFromQuorumByHTTP(currentEpochId, epochHandler)
+	if fromHTTP != nil {
+		storeAggregatedEpochRotationProof(fromHTTP)
+		return fromHTTP
+	}
+
+	return nil
+}
+
+func fetchBlockForExecution(blockId string) *block_pack.Block {
+	blockRaw, err := databases.BLOCKS.Get([]byte(blockId), nil)
+	if err == nil {
+		var block block_pack.Block
+		if json.Unmarshal(blockRaw, &block) == nil && block.VerifySignature() {
+			return &block
+		}
+	}
+
+	response := getBlockAndAfpFromPoD(blockId)
+	if response != nil && response.Block != nil && response.Block.VerifySignature() {
+		return response.Block
+	}
+
+	epochIndex, _, _, ok := parseBlockId(blockId)
+	if !ok {
+		return nil
+	}
+
+	epochHandler := getEpochHandlerForTracker(epochIndex)
+	if epochHandler == nil {
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
+		currentEpochHandler := handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochDataHandler
+		handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+		if epochIndex == currentEpochHandler.Id+1 {
+			epochRotationProof := fetchVerifiedAggregatedEpochRotationProof(currentEpochHandler.Id)
+			if epochRotationProof != nil && epochRotationProof.NextEpochId == epochIndex {
+				epochHandler = buildNextEpochHandlerForBoundaryFetch(&currentEpochHandler, &epochRotationProof.EpochData)
+			}
+		}
+	}
+
+	if networkBlock := getBlockFromNetworkById(blockId, epochHandler); networkBlock != nil {
+		return networkBlock
+	}
+
+	return nil
 }
 
 func getBlockAndAfpFromPoD(blockID string) *websocket_pack.WsBlockWithAfpResponse {
-
 	req := websocket_pack.WsBlockWithAfpRequest{
 		Route:   constants.WsRouteGetBlockWithAfp,
 		BlockId: blockID,
 	}
 
 	if reqBytes, err := json.Marshal(req); err == nil {
-
 		// Use dedicated PoD websocket connection to avoid blocking other PoD traffic.
 		if respBytes, err := utils.SendWebsocketMessageToPoDForBlocks(reqBytes); err == nil {
-
 			var resp websocket_pack.WsBlockWithAfpResponse
 
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
-
 				if resp.Block == nil {
-
 					return nil
-
 				}
 
 				return &resp
-
 			}
-
 		}
-
 	}
 	return nil
-
 }
 
 func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures.EpochDataHandler) *websocket_pack.WsAnchorBlockWithAfpResponse {
-
 	req := websocket_pack.WsAnchorBlockWithAfpRequest{
 		Route:   constants.WsRouteGetAnchorBlockWithAfp,
 		BlockId: blockID,
 	}
 
 	if reqBytes, err := json.Marshal(req); err == nil {
-
 		if respBytes, err := utils.SendWebsocketMessageToAnchorsPoD(reqBytes); err == nil {
-
 			var resp websocket_pack.WsAnchorBlockWithAfpResponse
 
 			if err := json.Unmarshal(respBytes, &resp); err == nil {
-
 				if resp.Block != nil {
 					// Reset miss state on success from PoD.
 					resetAnchorsPodMisses(blockID)
@@ -270,7 +363,6 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures
 
 					return &resp
 				}
-
 			}
 		}
 	}
@@ -310,7 +402,6 @@ func getAnchorBlockAndAfpFromAnchorsPoD(blockID string, epochHandler *structures
 	}
 
 	return nil
-
 }
 
 func parseBlockId(blockId string) (epochIndex int, creator string, index int, ok bool) {
@@ -489,14 +580,20 @@ func nextBlockId(blockId string) string {
 	return strings.Join(parts, ":")
 }
 
-func shortHash(h string) string {
-	if len(h) > 8 {
-		return h[:8]
-	}
-	return h
-}
-
 func executeBlock(block *block_pack.Block) {
+	// Invariant: cursor.NetworkId and genesis.NetworkId must be in sync at execution time.
+	// Block.GetHash() already mixes in globals.GENESIS.NetworkId, so a foreign block would fail
+	// signature verification — but this explicit check makes a runtime drift loud and obvious
+	// instead of surfacing as "invalid signature".
+	if handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId != globals.GENESIS.NetworkId {
+		utils.LogWithTime(fmt.Sprintf(
+			"FATAL: NetworkId drift during execution: cursor=%q genesis=%q",
+			handlers.EXECUTION_THREAD_METADATA.ChainCursor.NetworkId, globals.GENESIS.NetworkId,
+		), utils.RED_COLOR)
+		utils.GracefulShutdown()
+		return
+	}
+
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.Lock()
 	stateBatch, logMsg, ok := buildExecutionBatch(block)
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.Unlock()
@@ -506,7 +603,7 @@ func executeBlock(block *block_pack.Block) {
 	}
 
 	if err := databases.STATE.Write(stateBatch, nil); err == nil {
-		utils.LogWithTime2(logMsg, utils.CYAN_COLOR)
+		utils.LogWithTimeAlt(logMsg, utils.CYAN_COLOR)
 	} else {
 		panic("Impossible to commit changes in atomic batch to permanent state")
 	}
@@ -515,28 +612,17 @@ func executeBlock(block *block_pack.Block) {
 // buildExecutionBatch mutates in-memory state and builds a LevelDB batch.
 // Caller MUST hold handlers.EXECUTION_THREAD_METADATA.RWMutex in write mode.
 func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool) {
-	epochHandlerRef := &handlers.EXECUTION_THREAD_METADATA.Handler
+	cursor := &handlers.EXECUTION_THREAD_METADATA.ChainCursor
 
-	if epochHandlerRef.Statistics == nil {
-		epochHandlerRef.Statistics = &structures.Statistics{LastHeight: -1}
+	if cursor.Statistics == nil {
+		cursor.Statistics = &structures.Statistics{LastHeight: -1}
 	}
-	if epochHandlerRef.EpochStatistics == nil {
-		epochHandlerRef.EpochStatistics = &structures.Statistics{LastHeight: -1}
+	if cursor.EpochStatistics == nil {
+		cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
 	}
 
-	currentEpochIndex := epochHandlerRef.EpochDataHandler.Id
+	currentEpochIndex := cursor.EpochDataHandler.Id
 	currentBlockId := strconv.Itoa(currentEpochIndex) + ":" + block.Creator + ":" + strconv.Itoa(block.Index)
-
-	expectedPrevHash := epochHandlerRef.ExecutionData[block.Creator].Hash
-	if expectedPrevHash != block.PrevHash {
-		utils.LogWithTimeThrottled(
-			"exec:prev_hash_mismatch:"+currentBlockId,
-			2*time.Second,
-			fmt.Sprintf("EXECUTION: prevHash mismatch for %s (expected %s..., got %s...)", currentBlockId, shortHash(expectedPrevHash), shortHash(block.PrevHash)),
-			utils.YELLOW_COLOR,
-		)
-		return nil, "", false
-	}
 
 	// Reset per-block write-back sets. We only persist accounts/validators touched during this block,
 	// while keeping the read caches bounded via LRU.
@@ -545,24 +631,38 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 	// To change the state atomically - prepare the atomic batch
 	stateBatch := new(leveldb.Batch)
 
-	blockFees := uint64(0)
+	// 1. Process all transactions in the block
+	blockFees := applyTransactions(block, currentBlockId, stateBatch, cursor)
 
+	// 2. Distribute fees
+	sendFeesToValidatorAccount(block.Creator, blockFees)
+
+	// 3. Persist touched state (accounts and validators)
+	persistTouchedState(stateBatch)
+
+	// 4. Update execution statistics and persist ChainCursor
+	logMsg := updateExecutionStatistics(block, currentBlockId, blockFees, stateBatch, cursor)
+
+	return stateBatch, logMsg, true
+}
+
+func applyTransactions(block *block_pack.Block, currentBlockId string, stateBatch *leveldb.Batch, cursor *structures.ChainCursor) uint64 {
+	blockFees := uint64(0)
 	delayedTxPayloadsForBatch := make([]map[string]string, 0)
 
 	for index, transaction := range block.Transactions {
-
 		success, reason, fee, delayedPayload, isDelayed := executeTransaction(&transaction)
 
 		if isDelayed {
 			delayedTxPayloadsForBatch = append(delayedTxPayloadsForBatch, delayedPayload)
 		}
 
-		epochHandlerRef.Statistics.TotalTransactions++
-		epochHandlerRef.EpochStatistics.TotalTransactions++
+		cursor.Statistics.TotalTransactions++
+		cursor.EpochStatistics.TotalTransactions++
 
 		if success {
-			epochHandlerRef.Statistics.SuccessfulTransactions++
-			epochHandlerRef.EpochStatistics.SuccessfulTransactions++
+			cursor.Statistics.SuccessfulTransactions++
+			cursor.EpochStatistics.SuccessfulTransactions++
 		}
 
 		blockFees += fee
@@ -571,23 +671,24 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 		if !success {
 			receiptReason = reason
 		}
+
 		if locationBytes, err := json.Marshal(structures.TransactionReceipt{Block: currentBlockId, Position: index, Success: success, Reason: receiptReason}); err == nil {
 			stateBatch.Put([]byte(constants.DBKeyPrefixTxReceipt+transaction.Hash()), locationBytes)
 		} else {
 			panic("Impossible to add transaction location data to atomic batch")
 		}
-
 	}
 
 	if len(delayedTxPayloadsForBatch) > 0 {
-		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, currentEpochIndex, stateBatch); err != nil {
+		if err := addDelayedTransactionsToBatch(delayedTxPayloadsForBatch, cursor.EpochDataHandler.Id, stateBatch); err != nil {
 			panic("Impossible to add delayed transactions to atomic batch")
 		}
 	}
 
-	// distributeFeesAmongValidatorAndStakers(block.Creator, blockFees)
-	sendFeesToValidatorAccount(block.Creator, blockFees)
+	return blockFees
+}
 
+func persistTouchedState(stateBatch *leveldb.Batch) {
 	for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
 		if accountDataBytes, err := json.Marshal(accountData); err == nil {
 			stateBatch.Put([]byte(accountID), accountDataBytes)
@@ -604,52 +705,40 @@ func buildExecutionBatch(block *block_pack.Block) (*leveldb.Batch, string, bool)
 			panic("Impossible to add validator storage to atomic batch")
 		}
 	}
+}
 
-	// Update the execution data for progress
+func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, blockFees uint64, stateBatch *leveldb.Batch, cursor *structures.ChainCursor) string {
 	blockHash := block.GetHash()
 
-	blockCreatorData := epochHandlerRef.ExecutionData[block.Creator]
-	blockCreatorData.Index = block.Index
-	blockCreatorData.Hash = blockHash
-	epochHandlerRef.ExecutionData[block.Creator] = blockCreatorData
+	cursor.Statistics.LastHeight++
+	cursor.Statistics.LastBlockHash = blockHash
+	cursor.Statistics.TotalFees += blockFees
+	cursor.Statistics.BlocksGenerated++
 
-	// Finally set the updated execution thread handler to atomic batch
-	epochHandlerRef.Statistics.LastHeight++
-	epochHandlerRef.Statistics.LastBlockHash = blockHash
-	epochHandlerRef.Statistics.TotalFees += blockFees
-	epochHandlerRef.Statistics.BlocksGenerated++
+	cursor.EpochStatistics.TotalFees += blockFees
+	cursor.EpochStatistics.BlocksGenerated++
 
-	epochHandlerRef.EpochStatistics.TotalFees += blockFees
-	epochHandlerRef.EpochStatistics.BlocksGenerated++
-	// For per-epoch stats we still expose the absolute last height / last block hash (useful to know
-	// which exact block finished the epoch).
-	epochHandlerRef.EpochStatistics.LastHeight = epochHandlerRef.Statistics.LastHeight
-	epochHandlerRef.EpochStatistics.LastBlockHash = blockHash
+	cursor.EpochStatistics.LastHeight = cursor.Statistics.LastHeight
+	cursor.EpochStatistics.LastBlockHash = blockHash
 
-	stateBatch.Put([]byte(fmt.Sprintf("BLOCK_INDEX:%d", epochHandlerRef.Statistics.LastHeight)), []byte(currentBlockId))
+	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(cursor.Statistics.LastHeight))), []byte(currentBlockId))
 
-	if execThreadRawBytes, err := json.Marshal(epochHandlerRef); err == nil {
-		stateBatch.Put([]byte("ET"), execThreadRawBytes)
-	} else {
-		panic("Impossible to store updated execution thread version to atomic batch")
+	if err := persistChainCursor(stateBatch); err != nil {
+		panic("Impossible to add ChainCursor to atomic batch")
 	}
 
-	logMsg := fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, epochHandlerRef.Statistics.LastHeight)
-	return stateBatch, logMsg, true
+	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, cursor.Statistics.LastHeight)
 }
 
 func sendFeesToValidatorAccount(blockCreatorPubkey string, feeFromBlock uint64) {
-
 	blockCreatorAccount := utils.GetAccountFromExecThreadState(blockCreatorPubkey)
 
 	// Transfer fees to account with pubkey associated with block creator
 
 	blockCreatorAccount.Balance += feeFromBlock
-
 }
 
 func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[string]string, bool) {
-
 	// Prevent overwriting system keys in STATE via crafted tx.To/tx.From.
 	// Account IDs must be canonical pubkeys.
 	if !cryptography.IsValidPubKey(tx.From) || !cryptography.IsValidPubKey(tx.To) {
@@ -657,16 +746,12 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 	}
 
 	if cryptography.VerifySignature(tx.Hash(), tx.From, tx.Sig) {
-
 		accountFrom := utils.GetAccountFromExecThreadState(tx.From)
 		accountFrom.InitiatedTransactions++
 
 		if delayedTxPayload, delayedTxType, isDelayed := getDelayedTransactionPayload(tx); isDelayed {
-
 			if ok, reason := validateDelayedTransaction(delayedTxType, tx, delayedTxPayload, accountFrom); !ok {
-
 				return false, reason, 0, nil, false
-
 			}
 
 			accountFrom.Balance -= tx.Fee
@@ -681,7 +766,6 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 			accountFrom.SuccessfulInitiatedTransactions++
 
 			return true, "", tx.Fee, delayedTxPayload, true
-
 		}
 
 		accountTo := utils.GetAccountFromExecThreadState(tx.To)
@@ -698,7 +782,6 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 		}
 
 		if accountFrom.Balance >= totalSpend {
-
 			accountFrom.Balance -= totalSpend
 
 			accountTo.Balance += tx.Amount
@@ -708,65 +791,46 @@ func executeTransaction(tx *structures.Transaction) (bool, string, uint64, map[s
 			accountFrom.SuccessfulInitiatedTransactions++
 
 			return true, "", tx.Fee, nil, false
-
 		}
 
 		return false, "insufficient balance", 0, nil, false
-
 	}
 
 	return false, "invalid signature", 0, nil, false
-
 }
 
 func getDelayedTransactionPayload(tx *structures.Transaction) (map[string]string, string, bool) {
-
 	if tx.Payload == nil {
-
 		return nil, "", false
-
 	}
 
 	payloadType, ok := tx.Payload["type"]
 
 	if !ok || payloadType == "" {
-
 		return nil, "", false
-
 	}
 
 	if _, exists := system_contracts.DELAYED_TRANSACTIONS_MAP[payloadType]; !exists {
-
 		return nil, "", false
-
 	}
 
 	return tx.Payload, payloadType, true
-
 }
 
 func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction, payload map[string]string, accountFrom *structures.Account) (bool, string) {
-
 	if accountFrom == nil {
-
 		return false, "missing sender account"
-
 	}
 
 	if !constants.ShouldBypassNonceCheck(tx.From) && tx.Nonce != accountFrom.Nonce+1 {
-
 		return false, "wrong nonce"
-
 	}
 
 	if accountFrom.Balance < tx.Fee {
-
 		return false, "insufficient balance for fee"
-
 	}
 
 	switch delayedTxType {
-
 	case "createValidator", "updateValidator":
 
 		if tx.From != payload["creator"] {
@@ -779,9 +843,7 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 		amount, err := strconv.ParseUint(payload["amount"], 10, 64)
 
 		if err != nil {
-
 			return false, "invalid delayed transaction amount"
-
 		}
 
 		if accountFrom.Balance < amount+tx.Fee {
@@ -793,31 +855,22 @@ func validateDelayedTransaction(delayedTxType string, tx *structures.Transaction
 	default:
 
 		return true, ""
-
 	}
-
 }
 
 func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochIndex int, batch *leveldb.Batch) error {
-
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", epochIndex+2)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", epochIndex+2)
 
 	cachedPayloads := make([]map[string]string, 0)
 
 	rawCachedPayloads, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 
 	if err == nil {
-
 		if jsonErr := json.Unmarshal(rawCachedPayloads, &cachedPayloads); jsonErr != nil {
-
 			cachedPayloads = make([]map[string]string, 0)
-
 		}
-
 	} else if err != leveldb.ErrNotFound {
-
 		return err
-
 	}
 
 	cachedPayloads = append(cachedPayloads, delayedTxPayloads...)
@@ -825,36 +878,20 @@ func addDelayedTransactionsToBatch(delayedTxPayloads []map[string]string, epochI
 	serializedPayloads, err := json.Marshal(cachedPayloads)
 
 	if err != nil {
-
 		return err
-
 	}
 
 	batch.Put([]byte(delayedTxKey), serializedPayloads)
 
 	return nil
-
 }
 
-func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
-
+func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, nextEpochData *structures.NextEpochDataHandler) {
 	currentEpochIndex := epochHandler.Id
-
 	nextEpochIndex := currentEpochIndex + 1
 
-	var nextEpochData *structures.NextEpochDataHandler
-
-	// Take from DB
-
-	rawHandler, dbErr := databases.APPROVEMENT_THREAD_METADATA.Get([]byte("EPOCH_DATA:"+strconv.Itoa(nextEpochIndex)), nil)
-
-	if dbErr == nil {
-
-		json.Unmarshal(rawHandler, &nextEpochData)
-
-	}
-
 	if nextEpochData != nil {
+		cursor := &handlers.EXECUTION_THREAD_METADATA.ChainCursor
 
 		// Reset touched sets before executing delayed txs for next epoch so we only persist what they touch.
 		utils.ResetExecTouchedSets()
@@ -862,124 +899,122 @@ func setupNextEpoch(epochHandler *structures.EpochDataHandler) {
 		dbBatch := new(leveldb.Batch)
 
 		// Persist per-epoch statistics snapshot for the finishing epoch into STATE.
-		// This allows HTTP API to query historical epoch statistics without bloating the ET payload.
-		finishingEpochStats := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
+		// This allows HTTP API to query historical epoch statistics without bloating the cursor payload.
+		finishingEpochStats := cursor.EpochStatistics
 		if finishingEpochStats == nil {
 			finishingEpochStats = &structures.Statistics{LastHeight: -1}
 		}
 		if rawStats, err := json.Marshal(finishingEpochStats); err == nil {
-			dbBatch.Put([]byte(fmt.Sprintf("EPOCH_STATS:%d", currentEpochIndex)), rawStats)
-		}
-
-		// Exec delayed txs here
-
-		for _, delayedTx := range nextEpochData.DelayedTransactions {
-
-			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
-
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochStats+strconv.Itoa(toAbsoluteEpochId(currentEpochIndex))), rawStats)
 		}
 
 		// Prepare epoch handler for next epoch
-
 		templateForNextEpoch := &structures.EpochDataHandler{
 			Id:                 nextEpochIndex,
 			Hash:               nextEpochData.NextEpochHash,
 			ValidatorsRegistry: nextEpochData.NextEpochValidatorsRegistry,
-			StartTimestamp:     epochHandler.StartTimestamp + uint64(handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters.EpochDuration),
+			StartTimestamp:     epochHandler.StartTimestamp + uint64(cursor.NetworkParameters.EpochDuration),
 			Quorum:             nextEpochData.NextEpochQuorum,
 			LeadersSequence:    nextEpochData.NextEpochLeadersSequence,
 		}
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler = *templateForNextEpoch
+		// Durable epoch data for API/Explorer is stored in STATE.
+		nextSnapshot := structures.EpochDataSnapshot{
+			EpochDataHandler:  *templateForNextEpoch,
+			NetworkParameters: cursor.NetworkParameters,
+		}
+		if nextValBytes, err := json.Marshal(nextSnapshot); err == nil {
+			dbBatch.Put([]byte(constants.DBKeyPrefixEpochData+strconv.Itoa(toAbsoluteEpochId(nextEpochIndex))), nextValBytes)
+		}
+
+		// Exec delayed txs here
+		for _, delayedTx := range nextEpochData.DelayedTransactions {
+			executeDelayedTransaction(delayedTx, constants.ContextExecutionThread)
+		}
+
+		cursor.EpochDataHandler = *templateForNextEpoch
 
 		// Nullify values for the upcoming epoch
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics = &structures.Statistics{LastHeight: -1}
+		cursor.EpochStatistics = &structures.Statistics{LastHeight: -1}
 
-		handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData = make(map[string]structures.ExecutionStats)
-
-		for _, validatorPubkey := range handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler.LeadersSequence {
-
-			handlers.EXECUTION_THREAD_METADATA.Handler.ExecutionData[validatorPubkey] = structures.NewExecutionStatsTemplate()
-
-		}
-
-		// Finally, clean & nullify sequence data
-
-		handlers.EXECUTION_THREAD_METADATA.Handler.SequenceAlignmentData = structures.AlignmentDataHandler{
-
-			CurrentAnchorAssumption:         0,
-			CurrentAnchorBlockIndexObserved: -1,
-			CurrentLeaderToExecBlocksFrom:   0,
-
-			LastBlocksByLeaders: make(map[string]structures.ExecutionStats),
-			LastBlocksByAnchors: make(map[int]structures.ExecutionStats),
-		}
+		// SequenceAlignmentData lives in FINALIZER_THREAD_METADATA now and is reset
+		// by last_mile_finalizer.go when the finalizer epoch rotates. Block execution
+		// no longer touches it.
 
 		// Commit the changes of state using atomic batch. Because we modified state via delayed transactions when epoch finished
 
 		for accountID, accountData := range handlers.EXECUTION_THREAD_METADATA.AccountsTouched {
-
 			if accountDataBytes, err := json.Marshal(accountData); err == nil {
-
 				dbBatch.Put([]byte(accountID), accountDataBytes)
-
 			} else {
-
 				panic("Impossible to add new account data to atomic batch")
-
 			}
-
 		}
 
 		for storageKey, validatorStorage := range handlers.EXECUTION_THREAD_METADATA.ValidatorsTouched {
-
 			if dataBytes, err := json.Marshal(validatorStorage); err == nil {
-
 				// storageKey already includes DBKeyPrefixValidatorStorage.
 				dbBatch.Put([]byte(storageKey), dataBytes)
-
 			} else {
-
 				panic("Impossible to add validator storage to atomic batch")
-
 			}
-
 		}
 
-		if execThreadRawBytes, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.Handler); err == nil {
-
-			dbBatch.Put([]byte("ET"), execThreadRawBytes)
-
-		} else {
-
-			panic("Impossible to store updated execution thread version to atomic batch")
-
+		if err := persistChainCursor(dbBatch); err != nil {
+			panic("Impossible to add ChainCursor to atomic batch")
 		}
 
 		if err := databases.STATE.Write(dbBatch, nil); err != nil {
-
 			panic("Impossible to modify the state when epoch finished")
-
 		}
 
 		// Version check once new epoch started
 
-		if utils.IsMyCoreVersionOld(&handlers.EXECUTION_THREAD_METADATA.Handler) {
-
+		if cursor.CoreMajorVersion > globals.CORE_MAJOR_VERSION {
 			utils.LogWithTime("New version detected on EXECUTION_THREAD. Please, upgrade your node software", utils.YELLOW_COLOR)
 
 			utils.GracefulShutdown()
-
 		}
-
 	} else {
 		utils.LogWithTimeThrottled(
 			fmt.Sprintf("execution:next_epoch_missing:%d", nextEpochIndex),
 			5*time.Second,
-			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing EPOCH_DATA:%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, nextEpochIndex),
+			fmt.Sprintf("EXECUTION: can't setup next epoch %d (missing %s%d in APPROVEMENT_THREAD_METADATA)", nextEpochIndex, constants.DBKeyPrefixEpochData, nextEpochIndex),
 			utils.YELLOW_COLOR,
 		)
 	}
+}
 
+// State Executor helpers: manage the permanent world-state layer in STATE DB.
+//
+// block_execution.go operates in local coordinates (0-based heights and epoch IDs
+// that match the consensus layer's HEIGHT_PROOF and EPOCH_ROTATION_PROOF numbering).
+//
+// When writing to STATE (BLOCK_INDEX, EPOCH_STATS, EPOCH_DATA), the executor applies
+// ChainCursor offsets to produce absolute keys that survive network restarts.
+// With default cursor {0, 0} the absolute values equal the local ones.
+//
+// ChainCursor is the single source of truth for ALL execution-thread state. It is
+// persisted atomically in the same LevelDB batch as other STATE writes under the
+// DBKeyChainCursor key.
+
+func toAbsoluteHeight(localHeight int64) int64 {
+	return localHeight + handlers.EXECUTION_THREAD_METADATA.ChainCursor.HeightOffset
+}
+
+func toAbsoluteEpochId(localEpochId int) int {
+	return localEpochId + handlers.EXECUTION_THREAD_METADATA.ChainCursor.EpochOffset
+}
+
+// persistChainCursor serializes the current ChainCursor and appends it to the batch.
+func persistChainCursor(batch *leveldb.Batch) error {
+	data, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.ChainCursor)
+	if err != nil {
+		return err
+	}
+
+	batch.Put([]byte(constants.DBKeyChainCursor), data)
+
+	return nil
 }

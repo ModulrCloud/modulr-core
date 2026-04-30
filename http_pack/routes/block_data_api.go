@@ -2,7 +2,9 @@ package routes
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/modulrcloud/modulr-core/block_pack"
 	"github.com/modulrcloud/modulr-core/constants"
@@ -18,11 +20,11 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type lastHeightResponse struct {
+type LastHeightResponse struct {
 	LastHeight int64 `json:"lastHeight"`
 }
 
-type liveStatsResponse struct {
+type LiveStatsResponse struct {
 	Statistics        *structures.Statistics       `json:"statistics"`
 	EpochStatistics   *structures.Statistics       `json:"epochStatistics"`
 	NetworkParameters structures.NetworkParameters `json:"networkParameters"`
@@ -30,9 +32,8 @@ type liveStatsResponse struct {
 }
 
 func GetLastHeight(ctx *fasthttp.RequestCtx) {
-
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
+	statistics := handlers.EXECUTION_THREAD_METADATA.ChainCursor.Statistics
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
 
 	if statistics == nil || statistics.LastHeight < 0 {
@@ -40,17 +41,18 @@ func GetLastHeight(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, lastHeightResponse{LastHeight: statistics.LastHeight})
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, LastHeightResponse{LastHeight: statistics.LastHeight})
 }
 
 func GetLiveStats(ctx *fasthttp.RequestCtx) {
-
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RLock()
-	statistics := handlers.EXECUTION_THREAD_METADATA.Handler.Statistics
-	epochStatistics := handlers.EXECUTION_THREAD_METADATA.Handler.EpochStatistics
-	networkParameters := handlers.EXECUTION_THREAD_METADATA.Handler.NetworkParameters
-	epoch := handlers.EXECUTION_THREAD_METADATA.Handler.EpochDataHandler
+	cursor := handlers.EXECUTION_THREAD_METADATA.ChainCursor
 	handlers.EXECUTION_THREAD_METADATA.RWMutex.RUnlock()
+
+	statistics := cursor.Statistics
+	epochStatistics := cursor.EpochStatistics
+	networkParameters := cursor.NetworkParameters
+	epoch := cursor.EpochDataHandler
 
 	if statistics == nil {
 		statistics = &structures.Statistics{LastHeight: -1}
@@ -59,7 +61,7 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 		epochStatistics = &structures.Statistics{LastHeight: -1}
 	}
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, liveStatsResponse{
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, LiveStatsResponse{
 		Statistics:        statistics,
 		EpochStatistics:   epochStatistics,
 		NetworkParameters: networkParameters,
@@ -68,7 +70,6 @@ func GetLiveStats(ctx *fasthttp.RequestCtx) {
 }
 
 func GetBlockById(ctx *fasthttp.RequestCtx) {
-
 	blockIdRaw := ctx.UserValue("id")
 	blockId, ok := blockIdRaw.(string)
 
@@ -88,7 +89,6 @@ func GetBlockById(ctx *fasthttp.RequestCtx) {
 }
 
 func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
-
 	absoluteHeightRaw := ctx.UserValue("absoluteHeightIndex")
 	absoluteHeight, ok := absoluteHeightRaw.(string)
 
@@ -102,7 +102,7 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	blockIndexKey := "BLOCK_INDEX:" + absoluteHeight
+	blockIndexKey := constants.DBKeyPrefixBlockIndex + absoluteHeight
 	blockID, err := databases.STATE.Get([]byte(blockIndexKey), nil)
 
 	if err != nil {
@@ -140,8 +140,69 @@ func GetBlockByHeight(ctx *fasthttp.RequestCtx) {
 	helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, block)
 }
 
-func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
+func GetAggregatedHeightProof(ctx *fasthttp.RequestCtx) {
+	heightRaw := ctx.UserValue("height")
+	heightStr, ok := heightRaw.(string)
 
+	if !ok || heightStr == "" {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid height")
+		return
+	}
+
+	height, err := strconv.Atoi(heightStr)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid height")
+		return
+	}
+
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixAggregatedHeightProof, height))
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
+		return
+	}
+
+	var proof structures.AggregatedHeightProof
+	if json.Unmarshal(raw, &proof) != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse proof")
+		return
+	}
+
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, proof)
+}
+
+func GetFirstBlockInEpoch(ctx *fasthttp.RequestCtx) {
+	epochIdRaw := ctx.UserValue("epochId")
+	epochIdStr, ok := epochIdRaw.(string)
+
+	if !ok || epochIdStr == "" {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid epochId")
+		return
+	}
+
+	epochId, err := strconv.Atoi(epochIdStr)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid epochId")
+		return
+	}
+
+	key := []byte(fmt.Sprintf("%s%d", constants.DBKeyPrefixFirstBlockAggregatedHeightProof, epochId))
+	raw, err := databases.FINALIZATION_THREAD_METADATA.Get(key, nil)
+	if err != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusNotFound, "Not found")
+		return
+	}
+
+	var proof structures.AggregatedHeightProof
+	if json.Unmarshal(raw, &proof) != nil {
+		helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Failed to parse proof")
+		return
+	}
+
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, proof)
+}
+
+func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
 	blockIdRaw := ctx.UserValue("blockId")
 	blockId, ok := blockIdRaw.(string)
 
@@ -150,7 +211,7 @@ func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	afp, err := databases.EPOCH_DATA.Get([]byte("AFP:"+blockId), nil)
+	afp, err := databases.EPOCH_DATA.Get([]byte(constants.DBKeyPrefixAfp+blockId), nil)
 
 	if err == nil && afp != nil {
 		helpers.WriteJSONBytes(ctx, fasthttp.StatusOK, afp)
@@ -161,7 +222,6 @@ func GetAggregatedFinalizationProof(ctx *fasthttp.RequestCtx) {
 }
 
 func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
-
 	hashRaw := ctx.UserValue("hash")
 	hash, ok := hashRaw.(string)
 
@@ -217,41 +277,31 @@ func GetTransactionByHash(ctx *fasthttp.RequestCtx) {
 }
 
 func AcceptTransaction(ctx *fasthttp.RequestCtx) {
-
 	var transaction structures.Transaction
 
 	if err := json.Unmarshal(ctx.PostBody(), &transaction); err != nil {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")
 		return
-
 	}
 
 	if transaction.From == "" || transaction.To == "" || transaction.Nonce == 0 || transaction.Sig == "" {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Event structure is wrong")
 		return
-
 	}
 
 	if !cryptography.IsValidPubKey(transaction.From) || !cryptography.IsValidPubKey(transaction.To) {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid pubkey")
 		return
-
 	}
 
 	if !cryptography.VerifySignature(transaction.Hash(), transaction.From, transaction.Sig) {
-
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid signature")
 		return
-
 	}
 
 	currentLeader := utils.GetCurrentLeader()
 
 	if !currentLeader.IsMeLeader {
-
 		// Redirect tx to leader
 
 		req := fasthttp.AcquireRequest()
@@ -263,8 +313,8 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 		req.Header.SetMethod(fasthttp.MethodPost)
 		req.SetBody(ctx.PostBody())
 
-		if err := fasthttp.Do(req, resp); err != nil {
-			helpers.WriteErr(ctx, fasthttp.StatusInternalServerError, "Impossible to redirect to current leader")
+		if err := fasthttp.DoTimeout(req, resp, 2*time.Second); err != nil {
+			helpers.WriteErr(ctx, fasthttp.StatusGatewayTimeout, "Current leader did not respond in time")
 			return
 		}
 
@@ -272,7 +322,6 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 		ctx.Response.Header.SetContentTypeBytes(resp.Header.ContentType())
 		ctx.SetBody(resp.Body())
 		return
-
 	}
 
 	// Check mempool size
@@ -289,5 +338,4 @@ func AcceptTransaction(ctx *fasthttp.RequestCtx) {
 	globals.MEMPOOL.Slice = append(globals.MEMPOOL.Slice, transaction)
 
 	helpers.WriteJSON(ctx, fasthttp.StatusOK, map[string]string{"status": "OK"})
-
 }

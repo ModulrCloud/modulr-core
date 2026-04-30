@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
 	"github.com/modulrcloud/modulr-core/databases"
 	"github.com/modulrcloud/modulr-core/globals"
@@ -16,17 +17,16 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type delayedTransactionsSignRequest struct {
+type DelayedTransactionsSignRequest struct {
 	EpochIndex int `json:"epochIndex"`
 }
 
-type delayedTransactionsSignResponse struct {
+type DelayedTransactionsSignResponse struct {
 	Signature string `json:"signature"`
 }
 
 func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
-
-	var request delayedTransactionsSignRequest
+	var request DelayedTransactionsSignRequest
 	if err := json.Unmarshal(ctx.PostBody(), &request); err != nil {
 		helpers.WriteErr(ctx, fasthttp.StatusBadRequest, "Invalid JSON")
 		return
@@ -54,7 +54,7 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	delayedTxKey := fmt.Sprintf("DELAYED_TRANSACTIONS:%d", request.EpochIndex)
+	delayedTxKey := fmt.Sprintf(constants.DBKeyPrefixDelayedTransactions+"%d", request.EpochIndex)
 	payloadBytes, err := databases.STATE.Get([]byte(delayedTxKey), nil)
 
 	if err != nil {
@@ -78,8 +78,8 @@ func SignDelayedTransactions(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	dataThatShouldBeSigned := "SIG_DELAYED_OPERATIONS:" + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
+	dataThatShouldBeSigned := constants.SigningPrefixDelayedOperations + ":" + strconv.Itoa(request.EpochIndex) + ":" + utils.Blake3(string(payloadBytes))
 	signature := cryptography.GenerateSignature(globals.CONFIGURATION.PrivateKey, dataThatShouldBeSigned)
 
-	helpers.WriteJSON(ctx, fasthttp.StatusOK, delayedTransactionsSignResponse{Signature: signature})
+	helpers.WriteJSON(ctx, fasthttp.StatusOK, DelayedTransactionsSignResponse{Signature: signature})
 }
