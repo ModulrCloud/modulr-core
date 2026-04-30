@@ -104,6 +104,70 @@ sequenceDiagram
     Anchors->>Anchors: Include ALFP in anchor block
 ```
 
+## Recent Changes: Proactive ALFP Requests from `modulr-anchors-core` to `modulr-core`
+
+Historically, ALFP delivery was passive from the anchor perspective: `modulr-core` built an ALFP and pushed it to anchors. Anchors only waited for that HTTP delivery.
+
+Recent changes added a fallback path where anchors can proactively collect missing ALFPs from the core quorum. This is not the primary path; anchors first give the normal `modulr-core` LeaderFinalizationThread a grace period after the leader timeframe ends.
+
+If the ALFP is still missing after that grace period, an anchor:
+
+1. Checks whether the ALFP is already in its mempool or already included in an anchor block.
+2. Tries to fetch the ALFP from PoD.
+3. If PoD does not have it, opens WebSocket requests to the relevant `modulr-core` quorum.
+4. Collects `2/3 + 1` valid leader-finalization signatures.
+5. Builds and verifies the ALFP locally.
+6. Deposits the ALFP into the anchor mempool so it can be included in an anchor block.
+
+```mermaid
+sequenceDiagram
+    participant CoreLFT as modulr-core LFT
+    participant Anchor as modulr-anchors-core
+    participant PoD as PoD
+    participant CoreQuorum as Core quorum
+
+    Note over CoreLFT,Anchor: Leader timeframe ends
+    CoreLFT->>Anchor: Normal path: POST ALFP
+    Anchor->>Anchor: Wait grace period if ALFP is missing
+
+    alt ALFP received normally
+        Anchor->>Anchor: Add ALFP to mempool
+    else ALFP still missing
+        Anchor->>PoD: Try to fetch ALFP
+        alt PoD has ALFP
+            PoD-->>Anchor: Return ALFP
+            Anchor->>Anchor: Verify and add to mempool
+        else PoD does not have ALFP
+            Anchor->>CoreQuorum: Request leader finalization signatures
+            CoreQuorum-->>Anchor: Return signed finalization votes
+            Anchor->>Anchor: Build ALFP after 2/3+1 signatures
+            Anchor->>Anchor: Verify and add ALFP to mempool
+        end
+    end
+```
+
+```mermaid
+flowchart TD
+    A["Leader timeframe ends"]
+    B["Anchor waits grace period"]
+    C{"ALFP already received<br/>or included?"}
+    D["Do nothing"]
+    E["Try PoD"]
+    F{"PoD has ALFP?"}
+    G["Verify ALFP<br/>add to anchor mempool"]
+    H["Fan out WS requests<br/>to core quorum"]
+    I["Collect 2/3+1 signatures"]
+    J["Build and verify ALFP"]
+    K["Add ALFP to anchor mempool"]
+    L["Anchor block includes ALFP"]
+
+    A --> B --> C
+    C -- yes --> D
+    C -- no --> E --> F
+    F -- yes --> G --> L
+    F -- no --> H --> I --> J --> K --> L
+```
+
 The core finalizer can then observe that all required leaders for the epoch have their ALFPs included by anchors.
 
 ```mermaid
