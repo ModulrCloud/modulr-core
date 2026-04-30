@@ -1007,7 +1007,7 @@ func deliverAggregatedEpochRotationProofToAnchors(proof *structures.AggregatedEp
 		Route string                                  `json:"route"`
 		Proof structures.AggregatedEpochRotationProof `json:"proof"`
 	}{
-		Route: "accept_aggregated_epoch_rotation_proof",
+		Route: constants.WsRouteAcceptAggregatedEpochRotationProof,
 		Proof: *proof,
 	})
 
