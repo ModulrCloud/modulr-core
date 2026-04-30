@@ -15,6 +15,30 @@ Recovery uses `modulr-anchors-core` first, because anchors persist `AggregatedEp
 
 The recovery script queries anchor nodes for their latest known core quorum data.
 
+These queries are possible because every normal `modulr-core` epoch rotation is anchored first:
+
+1. The core quorum builds an `AggregatedEpochRotationProof` (AERP) for epoch `N -> N+1`.
+2. The core quorum sends that AERP to `modulr-anchors-core`.
+3. Anchors persist the AERP and sign acknowledgements.
+4. `modulr-core` waits for a majority of anchor acknowledgements.
+5. Only after that majority ACK exists can the core network start sequencing blocks for epoch `N+1`.
+
+This means the latest core epoch accepted by the running network must already be known by a majority of anchors.
+
+```mermaid
+sequenceDiagram
+    participant Core as modulr-core quorum
+    participant Anchors as modulr-anchors-core majority
+    participant NextEpoch as Core epoch N+1
+
+    Core->>Core: Build AERP (N -> N+1)
+    Core->>Anchors: Send AERP
+    Anchors->>Anchors: Persist AERP
+    Anchors-->>Core: Return majority anchor ACKs
+    Core->>Core: Build AggregatedAnchorEpochAckProof
+    Core->>NextEpoch: Start sequencing epoch N+1
+```
+
 ```mermaid
 sequenceDiagram
     participant Script as Recovery script
@@ -54,6 +78,23 @@ The winning AERP gives the recovery process the latest known core epoch data:
 - next quorum
 - next leaders sequence
 - validator HTTP/WSS endpoints collected by anchors
+
+Under the normal fault model, recovery should eventually be able to discover this data. Since `modulr-core` requires a majority of anchor ACKs before moving to the next epoch, and less than one third of anchors are assumed malicious, that majority contains at least one honest anchor. An honest anchor can provide a valid AERP chain, allowing lagging anchors to align their local recovery state and allowing the script to obtain a majority agreement on the latest epoch.
+
+```mermaid
+flowchart TD
+    A["Core moved to epoch N+1"]
+    B["Therefore: majority anchors<br/>ACKed AERP N -> N+1"]
+    C["Fault model:<br/>< 1/3 malicious anchors"]
+    D["At least one ACKing anchor<br/>is honest"]
+    E["Honest anchor has valid AERP chain"]
+    F["Lagging anchors can align"]
+    G["Recovery script obtains<br/>majority agreement"]
+
+    A --> B --> D
+    C --> D
+    D --> E --> F --> G
+```
 
 ## Phase 2: Query the Latest Core Quorum
 
