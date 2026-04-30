@@ -96,6 +96,37 @@ flowchart TD
     D --> E --> F --> G
 ```
 
+Example with 5 anchors:
+
+```mermaid
+flowchart TD
+    subgraph Anchors["Anchor network: 5 nodes"]
+        A1["Anchor 1<br/>honest<br/>valid AERP chain"]
+        A2["Anchor 2<br/>honest<br/>valid AERP chain"]
+        A3["Anchor 3<br/>honest<br/>valid AERP chain"]
+        A4["Anchor 4<br/>honest<br/>valid AERP chain"]
+        A5["Anchor 5<br/>malicious or stale"]
+    end
+
+    R["Recovery script queries<br/>majority = 4 anchors"]
+    M["Any 4-of-5 response set<br/>contains at least 3 honest anchors"]
+    V["Honest anchors provide<br/>valid AERP chain"]
+    E["Script reaches the latest<br/>valid core epoch index"]
+
+    R --> A1
+    R --> A2
+    R --> A3
+    R --> A5
+
+    A1 --> M
+    A2 --> M
+    A3 --> M
+    A5 --> M
+    M --> V --> E
+```
+
+Because the core network could only enter epoch `N+1` after a majority of anchors acknowledged the AERP for `N -> N+1`, at least one honest anchor in the queried majority can provide the valid proof path. With 5 anchors and fewer than one third malicious, a majority query gives enough honest responses to recover the valid AERP chain up to the latest accepted epoch.
+
 ## Phase 2: Query the Latest Core Quorum
 
 Once the script knows the latest core quorum, it queries those validators for their latest finalized height.
