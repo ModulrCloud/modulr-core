@@ -52,12 +52,33 @@ func createRouter() fasthttp.RequestHandler {
 	return r.Handler
 }
 
-func CreateHTTPServer() {
+func createRecoveryRouter() fasthttp.RequestHandler {
+	r := router.New()
+
+	// Recovery/read-only routes. No transaction acceptance, delayed-tx signing,
+	// websocket consensus routes, or background consensus threads are available
+	// when RECOVERY_MODE is enabled.
+	r.GET("/recovery/last_finalized_height", routes.GetRecoveryLastFinalizedHeight)
+	r.GET("/get_validator_endpoints", routes.GetValidatorEndpoints)
+	r.GET("/get_validator_ws_endpoints", routes.GetValidatorWsEndpoints)
+
+	return r.Handler
+}
+
+func listen(handler fasthttp.RequestHandler, mode string) {
 	serverAddr := globals.CONFIGURATION.Interface + ":" + strconv.Itoa(globals.CONFIGURATION.Port)
 
-	utils.LogWithTime(fmt.Sprintf("Server is starting at http://%s ...✅", serverAddr), utils.CYAN_COLOR)
+	utils.LogWithTime(fmt.Sprintf("%s server is starting at http://%s ...✅", mode, serverAddr), utils.CYAN_COLOR)
 
-	if err := fasthttp.ListenAndServe(serverAddr, createRouter()); err != nil {
+	if err := fasthttp.ListenAndServe(serverAddr, handler); err != nil {
 		utils.LogWithTime(fmt.Sprintf("Error in server: %s", err), utils.RED_COLOR)
 	}
+}
+
+func CreateHTTPServer() {
+	listen(createRouter(), "Server")
+}
+
+func CreateRecoveryHTTPServer() {
+	listen(createRecoveryRouter(), "Recovery")
 }

@@ -30,6 +30,13 @@ func RunBlockchain() {
 		return
 	}
 
+	if globals.CONFIGURATION.RecoveryMode {
+		utils.LogWithTime("RECOVERY_MODE enabled: starting read-only recovery HTTP API only", utils.YELLOW_COLOR)
+		globals.FLOOD_PREVENTION_FLAG_FOR_ROUTES.Store(true)
+		http_pack.CreateRecoveryHTTPServer()
+		return
+	}
+
 	waitUntilFirstEpochStart()
 
 	//_________________________ RUN SEVERAL LOGICAL THREADS _________________________

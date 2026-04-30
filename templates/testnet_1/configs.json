@@ -9,6 +9,7 @@
   },
 
   "DISABLE_POD_OUTBOX": false,
+  "RECOVERY_MODE": false,
 
   "TXS_MEMPOOL_SIZE": 300000,
   "ACCOUNTS_CACHE_MAX": 50000,
