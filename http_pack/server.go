@@ -43,9 +43,6 @@ func createRouter() fasthttp.RequestHandler {
 	r.POST("/transaction", routes.AcceptTransaction)
 	r.POST("/delayed_transactions_signature", routes.SignDelayedTransactions)
 
-	// Information to help with recovery
-	r.GET("/recovery/last_finalized_height", routes.GetRecoveryLastFinalizedHeight)
-
 	// Other
 	r.GET("/aggregated_anchor_epoch_ack_proof/{epochId}", routes.GetAggregatedAnchorEpochAckProof)
 
