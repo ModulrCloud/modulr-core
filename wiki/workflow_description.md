@@ -35,7 +35,7 @@ The quorum and leaders sequence are epoch-scoped. The next epoch can use a diffe
 
 ```mermaid
 flowchart LR
-    V["Global validator set"]
+    V["Global validator set: A, B, C, D, E, F"]
 
     subgraph EpochN["Epoch N"]
         QN["Quorum: A, B, C, D"]

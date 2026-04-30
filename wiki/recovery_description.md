@@ -129,7 +129,7 @@ Because the core network could only enter epoch `N+1` after a majority of anchor
 
 ## Phase 2: Query the Latest Core Quorum
 
-Once the script knows the latest core quorum, it queries those validators for their latest finalized height.
+Once the script knows the latest core quorum, it queries those validators for their latest finalized height. Each validator can return its local view of the latest height, but that height is only accepted if it is backed by a proof signed by the core quorum majority.
 
 ```mermaid
 flowchart LR
@@ -137,8 +137,8 @@ flowchart LR
     B["Extract latest core quorum"]
     C["Collect validator endpoints"]
     D["Query validators:<br/>/recovery/last_finalized_height"]
-    E["Verify validator signatures"]
-    F["Majority height result"]
+    E["Verify quorum-signed<br/>height proof"]
+    F["Latest finalized height"]
 
     A --> B --> C --> D --> E --> F
 ```
@@ -156,25 +156,24 @@ sequenceDiagram
     Script->>V2: GET /recovery/last_finalized_height
     Script->>V3: GET /recovery/last_finalized_height
 
-    V1-->>Script: Signed height payload
-    V2-->>Script: Signed height payload
-    V3-->>Script: Signed height payload
+    V1-->>Script: Height + quorum proof
+    V2-->>Script: Height + quorum proof
+    V3-->>Script: Height + quorum proof
 ```
 
-The script verifies validator signatures and groups responses by height payload.
+The script verifies the quorum signatures inside each height proof and keeps only valid finalized heights. Since a valid height must be signed by a majority of the discovered core quorum, the script can reject unfinalized or fabricated answers and select the latest finalized height from the valid proofs.
 
 ```mermaid
 flowchart TD
-    A["Signed height responses"]
-    B["Verify validator signatures"]
-    C["Group by:<br/>lastHeight + blockId + blockHash + epochId"]
-    D{"Core quorum majority agrees?"}
-    E["Recovery point:<br/>epoch Y, height X"]
-    F["Recovery point is unsafe"]
+    A["Height responses from validators"]
+    B["Extract height proof"]
+    C["Discard invalid responses"]
+    D["Verify majority signatures<br/>from latest core quorum"]
+    E["Compare valid finalized heights"]
+    F["Select maximum valid<br/>finalized height"]
+    G["Recovery point:<br/>epoch Y, height X"]
 
-    A --> B --> C --> D
-    D -- yes --> E
-    D -- no --> F
+    A --> B --> D --> C --> E --> F --> G
 ```
 
 ## End-to-End Recovery View
