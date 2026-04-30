@@ -9,12 +9,13 @@ import (
 
 var BLOCKS, STATE, EPOCH_DATA, APPROVEMENT_THREAD_METADATA, FINALIZATION_THREAD_METADATA *leveldb.DB
 
+type namedDB struct {
+	name string
+	db   **leveldb.DB
+}
+
 // CloseAll safely closes all initialized LevelDB instances
 func CloseAll() error {
-	type namedDB struct {
-		name string
-		db   **leveldb.DB
-	}
 
 	databases := []namedDB{
 		{name: "BLOCKS", db: &BLOCKS},
