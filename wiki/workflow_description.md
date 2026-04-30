@@ -55,22 +55,28 @@ flowchart LR
 
 ## Normal Epoch Lifecycle
 
-Within one `modulr-core` epoch, leaders rotate one by one. Each leader produces blocks during its leadership window. The core quorum finalizes block heights and eventually produces an `AggregatedLeaderFinalizationProof` (ALFP) for the leader.
+Within one `modulr-core` epoch, leaders rotate one by one. Each leader produces blocks during its leadership window. The core quorum can aggregate finality for individual blocks/heights during that window (AFP). The `AggregatedLeaderFinalizationProof` (ALFP) is built only after the leader's timeframe has ended, because it represents the final block for that leader.
 
 ```mermaid
 flowchart LR
     subgraph CoreEpoch["modulr-core epoch N"]
-        L1["Leader 0<br/>produces blocks"]
-        F1["Core quorum<br/>finalizes heights"]
-        A1["ALFP for Leader 0"]
+        subgraph W1["Leader 0 timeframe"]
+            L1["Leader 0<br/>produces blocks"]
+            F1["AFP / height finality<br/>during the window"]
+        end
+        A1["After timeframe ends:<br/>ALFP for Leader 0"]
 
-        L2["Leader 1<br/>produces blocks"]
-        F2["Core quorum<br/>finalizes heights"]
-        A2["ALFP for Leader 1"]
+        subgraph W2["Leader 1 timeframe"]
+            L2["Leader 1<br/>produces blocks"]
+            F2["AFP / height finality<br/>during the window"]
+        end
+        A2["After timeframe ends:<br/>ALFP for Leader 1"]
 
-        L3["Leader K<br/>produces blocks"]
-        F3["Core quorum<br/>finalizes heights"]
-        A3["ALFP for Leader K"]
+        subgraph W3["Leader K timeframe"]
+            L3["Leader K<br/>produces blocks"]
+            F3["AFP / height finality<br/>during the window"]
+        end
+        A3["After timeframe ends:<br/>ALFP for Leader K"]
     end
 
     L1 --> F1 --> A1
@@ -78,7 +84,7 @@ flowchart LR
     A2 --> L3 --> F3 --> A3
 ```
 
-Each ALFP says: "for this leader in this core epoch, this is the last finalized block known by the quorum".
+Each AFP says: "this block/height is finalized". Each ALFP says: "for this leader in this core epoch, this is the last finalized block known by the quorum".
 
 ## Anchoring Leader Finalization
 
@@ -90,8 +96,9 @@ sequenceDiagram
     participant CoreQuorum as Core quorum
     participant Anchors as modulr-anchors-core
 
-    CoreLeader->>CoreQuorum: Produce and share blocks
-    CoreQuorum->>CoreQuorum: Finalize heights
+    CoreLeader->>CoreQuorum: Produce and share blocks during leader window
+    CoreQuorum->>CoreQuorum: Build AFPs / height proofs during leader window
+    Note over CoreLeader,CoreQuorum: Leader timeframe ends
     CoreQuorum->>CoreQuorum: Build ALFP for finished leader
     CoreQuorum->>Anchors: Send ALFP
     Anchors->>Anchors: Include ALFP in anchor block
