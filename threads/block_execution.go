@@ -723,7 +723,9 @@ func updateExecutionStatistics(block *block_pack.Block, currentBlockId string, b
 
 	stateBatch.Put([]byte(fmt.Sprintf(constants.DBKeyPrefixBlockIndex+"%d", toAbsoluteHeight(cursor.Statistics.LastHeight))), []byte(currentBlockId))
 
-	persistChainCursor(stateBatch)
+	if err := persistChainCursor(stateBatch); err != nil {
+		panic("Impossible to add ChainCursor to atomic batch")
+	}
 
 	return fmt.Sprintf("Executed block %s ✅ [%d]", currentBlockId, cursor.Statistics.LastHeight)
 }
@@ -959,7 +961,9 @@ func setupNextEpochFromRotationProof(epochHandler *structures.EpochDataHandler, 
 			}
 		}
 
-		persistChainCursor(dbBatch)
+		if err := persistChainCursor(dbBatch); err != nil {
+			panic("Impossible to add ChainCursor to atomic batch")
+		}
 
 		if err := databases.STATE.Write(dbBatch, nil); err != nil {
 			panic("Impossible to modify the state when epoch finished")
@@ -1004,8 +1008,13 @@ func toAbsoluteEpochId(localEpochId int) int {
 }
 
 // persistChainCursor serializes the current ChainCursor and appends it to the batch.
-func persistChainCursor(batch *leveldb.Batch) {
-	if data, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.ChainCursor); err == nil {
-		batch.Put([]byte(constants.DBKeyChainCursor), data)
+func persistChainCursor(batch *leveldb.Batch) error {
+	data, err := json.Marshal(&handlers.EXECUTION_THREAD_METADATA.ChainCursor)
+	if err != nil {
+		return err
 	}
+
+	batch.Put([]byte(constants.DBKeyChainCursor), data)
+
+	return nil
 }

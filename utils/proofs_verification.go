@@ -15,8 +15,34 @@ import (
 	"github.com/modulrcloud/modulr-core/structures"
 )
 
+func allowedPubkeysMap(pubkeys []string) map[string]bool {
+	allowed := make(map[string]bool, len(pubkeys))
+	for _, pk := range pubkeys {
+		allowed[pk] = true
+	}
+
+	return allowed
+}
+
+func countVerifiedUniqueSignatures(signatures map[string]string, allowed map[string]bool, payload string) int {
+	verified := 0
+	seen := make(map[string]bool, len(signatures))
+
+	for pubKey, signature := range signatures {
+		if signature == "" || !allowed[pubKey] || seen[pubKey] {
+			continue
+		}
+		if cryptography.VerifySignature(payload, pubKey, signature) {
+			seen[pubKey] = true
+			verified++
+		}
+	}
+
+	return verified
+}
+
 func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
-	if epochHandler == nil {
+	if proof == nil || epochHandler == nil {
 		return false
 	}
 
@@ -25,50 +51,22 @@ func VerifyAggregatedFinalizationProof(proof *structures.AggregatedFinalizationP
 	dataThatShouldBeSigned := strings.Join([]string{proof.PrevBlockHash, proof.BlockId, proof.BlockHash, epochFullID}, ":")
 
 	majority := GetQuorumMajority(epochHandler)
-
-	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
-	for _, pk := range epochHandler.Quorum {
-		quorumMap[pk] = true
-	}
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Proofs {
-		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
-			if quorumMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Proofs, allowedPubkeysMap(epochHandler.Quorum), dataThatShouldBeSigned)
 
 	return okSignatures >= majority
 }
 
 func VerifyAggregatedFinalizationProofForAnchorBlock(proof *structures.AggregatedFinalizationProof, epochHandler *structures.EpochDataHandler) bool {
+	if proof == nil || epochHandler == nil {
+		return false
+	}
+
 	epochIndex := strconv.Itoa(epochHandler.Id)
 
 	dataThatShouldBeSigned := strings.Join([]string{proof.PrevBlockHash, proof.BlockId, proof.BlockHash, epochIndex}, ":")
 
 	majority := GetAnchorsQuorumMajority()
-
-	quorumMap := make(map[string]bool, len(globals.ANCHORS_PUBKEYS))
-	for _, pk := range globals.ANCHORS_PUBKEYS {
-		quorumMap[pk] = true
-	}
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Proofs {
-		if cryptography.VerifySignature(dataThatShouldBeSigned, pubKey, signature) {
-			if quorumMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Proofs, allowedPubkeysMap(globals.ANCHORS_PUBKEYS), dataThatShouldBeSigned)
 
 	return okSignatures >= majority
 }
@@ -81,11 +79,6 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	epochFullID := epochHandler.Hash + "#" + strconv.Itoa(epochHandler.Id)
 
 	majority := GetQuorumMajority(epochHandler)
-
-	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
-	for _, pk := range epochHandler.Quorum {
-		quorumMap[pk] = true
-	}
 
 	if proof.VotingStat.Index >= 0 {
 		parts := strings.Split(proof.VotingStat.Afp.BlockId, ":")
@@ -104,18 +97,7 @@ func VerifyAggregatedLeaderFinalizationProof(proof *structures.AggregatedLeaderF
 	}
 
 	dataToVerify := strings.Join([]string{constants.SigningPrefixLeaderFinalization, proof.Leader, strconv.Itoa(proof.VotingStat.Index), proof.VotingStat.Hash, epochFullID}, ":")
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Signatures {
-		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			if quorumMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Signatures, allowedPubkeysMap(epochHandler.Quorum), dataToVerify)
 
 	return okSignatures >= majority
 }
@@ -127,11 +109,6 @@ func VerifyAggregatedHeightProof(proof *structures.AggregatedHeightProof, epochH
 
 	majority := GetQuorumMajority(epochHandler)
 
-	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
-	for _, pk := range epochHandler.Quorum {
-		quorumMap[pk] = true
-	}
-
 	dataToVerify := strings.Join([]string{
 		constants.SigningPrefixHeightProof,
 		strconv.Itoa(proof.AbsoluteHeight),
@@ -140,18 +117,7 @@ func VerifyAggregatedHeightProof(proof *structures.AggregatedHeightProof, epochH
 		strconv.Itoa(proof.EpochId),
 		strconv.Itoa(proof.HeightInEpoch),
 	}, ":")
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Proofs {
-		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			if quorumMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Proofs, allowedPubkeysMap(epochHandler.Quorum), dataToVerify)
 
 	return okSignatures >= majority
 }
@@ -199,11 +165,6 @@ func VerifyAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotatio
 
 	majority := GetQuorumMajority(epochHandler)
 
-	quorumMap := make(map[string]bool, len(epochHandler.Quorum))
-	for _, pk := range epochHandler.Quorum {
-		quorumMap[pk] = true
-	}
-
 	dataToVerify := BuildEpochRotationProofSigningPayload(
 		proof.EpochId,
 		proof.NextEpochId,
@@ -212,18 +173,7 @@ func VerifyAggregatedEpochRotationProof(proof *structures.AggregatedEpochRotatio
 		proof.FinishedOnBlockId,
 		proof.FinishedOnHash,
 	)
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Proofs {
-		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			if quorumMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Proofs, allowedPubkeysMap(epochHandler.Quorum), dataToVerify)
 
 	return okSignatures >= majority
 }
@@ -235,29 +185,13 @@ func VerifyAggregatedAnchorEpochAckProof(proof *structures.AggregatedAnchorEpoch
 
 	majority := GetAnchorsQuorumMajority()
 
-	anchorMap := make(map[string]bool, len(globals.ANCHORS_PUBKEYS))
-	for _, pk := range globals.ANCHORS_PUBKEYS {
-		anchorMap[pk] = true
-	}
-
 	dataToVerify := strings.Join([]string{
 		constants.SigningPrefixAnchorEpochAckProof,
 		strconv.Itoa(proof.EpochId),
 		strconv.Itoa(proof.NextEpochId),
 		proof.EpochDataHash,
 	}, ":")
-
-	okSignatures := 0
-	seen := make(map[string]bool)
-
-	for pubKey, signature := range proof.Proofs {
-		if cryptography.VerifySignature(dataToVerify, pubKey, signature) {
-			if anchorMap[pubKey] && !seen[pubKey] {
-				seen[pubKey] = true
-				okSignatures++
-			}
-		}
-	}
+	okSignatures := countVerifiedUniqueSignatures(proof.Proofs, allowedPubkeysMap(globals.ANCHORS_PUBKEYS), dataToVerify)
 
 	return okSignatures >= majority
 }
