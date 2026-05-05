@@ -2,6 +2,21 @@
 
 All databases are LevelDB instances, declared in `databases/databases.go`.
 
+On disk, `STATE` is global and lives directly under `CHAINDATA_PATH`. All other
+databases are scoped by `NETWORK_ID`:
+
+```
+CHAINDATA/
+├── STATE/
+├── network-1/
+│   ├── BLOCKS/
+│   ├── EPOCH_DATA/
+│   ├── APPROVEMENT_THREAD_METADATA/
+│   └── FINALIZATION_THREAD_METADATA/
+└── network-2/
+    └── ...
+```
+
 ---
 
 ## 1. BLOCKS

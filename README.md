@@ -24,7 +24,8 @@ In this directory you should add `configs.json` and `genesis.json`. The chaindat
 ```
 ├── configs.json
 ├── genesis.json
-├── DATABASES/
+├── STATE/
+├── <NETWORK_ID>/
 │   ├── BLOCKS/
 │   ├── EPOCH_DATA/
 │   ├── APPROVEMENT_THREAD_METADATA/
@@ -89,7 +90,7 @@ In the same shell where you stored the env variable - run
 This version may contains the bugs, so to restart the network you should:
 
 1. Stop the node
-2. Delete the `DATABASES` directory in `$CHAINDATA_PATH`
+2. Delete the network-specific directory (`$CHAINDATA_PATH/<NETWORK_ID>`) if a clean restart is needed, while preserving `$CHAINDATA_PATH/STATE` when recovery requires keeping global state
 3. Update the `FIRST_EPOCH_START_TIMESTAMP` with a new value (just run the `time_update.py` again)
 4. Run binary again
 

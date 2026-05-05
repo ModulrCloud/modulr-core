@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 
 	"github.com/modulrcloud/modulr-core/constants"
 	"github.com/modulrcloud/modulr-core/cryptography"
@@ -16,11 +17,21 @@ import (
 )
 
 func OpenDb(dbName string) *leveldb.DB {
-	db, err := leveldb.OpenFile(globals.CHAINDATA_PATH+"/DATABASES/"+dbName, nil)
+	dbPath := ResolveDbPath(dbName)
+
+	db, err := leveldb.OpenFile(dbPath, nil)
 	if err != nil {
-		panic("Impossible to open db : " + dbName + " =>" + err.Error())
+		panic("Impossible to open db : " + dbName + " at " + dbPath + " =>" + err.Error())
 	}
 	return db
+}
+
+func ResolveDbPath(dbName string) string {
+	if dbName == "STATE" {
+		return filepath.Join(globals.CHAINDATA_PATH, dbName)
+	}
+
+	return filepath.Join(globals.CHAINDATA_PATH, globals.GENESIS.NetworkId, dbName)
 }
 
 func GetAccountFromExecThreadState(accountId string) *structures.Account {

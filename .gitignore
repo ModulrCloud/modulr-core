@@ -39,7 +39,7 @@ modulr*
 
 TODO
 alfp_probe_*
-scripts/
+local_scripts/
 point-*
 REFACTORING_MANIFEST.md
 last-mile-finalizer.md
